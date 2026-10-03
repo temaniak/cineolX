@@ -5,6 +5,9 @@ the six programs of the **original Lexicon 224, firmware v4.4**. The desktop
 plugin is version **0.5.1**, with the current metal-panel artwork and 21-mark
 fader scales.
 
+ChatGPT was actively used during the creation of this project, assisting with
+code development, debugging, testing and documentation.
+
 ![Cineol-X 224 interface](docs/images/cineol-x-224.png)
 
 This repository contains the Cineol DSP, plugin, ROM import tools and a generic

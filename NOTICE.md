@@ -4,6 +4,9 @@ Cineol-X 224 was separated from local native-plugin work in the Reflexion
 workspace. The new repository has its own history and does not carry that
 workspace's private carrier-board code or commit history.
 
+ChatGPT was actively used during the creation of this project, assisting with
+code development, debugging, testing and documentation.
+
 - Reflexion: https://github.com/joelanders/reflexion-224, pinned in
   `dependencies.json`. Runtime import and validation use its 8080 host and row
   machine; the plugin uses its host-rate bridge. `patches/reflexion-scheduler.patch`
