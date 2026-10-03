@@ -1,0 +1,10 @@
+{
+  "reflexion": {
+    "url": "https://github.com/joelanders/reflexion-224.git",
+    "commit": "f68ea1d069fef4a5663201693bfdfa1c579ffd69"
+  },
+  "libDaisy": {
+    "url": "https://github.com/electro-smith/libDaisy.git",
+    "commit": "e3f0395943635b9890c17b665e9f6af3605a82c2"
+  }
+}

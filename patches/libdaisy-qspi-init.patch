@@ -1,0 +1,14 @@
+diff --git a/src/per/qspi.cpp b/src/per/qspi.cpp
+--- a/src/per/qspi.cpp
++++ b/src/per/qspi.cpp
+@@ -216,6 +216,10 @@ QSPIHandle::Result QSPIHandle::Impl::Init(const QSPIHandle::Config& config)
+     auto device = config_.device;
+     auto mode   = config_.mode;
+ 
++    // The bootloader can leave QSPI mapped before this fresh HAL handle
++    // has been initialized. DeInit must receive a valid peripheral pointer.
++    halqspi_.Instance = QUADSPI;
++
+     if(HAL_QSPI_DeInit(&halqspi_) != HAL_OK)
+     {
+         ERR_SIMPLE(Status::E_HAL_ERROR);

@@ -1,0 +1,85 @@
+diff --git a/emulator/scheduler.hpp b/emulator/scheduler.hpp
+index e8a5f5e..6496ad4 100644
+--- a/emulator/scheduler.hpp
++++ b/emulator/scheduler.hpp
+@@ -17,8 +17,13 @@
+ // DSP side goes first.
+ #include "timing.hpp"
+ #include <algorithm>
+-#include <functional>
++#include <cstddef>
++#include <cstdlib>
++#include <cstring>
++#include <new>
+ #include <stdexcept>
++#include <type_traits>
++#include <utility>
+ #include <vector>
+ 
+ namespace lexicon224x::cpu {
+@@ -26,7 +31,38 @@ namespace lexicon224x::cpu {
+ enum class RowPhase { Begin, ExecutePrevious, Fetch, ResetDecode, Converter };
+ 
+ class Scheduler {
++    // Board events capture only pointers and plain values. Keep their captures
++    // inline: std::function can allocate even for a frequently scheduled strobe.
++    struct Action {
++        alignas(std::max_align_t) unsigned char storage[128]{};
++        void (*invoke)(void *) = nullptr;
++
++        template <class F>
++        explicit Action(F action) {
++            static_assert(std::is_trivially_copyable_v<F>);
++            static_assert(sizeof(F) <= sizeof storage);
++            static_assert(alignof(F) <= alignof(std::max_align_t));
++            new (storage) F(std::move(action));
++            invoke = [](void *p) { (*std::launder(reinterpret_cast<F *>(p)))(); };
++        }
++
++        Action(const Action &other) : invoke(other.invoke) {
++            std::memcpy(storage, other.storage, sizeof storage);
++        }
++        Action &operator=(const Action &other) {
++            if (this != &other) {
++                std::memcpy(storage, other.storage, sizeof storage);
++                invoke = other.invoke;
++            }
++            return *this;
++        }
++        void operator()() { invoke(storage); }
++    };
++
+ public:
++    // Only a handful of bus effects overlap. Bound the queue, with ample room;
++    // construction happens before rendering, and a broken invariant cannot grow it.
++    Scheduler() { events.reserve(64); }
+     RowTiming timing = timing_224x;     // the model's row timing (timing.hpp); set before the first step
+ 
+     Tick now() const {
+@@ -35,11 +71,15 @@ public:
+ 
+     // Schedule `action` at `when` (not in the past). A late action runs after
+     // the row phases and the other actions at the same time.
+-    void at(Tick when, std::function<void()> action, bool late = false) {
++    template <class F>
++    void at(Tick when, F action, bool late = false) {
+         if (when < time) {
+             throw std::logic_error("event scheduled in the past");
+         }
+-        events.push_back({when, serial++, time, late, std::move(action)});
++        if (events.size() == events.capacity()) {
++            std::abort();
++        }
++        events.push_back({when, serial++, time, late, Action(std::move(action))});
+         std::push_heap(events.begin(), events.end(), fires_after);
+     }
+ 
+@@ -149,7 +189,7 @@ private:
+         uint64_t serial;        // creation order
+         Tick created;
+         bool late;
+-        std::function<void()> action;
++        Action action;
+     };
+ 
+     // Heap order: earlier time first, then late ones last, then creation order.

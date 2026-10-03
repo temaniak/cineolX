@@ -1,0 +1,6 @@
+[submodule "deps/reflexion"]
+	path = deps/reflexion
+	url = https://github.com/joelanders/reflexion-224.git
+[submodule "deps/libDaisy"]
+	path = deps/libDaisy
+	url = https://github.com/electro-smith/libDaisy.git
