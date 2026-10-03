@@ -14,7 +14,11 @@ The following checks were run from this repository on macOS/Apple silicon.
   matching the existing native implementation's bank byte for byte.
 - Generic Daisy Seed and Patch SM QSPI images built and passed ITCM, AXI SRAM,
   DTCM, DMA and reset-vector placement checks. ARU edge arithmetic remained
-  inlined in the hot network.
+  inlined in the hot network. These builds were repeated with the public
+  libDaisy commit pinned in `dependencies.json`; the prepared ROM bank remained
+  byte-identical.
+- The Reflexion, libDaisy and nested libDaisy submodule commits were verified
+  to be available in their upstream GitHub repositories.
 - Logical control checks covered normalized, 0..3.3 V, 0..5 V and -5..+5 V
   ranges, inversion, all ten targets, both buttons, the two-button chord,
   distinct program RGB colors and stereo processing under program changes.
