@@ -32,10 +32,24 @@ public:
     juce::String romStatus() const {return rom_bank_->status();}
     bool importRoms(const juce::Array<juce::File>& files) {return rom_bank_->startImport(files);}
     void cancelRomImport() {rom_bank_->cancelImport();}
+    static juce::File presetDirectory();
+    juce::Result savePreset(const juce::File&);
+    juce::Result loadPreset(const juce::File&);
+    struct PresetInfo {juce::String name;int algorithm=0;};
+    static juce::File presetBankFile();
+    juce::Result presetBankEntries(juce::Array<PresetInfo>&,const juce::File& bank=presetBankFile());
+    juce::Result presetNames(juce::StringArray&,const juce::File& bank=presetBankFile());
+    juce::Result saveBankPreset(const juce::String& name,bool replace=false,const juce::File& bank=presetBankFile());
+    juce::Result loadBankPreset(const juce::String& name,const juce::File& bank=presetBankFile());
+    juce::String presetName();
+    bool presetModified();
+    unsigned presetRecallRevision() const noexcept {return preset_recall_revision_.load(std::memory_order_acquire);}
+    bool presetRecallInProgress() const noexcept {return (parameter_transaction_.load(std::memory_order_acquire)&1u)!=0;}
     juce::AudioProcessorValueTreeState state;
     static constexpr const char* ids[]={"bass","mid","crossover","treble","depth","predelay","diffusion",
         "input_db","mix","analog","mode_enh","decay_opt","output_l","output_r","algorithm"};
 private:
+    juce::Result applyPreset(const juce::ValueTree&,const juce::String&);
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
     void updateLatency();
     void timerCallback() override {updateLatency();}
@@ -45,6 +59,9 @@ private:
     juce::AudioParameterChoice* algorithm_parameter_=nullptr;
     std::array<std::atomic<float>*,15> values_{};
     std::array<float,15> previous_{};
+    std::array<float,15> stable_values_{}; // Audio-thread snapshot; never follows a partial preset recall.
+    juce::CriticalSection preset_write_lock_; // Preset/session writers only; never used by processBlock.
+    std::atomic<unsigned> parameter_transaction_{0},preset_recall_revision_{0};
     std::atomic<float>* low_latency_value_=nullptr;
     std::atomic<bool> low_latency_active_{false};
     std::atomic<int> normal_latency_{native_hall::Engine48::latency_samples};

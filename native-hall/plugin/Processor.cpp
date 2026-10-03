@@ -60,7 +60,9 @@ NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
     .withInput("Input",juce::AudioChannelSet::stereo(),true).withOutput("Output",juce::AudioChannelSet::stereo(),true)),
     state(*this,nullptr,"NativeHall224",layout()) {
     algorithm_parameter_=static_cast<juce::AudioParameterChoice*>(state.getParameter("algorithm"));
-    for(unsigned i=0;i<values_.size();++i) values_[i]=state.getRawParameterValue(ids[i]);
+    for(unsigned i=0;i<values_.size();++i) {
+        values_[i]=state.getRawParameterValue(ids[i]);stable_values_[i]=values_[i]->load();
+    }
     low_latency_value_=state.getRawParameterValue("low_latency");
     previous_.fill(std::numeric_limits<float>::quiet_NaN());
     // Poll outside the audio callback, even with the editor closed. Host
@@ -92,14 +94,24 @@ void NativeHallProcessor::prepareToPlay(double rate,int block) {
 void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) {
     juce::ScopedNoDenormals noDenormals;
     if(!ready()) {if(getTotalNumInputChannels()==1) b.copyFrom(1,0,b,0,0,b.getNumSamples());return;}
+    // One bounded attempt. A writer in progress leaves the previous complete
+    // settings in force; audio never waits, retries, or reads preset files.
+    auto v=stable_values_;
+    const unsigned transaction=parameter_transaction_.load(std::memory_order_acquire);
+    if((transaction&1u)==0) {
+        std::array<float,15> candidate;
+        for(unsigned i=0;i<candidate.size();++i) candidate[i]=values_[i]->load(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if(parameter_transaction_.load(std::memory_order_acquire)==transaction) stable_values_=v=candidate;
+    }
     if(!engine_initialized_) {
         // Import publishes immutable data. Only the audio thread touches its
         // engine; initialization uses fixed storage, with no I/O or allocation.
-        engine_.prepare(rom_bank_->bank(),unsigned(getCurrentProgram()));
+        engine_.prepare(rom_bank_->bank(),unsigned(v[14]));
         previous_.fill(std::numeric_limits<float>::quiet_NaN());engine_initialized_=true;
     }
-    std::array<float,15> v;bool changed=false;
-    for(unsigned i=0;i<v.size();++i) {v[i]=values_[i]->load(std::memory_order_relaxed);changed|=v[i]!=previous_[i];}
+    bool changed=false;
+    for(unsigned i=0;i<v.size();++i) changed|=v[i]!=previous_[i];
     if(changed) {
         previous_=v;native_hall::Parameters p;
         p.hall.bass=int(v[0]);p.hall.mid=int(v[1]);p.hall.crossover=int(v[2]);p.hall.treble=int(v[3]);
@@ -151,6 +163,7 @@ const juce::String NativeHallProcessor::getProgramName(int program) {
 }
 juce::AudioProcessorEditor* NativeHallProcessor::createEditor() {return new CineolEditor(*this);}
 void NativeHallProcessor::getStateInformation(juce::MemoryBlock& block) {
+    const juce::ScopedLock lock(preset_write_lock_);
     if(auto xml=state.copyState().createXml()) copyXmlToBinary(*xml,block);
 }
 void NativeHallProcessor::setStateInformation(const void* data,int size) {
@@ -168,7 +181,11 @@ void NativeHallProcessor::setStateInformation(const void* data,int size) {
             juce::ValueTree low("PARAM");low.setProperty("id","low_latency",nullptr);
             low.setProperty("value",0.0f,nullptr);restored.appendChild(low,nullptr);
         }
+        const juce::ScopedLock lock(preset_write_lock_);
+        parameter_transaction_.fetch_add(1,std::memory_order_acq_rel);
+        preset_recall_revision_.fetch_add(1,std::memory_order_release);
         state.replaceState(restored);
+        parameter_transaction_.fetch_add(1,std::memory_order_release);
     }
 }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {return new NativeHallProcessor;}

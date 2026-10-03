@@ -76,6 +76,7 @@ static void check_editor() {
     auto* low_latency=dynamic_cast<juce::ToggleButton*>(find(*editor,"low_latency"));
     require(dirt && bass && delay && algorithm && output && diffusion && display,"editor controls missing");
     require(settings && settings_panel && low_latency && !settings_panel->isVisible(),"Settings controls/default missing");
+    require(find(*editor,"preset") && find(*editor,"save_preset"),"display preset controls missing");
     settings->setToggleState(true,juce::sendNotificationSync);
     require(settings_panel->isVisible(),"gear did not open Settings");
     low_latency->setToggleState(true,juce::sendNotificationSync);
@@ -126,6 +127,182 @@ static void check_editor() {
         require(shot.isValid() && shot.getWidth()==width,"resized editor snapshot failed");
     }
     std::cout<<"Editor: fader/display, six algorithms, separated LED segments, outputs, inverted Digital Dirt + legacy automation/state, three sizes pass\n";
+}
+struct PresetTestFiles {
+    juce::File folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
+        .getNonexistentChildFile("cineol-preset-check",{},false);
+    ~PresetTestFiles() {folder.deleteRecursively();}
+};
+static void check_presets() {
+    PresetTestFiles files;NativeHallProcessor p;
+    const auto first=files.folder.getChildFile("Warm Concert Hall.cineol224");
+    const auto second=files.folder.getChildFile("Short Hall.cineol224");
+    require(p.savePreset(first).wasOk() && p.presetName()=="Warm Concert Hall" && !p.presetModified(),"preset save/name failed");
+    set(p,"bass",5);set(p,"depth",40);set(p,"mix",0.5f);set(p,"low_latency",1);
+    require(p.presetModified(),"edited preset was not marked modified");
+    require(p.savePreset(second).wasOk(),"second preset save failed");
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* bass=dynamic_cast<juce::Slider*>(find(*editor,"bass"));
+    auto* preset=dynamic_cast<juce::Button*>(find(*editor,"preset"));
+    require(bass && preset,"preset UI missing");
+    struct Counter final : juce::AudioProcessorParameter::Listener {
+        int changes=0;
+        void parameterValueChanged(int,float) override {++changes;}
+        void parameterGestureChanged(int,bool) override {}
+    } counter;
+    auto* parameter=p.state.getParameter("bass");parameter->addListener(&counter);
+    const double start=double(bass->getProperties()["motor_position"]);
+    require(p.loadPreset(first).wasOk() && p.getCurrentProgram()==2,"preset load failed");
+    const double target=bass->valueToProportionOfLength(17);
+    require(bass->getValue()==17 && counter.changes==1 && bool(bass->getProperties()["motor_moving"]) &&
+        std::abs(double(bass->getProperties()["motor_position"])-start)<0.0001,"preset did not apply immediately with visual-only motion");
+    auto tick=[](int ms) {
+        const auto end=juce::Time::getMillisecondCounterHiRes()+ms;
+        while(juce::Time::getMillisecondCounterHiRes()<end) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
+    };
+    tick(100);const double middle=double(bass->getProperties()["motor_position"]);
+    require(middle>start && middle<target && counter.changes==1 && bass->getValue()==17,"fader animation changed audio/automation or skipped motion");
+    // A second recall starts at the currently drawn cap, not either endpoint.
+    require(p.loadPreset(second).wasOk(),"rapid preset recall failed");
+    require(std::abs(double(bass->getProperties()["motor_position"])-middle)<0.03,"rapid recall jumped its visual starting point");
+    tick(400);
+    require(!bool(bass->getProperties()["motor_moving"]) &&
+        std::abs(double(bass->getProperties()["motor_position"])-start)<0.0001 && counter.changes==2,
+        "animation did not settle or generated extra parameter events");
+    require(p.loadPreset(first).wasOk(),"repeat recall failed");
+    bass->setValue(22,juce::sendNotificationSync);
+    require(!bool(bass->getProperties()["motor_moving"]) && p.presetModified() &&
+        std::abs(double(bass->getProperties()["motor_position"])-bass->valueToProportionOfLength(22))<0.0001,
+        "manual edit did not interrupt visual motion");
+    parameter->removeListener(&counter);
+    require(p.state.getRawParameterValue("low_latency")->load()==1,"preset changed instance Low latency");
+    require(p.loadPreset(first).wasOk() && !p.presetModified(),"preset baseline restoration failed");
+    juce::MemoryBlock session;p.getStateInformation(session);NativeHallProcessor restored;
+    restored.setStateInformation(session.getData(),int(session.getSize()));
+    require(restored.presetName()=="Warm Concert Hall" && !restored.presetModified(),"DAW state lost preset identity/baseline");
+    // No partial mutation on broken, incomplete, nonnumeric or out-of-range files.
+    auto original=juce::XmlDocument::parse(first);require(original!=nullptr,"saved preset XML missing");
+    const auto broken=files.folder.getChildFile("Broken.cineol224");
+    for(const auto& text:juce::StringArray{"not-a-number","9999","nan","12trailing"}) {
+        original->getFirstChildElement()->setAttribute("value",text);require(original->writeTo(broken),"bad fixture write failed");
+        require(p.loadPreset(broken).failed() && p.presetName()=="Warm Concert Hall" && !p.presetModified(),"invalid preset changed the instance");
+    }
+    original->removeChildElement(original->getFirstChildElement(),true);original->writeTo(broken);
+    require(p.loadPreset(broken).failed() && !p.presetModified(),"incomplete preset was accepted");
+    std::cout<<"Presets: file + session round trip, validation, Low latency isolation, 320ms visual-only/rapid/interrupted faders pass\n";
+}
+static void check_preset_bank() {
+    PresetTestFiles files;NativeHallProcessor p;
+    const auto bank=files.folder.getChildFile("User Presets.cineolbank");
+    const auto legacy=files.folder.getChildFile("Legacy Hall.cineol224");
+    require(p.savePreset(legacy).wasOk(),"legacy bank fixture failed");
+    juce::StringArray names;
+    require(p.presetNames(names,bank).wasOk() && names.contains("Legacy Hall"),"legacy preset was not adopted");
+    set(p,"bass",5);set(p,"mix",0.5f);set(p,"low_latency",1);
+    const auto unicode=juce::String::fromUTF8("Зал / тёплый");
+    require(p.saveBankPreset(unicode,false,bank).wasOk() && p.presetName()==unicode && !p.presetModified(),"named bank save failed");
+    require(bank.existsAsFile() && legacy.existsAsFile() &&
+        files.folder.findChildFiles(juce::File::findFiles,false,"*.cineol224").size()==1,"bank save created per-preset files or deleted a legacy file");
+    require(p.presetNames(names,bank).wasOk() && names.size()==2 && names.contains(unicode),"bank listing failed");
+    set(p,"bass",9);
+    const auto unchanged=bank.loadFileAsString();
+    require(p.saveBankPreset(unicode,false,bank).failed() && p.presetModified() && bank.loadFileAsString()==unchanged,"duplicate save silently replaced a preset");
+    require(p.saveBankPreset(unicode,true,bank).wasOk(),"explicit preset replacement failed");
+    require(p.saveBankPreset("  ",false,bank).failed() && p.saveBankPreset(juce::String::repeatedString("x",81),false,bank).failed(),"invalid preset name accepted");
+    NativeHallProcessor other;
+    require(other.loadBankPreset(unicode,bank).wasOk() && other.state.getRawParameterValue("bass")->load()==9 &&
+        other.state.getRawParameterValue("mix")->load()==0.5f && other.state.getRawParameterValue("low_latency")->load()==0,
+        "bank did not persist between instances or changed instance latency");
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* bass=dynamic_cast<juce::Slider*>(find(*editor,"bass"));
+    require(p.loadBankPreset("Legacy Hall",bank).wasOk() && bass && bass->getValue()==17 &&
+        bool(bass->getProperties()["motor_moving"]),"bank recall did not animate the fader");
+    require(p.loadBankPreset("missing",bank).failed() && p.presetName()=="Legacy Hall" && !p.presetModified(),"missing bank entry changed the instance");
+    p.setCurrentProgram(1);require(p.saveBankPreset("Vocal Room",false,bank).wasOk(),"algorithm preset save failed");
+    juce::Array<NativeHallProcessor::PresetInfo> entries;
+    auto algorithmOf=[&](const juce::String& name) {for(const auto& entry:entries) if(entry.name==name) return entry.algorithm;return -1;};
+    require(p.presetBankEntries(entries,bank).wasOk() && algorithmOf("Vocal Room")==1 && algorithmOf("Legacy Hall")==2,
+        "presets were not assigned to their saved algorithms");
+    p.setCurrentProgram(3);require(p.saveBankPreset("Vocal Room",true,bank).wasOk() &&
+        p.presetBankEntries(entries,bank).wasOk() && entries.size()==3 && algorithmOf("Vocal Room")==3,
+        "replaced preset did not move to its new algorithm group");
+    p.setCurrentProgram(2);require(p.loadBankPreset("Vocal Room",bank).wasOk() && p.getCurrentProgram()==3,
+        "bank recall did not restore the saved algorithm");
+    require(p.loadBankPreset("Legacy Hall",bank).wasOk(),"bank baseline restoration failed");
+    if(juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()!=nullptr) {
+        // The disk button asks only for a name and saves directly into the managed bank.
+        auto* save=dynamic_cast<juce::Button*>(find(*editor,"save_preset"));require(save && bool(save->onClick),"bank save button missing");
+        save->onClick();
+        auto* dialog=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
+        require(dialog && dialog->getTextEditor("preset_name"),"save opened a file chooser instead of a name dialog");
+        dialog->getTextEditor("preset_name")->setText("UI Hall");dialog->exitModalState(1);
+        juce::Timer::callAfterDelay(60,[&] {
+            require(p.presetName()=="UI Hall" && !p.presetModified() &&
+                p.presetBankEntries(entries).wasOk() && entries.size()==1 && entries[0].algorithm==2,
+                "name-only UI save failed or used the wrong algorithm");
+            require(p.loadBankPreset("Legacy Hall",bank).wasOk(),"UI test baseline restoration failed");
+            save->onClick();editor.reset();
+            juce::Timer::callAfterDelay(60,[] {
+                require(!juce::Component::getCurrentlyModalComponent(),"closing the editor left a preset dialog open");
+                juce::MessageManager::getInstance()->stopDispatchLoop();
+            });
+        });
+        juce::MessageManager::getInstance()->runDispatchLoop();
+        std::cout<<"Preset dialog: name-only bank save and safe editor close pass\n";
+    }
+    const auto before=bank.loadFileAsString();
+    require(bank.replaceWithText("<broken/>"),"bank corruption fixture failed");
+    require(p.saveBankPreset("New",false,bank).failed() && bank.loadFileAsString()=="<broken/>" &&
+        p.loadBankPreset("Legacy Hall",bank).failed() && !p.presetModified(),"broken bank was overwritten or changed the instance");
+    require(bank.replaceWithText(before),"bank fixture restoration failed");
+    auto xml=juce::XmlDocument::parse(bank);require(xml!=nullptr,"bank XML missing");
+    xml->getFirstChildElement()->getFirstChildElement()->setAttribute("value","nan");
+    require(xml->writeTo(bank),"invalid bank parameter fixture failed");
+    const auto invalidName=xml->getFirstChildElement()->getStringAttribute("name");
+    require(p.loadBankPreset(invalidName,bank).failed() && !p.presetModified(),"invalid bank parameter changed the instance");
+    std::cout<<"Preset bank: named save/replace, persistent shared listing, legacy adoption, algorithm grouping/recall, Unicode names, visual recall, validation pass\n";
+}
+static void check_preset_audio() {
+    PresetTestFiles files;NativeHallProcessor p,reference;
+    const auto bank=files.folder.getChildFile("Audio.cineolbank");
+    require(p.saveBankPreset("First",true,bank).wasOk(),"audio preset fixture save failed");
+    auto alternate=[](NativeHallProcessor& processor) {
+        set(processor,"bass",20);set(processor,"mid",16);set(processor,"depth",40);
+        set(processor,"diffusion",30);set(processor,"predelay",88);set(processor,"analog",0);
+    };
+    alternate(p);require(p.saveBankPreset("Second",true,bank).wasOk() && p.loadBankPreset("First",bank).wasOk(),"audio preset preparation failed");
+    p.prepareToPlay(48000,128);reference.prepareToPlay(48000,128);
+    juce::AudioBuffer<float> block(2,128),expected(2,128);juce::MidiBuffer midi;unsigned position=0;
+    auto render=[&](bool input) {
+        for(int i=0;i<128;++i) {
+            const float value=input?0.1f*std::sin(float(position+i)*0.117f):0;
+            block.setSample(0,i,value);block.setSample(1,i,0);
+            expected.setSample(0,i,value);expected.setSample(1,i,0);
+        }
+        audio=true;p.processBlock(block,midi);reference.processBlock(expected,midi);audio=false;position+=128;
+        double energy=0;
+        for(int i=0;i<128;++i) for(int c=0;c<2;++c) {
+            require(block.getSample(c,i)==expected.getSample(c,i),"preset audio differs from equivalent manual control updates");
+            energy+=double(block.getSample(c,i))*block.getSample(c,i);
+        }
+        return energy;
+    };
+    for(int i=0;i<160;++i) render(i<120);
+    struct DuringRecall final : juce::AudioProcessorParameter::Listener {
+        std::function<void()> callback;
+        void parameterValueChanged(int,float) override {callback();}
+        void parameterGestureChanged(int,bool) override {}
+    } during;
+    bool probed=false;during.callback=[&]{probed=true;require(p.presetRecallInProgress(),"recall transaction was not active");render(false);};
+    auto* bass=p.state.getParameter("bass");bass->addListener(&during);
+    require(p.loadBankPreset("Second",bank).wasOk(),"same-algorithm audio recall failed");bass->removeListener(&during);
+    require(probed,"mid-recall audio check was not exercised");alternate(reference);
+    double tail=0;for(int i=0;i<100;++i) tail+=render(false);
+    require(tail>1e-7,"same-algorithm preset recall cleared the tail");
+    p.setCurrentProgram(1);require(p.saveBankPreset("Second",true,bank).wasOk(),"cross-algorithm fixture save failed");
+    p.setCurrentProgram(2);render(false);require(p.loadBankPreset("Second",bank).wasOk(),"cross-algorithm recall failed");
+    reference.setCurrentProgram(1);for(int i=0;i<30;++i) render(false);
+    std::cout<<"Preset audio: same-algorithm tail retained, cross-algorithm switch == manual switch, partial recall keeps previous complete settings pass\n";
 }
 static std::vector<float> run(int rate,int block,bool offline,int program,bool mono=false,bool low=false,float mix=1) {
     auto p=std::make_unique<NativeHallProcessor>();require(p->ready(),"missing imported bank");
@@ -314,7 +491,10 @@ int main(int argc,char** argv) {
     }
     if((argc==3 || argc==4 || argc==5 || argc==6) && std::string(argv[1])=="--editor") {
         NativeHallProcessor p;
+        PresetTestFiles demo;
         if(argc>=4) p.setCurrentProgram(std::atoi(argv[3]));
+        if(argc==5 && std::string(argv[4])=="preset")
+            require(p.savePreset(demo.folder.getChildFile("Warm Concert Hall.cineol224")).wasOk(),"preview preset failed");
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
         if(argc==6) set(p,argv[4],std::strtof(argv[5],nullptr));
         if(argc==5 && std::string(argv[4])=="settings") {
@@ -328,7 +508,7 @@ int main(int argc,char** argv) {
             editor->createComponentSnapshot(editor->getLocalBounds()),output),"editor screenshot failed");
         return 0;
     }
-    check_state_and_ranges();check_editor();
+    check_state_and_ranges();check_editor();check_presets();check_preset_bank();check_preset_audio();
     if(argc==3 && std::string(argv[1])=="--bank") check_daisy_engine(argv[2]);
     check_low_latency();
     for(int program=0;program<6;++program) for(int rate:{44100,48000,96000}) {

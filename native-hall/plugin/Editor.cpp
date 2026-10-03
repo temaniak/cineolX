@@ -25,6 +25,44 @@ juce::Image trimTransparentPadding(const juce::Image& source) {
         }
     return right>=left && bottom>=top?source.getClippedImage({left,top,right-left+1,bottom-top+1}):source;
 }
+// The attached Slider always holds the actual parameter. Only the cap's
+// painted position moves; animation never emits a parameter/automation event.
+class MotorFader final : public juce::Slider,private juce::Timer {
+public:
+    void connect(NativeHallProcessor& processor) {
+        processor_=&processor;revision_=processor.presetRecallRevision();snap();
+    }
+    double visualProportion() const {return position_;}
+    void mouseDown(const juce::MouseEvent& event) override {snap();juce::Slider::mouseDown(event);}
+    void valueChanged() override {
+        const auto revision=processor_?processor_->presetRecallRevision():revision_;
+        if(processor_ && revision!=revision_ && processor_->presetRecallInProgress()) {
+            advance();revision_=revision;start_=position_;target_=valueToProportionOfLength(getValue());
+            began_=juce::Time::getMillisecondCounterHiRes();moving_=std::abs(target_-start_)>0.00001;
+            if(moving_) startTimerHz(60);else stopTimer();publish();
+        } else snap();
+    }
+private:
+    void snap() {
+        stopTimer();moving_=false;position_=valueToProportionOfLength(getValue());
+        if(processor_) revision_=processor_->presetRecallRevision();publish();
+    }
+    void advance() {
+        if(!moving_) return;
+        const double t=std::clamp((juce::Time::getMillisecondCounterHiRes()-began_)/320.0,0.0,1.0);
+        position_=start_+(target_-start_)*t*t*(3-2*t);
+        if(t>=1) {position_=target_;moving_=false;stopTimer();}
+    }
+    void publish() {
+        // Diagnostics also let UI checks verify motion without changing values.
+        getProperties().set("motor_position",position_);getProperties().set("motor_moving",moving_);repaint();
+    }
+    void timerCallback() override {advance();publish();}
+    NativeHallProcessor* processor_=nullptr;
+    unsigned revision_=0;
+    double position_=0,start_=0,target_=0,began_=0;
+    bool moving_=false;
+};
 class InstrumentLook final : public juce::LookAndFeel_V4 {
 public:
     InstrumentLook():cap_(trimTransparentPadding(loadImage("fadercap_png"))) {
@@ -55,6 +93,7 @@ public:
     }
     void drawLinearSlider(juce::Graphics& g,int x,int y,int width,int height,float pos,float,float,
                           juce::Slider::SliderStyle,juce::Slider& s) override {
+        if(auto* motor=dynamic_cast<MotorFader*>(&s)) pos=float(y)+float(height)*float(1-motor->visualProportion());
         const float cx=float(x)+float(width)/2;
         g.setOpacity(s.isEnabled()?1.0f:0.35f);
         juce::Rectangle<float> rail(cx-10,float(y-33),20,float(height+66));
@@ -128,6 +167,7 @@ const char* glyph(char c) {
     switch(c) {
         case '-':return "0000001F000000";case '.':return "00000000000C0C";
         case '%':return "19190204081313";case '/':return "01010204081010";
+        case '*':return "00150E1F0E1500";
         default:return "00000000000000";
     }
 }
@@ -186,9 +226,54 @@ void digit(juce::Graphics& g,int value,float x,float y) {
         g.setColour(active?led:led.withAlpha(0.065f));g.fillPath(shapes[segment]);
     }
 }
+class PresetButton final : public juce::Button {
+public:
+    PresetButton():Button("Preset") {
+        setComponentID("preset");setTitle("Preset");setTooltip("Choose a preset from the bank, grouped by algorithm.");
+    }
+    void paintButton(juce::Graphics& g,bool highlighted,bool down) override {
+        if(highlighted || down) {g.setColour(led.withAlpha(0.08f));g.fillRoundedRectangle(getLocalBounds().toFloat(),4);}
+        auto text=getButtonText();
+        if(text.length()>30) text=text.substring(0,26)+"..."+(text.endsWith(" *")?" *":"");
+        bool fallback=false;for(auto c:text.toUpperCase())
+            fallback|=!((c>='A' && c<='Z') || (c>='0' && c<='9') || juce::String(" -.%/*").containsChar(c));
+        if(fallback) {
+            g.setColour(led);g.setFont(font(38));
+            g.drawFittedText(text,0,0,getWidth()-48,getHeight(),juce::Justification::centredLeft,1);
+        } else dotText(g,text,{0,0,float(getWidth()-48),float(getHeight())},6,false);
+        juce::Path arrow;const float x=float(getWidth()-23),y=float(getHeight())/2;
+        arrow.addTriangle(x-10,y-5,x+10,y-5,x,y+6);g.setColour(led);g.fillPath(arrow);
+        if(hasKeyboardFocus(true)) {g.setColour(led.withAlpha(0.5f));g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1),4,1);}
+    }
+};
+class SavePresetButton final : public juce::Button {
+public:
+    SavePresetButton():Button("Save preset") {
+        setComponentID("save_preset");setTitle("Save preset");setTooltip("Name and save the current algorithm and settings in the preset bank.");
+    }
+    void paintButton(juce::Graphics& g,bool highlighted,bool down) override {
+        if(highlighted || down) {g.setColour(led.withAlpha(0.08f));g.fillRoundedRectangle(getLocalBounds().toFloat(),4);}
+        juce::Path disk;disk.startNewSubPath(8,6);disk.lineTo(34,6);disk.lineTo(43,15);
+        disk.lineTo(43,45);disk.lineTo(8,45);disk.closeSubPath();
+        g.setColour(led);g.strokePath(disk,juce::PathStrokeType(2));
+        g.drawRect(16,6,17,15,2);g.drawRect(16,30,20,15,2);g.drawLine(27,8,27,17,2);
+        if(hasKeyboardFocus(true)) g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1),4,1);
+    }
+};
 class Display final : public juce::Component {
 public:
-    Display(){setComponentID("display");setTitle("Algorithm and parameter display");}
+    Display(){
+        setComponentID("display");setTitle("Preset, algorithm and parameter display");
+        addAndMakeVisible(preset);preset.setBounds(320,18,650,50);
+        addAndMakeVisible(save);save.setBounds(992,18,52,52);
+    }
+    void updatePreset(const juce::String& name,bool modified) {
+        const auto text=name+(modified?" *":"");
+        if(preset.getButtonText()!=text) {
+            preset.setButtonText(text);preset.setName(text);
+            preset.setTooltip(text+"\nChoose a preset from the bank, grouped by algorithm.");
+        }
+    }
     void update(int program,const juce::String& name,const juce::String& parameter,const juce::String& value) {
         if(program==program_ && name==name_ && parameter==parameter_ && value==value_) return;
         program_=program;name_=name;parameter_=parameter;value_=value;
@@ -197,10 +282,15 @@ public:
     void paint(juce::Graphics& g) override {
         digit(g,(program_+1)/10,62,5);digit(g,(program_+1)%10,152,5);
         g.setColour(led.withAlpha(0.3f));g.drawVerticalLine(287,10,115);
-        dotText(g,name_,{320,28,720,70},9,true);
+        dotText(g,"PRESET",{320,1,160,14},1.8f,false);
+        dotText(g,"ALGORITHM",{320,78,210,12},1.5f,false);
+        dotText(g,name_,{320,94,720,27},3.6f,false);
+        g.setColour(led.withAlpha(0.25f));g.drawVerticalLine(1074,10,115);
         dotText(g,parameter_,{1100,15,190,26},3,false);
         dotText(g,value_,{1100,52,190,54},7,false);
     }
+    PresetButton preset;
+    SavePresetButton save;
 private:
     int program_=2;
     juce::String name_,parameter_,value_;
@@ -339,6 +429,8 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
     explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor) {
         setLookAndFeel(&look_);setSize(panel_width,panel_height);addAndMakeVisible(display_);
         display_.setBounds(88,100,1294,125);
+        display_.preset.onClick=[this]{showPresets();};
+        display_.save.onClick=[this]{namePreset();};
         for(unsigned i=0;i<sliders_.size();++i) {
             auto& slider=sliders_[i];auto* param=processor_.state.getParameter(NativeHallProcessor::ids[i]);
             slider.setLookAndFeel(&look_);
@@ -353,6 +445,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
             slider.setTooltip(param->getName(40)+": drag, use arrow keys, or type a value. Double-click resets.");
             addAndMakeVisible(slider);slider.setBounds(51+int(i)*153,329,140,424);
             slider_attachments_[i]=std::make_unique<SliderAttachment>(processor_.state,NativeHallProcessor::ids[i],slider);
+            slider.connect(processor_);
             slider.onDragStart=[this,i]{focused_=i;refreshDisplay();};
             slider.onValueChange=[this,i]{focused_=i;refreshDisplay();};
         }
@@ -392,7 +485,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
         };
         refreshProgram();startTimerHz(30);
     }
-    ~Panel() override {stopTimer();setLookAndFeel(nullptr);}
+    ~Panel() override {stopTimer();if(preset_dialog_) preset_dialog_->exitModalState(0);setLookAndFeel(nullptr);}
     void paint(juce::Graphics& g) override {
         g.drawImage(background_,getLocalBounds().toFloat(),juce::RectanglePlacement::stretchToFit);
         g.setColour(ink);g.setFont(font(40,true));g.drawText("Cineol-X 224",84,17,800,44,juce::Justification::centredLeft);
@@ -417,12 +510,76 @@ private:
     using SliderAttachment=juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment=juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboAttachment=juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    void showPresets() {
+        juce::Array<NativeHallProcessor::PresetInfo> entries;const auto result=processor_.presetBankEntries(entries);
+        if(result.failed()) {reportPresetResult(result);return;}
+        juce::PopupMenu menu;menu.setLookAndFeel(&look_);
+        menu.addSectionHeader("Preset bank");
+        for(int program=0;program<processor_.getNumPrograms();++program) {
+            juce::PopupMenu group;
+            for(int i=0;i<entries.size();++i) if(entries[i].algorithm==program)
+                group.addItem(100+i,entries[i].name,true,entries[i].name.equalsIgnoreCase(processor_.presetName()));
+            if(group.getNumItems()==0) group.addItem(99,"No saved presets yet",false);
+            menu.addSubMenu(processor_.getProgramName(program),group);
+        }
+        menu.addSeparator();menu.addItem(1,"Save preset...");
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&display_.preset),
+            [safe=juce::Component::SafePointer<Panel>(this),entries](int item) {
+                if(!safe) return;
+                if(item==1) safe->namePreset();
+                else if(item>=100 && item-100<entries.size())
+                    safe->reportPresetResult(safe->processor_.loadBankPreset(entries[item-100].name));
+            });
+    }
+    void reportPresetResult(const juce::Result& result) {
+        if(result.failed()) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Cineol-X 224 preset",result.getErrorMessage());
+        refreshProgram();
+    }
+    void storePreset(const juce::String& name) {
+        juce::StringArray names;auto result=processor_.presetNames(names);
+        if(result.failed()) {reportPresetResult(result);return;}
+        if(!names.contains(name.trim(),true)) {reportPresetResult(processor_.saveBankPreset(name));return;}
+        preset_dialog_open_=true;refreshProgram();
+        juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::QuestionIcon,"Replace preset?",
+            "Replace \""+name.trim()+"\" in the preset bank?","Replace","Cancel",nullptr,
+            juce::ModalCallbackFunction::create([safe=juce::Component::SafePointer<Panel>(this),name](int answer) {
+                if(!safe) return;
+                safe->preset_dialog_open_=false;
+                if(answer) safe->reportPresetResult(safe->processor_.saveBankPreset(name,true));
+                else safe->refreshProgram();
+            }));
+    }
+    void namePreset() {
+        if(preset_dialog_open_) return;
+        preset_dialog_open_=true;refreshProgram();
+        auto* dialog=new juce::AlertWindow("Save preset",
+            "Algorithm: "+processor_.getProgramName(processor_.getCurrentProgram())+"\nName this preset to add it to the bank.",
+            juce::MessageBoxIconType::NoIcon,getTopLevelComponent());
+        const auto current=processor_.presetName();
+        dialog->addTextEditor("preset_name",current=="Unsaved settings"?juce::String{}:current,"Preset name");
+        dialog->getTextEditor("preset_name")->setInputRestrictions(80);
+        dialog->addButton("Save",1,juce::KeyPress(juce::KeyPress::returnKey));
+        dialog->addButton("Cancel",0,juce::KeyPress(juce::KeyPress::escapeKey));
+        preset_dialog_=dialog;
+        dialog->addToDesktop(dialog->getLookAndFeel().getAlertBoxWindowFlags());
+        dialog->enterModalState(true,juce::ModalCallbackFunction::create(
+            [safe=juce::Component::SafePointer<Panel>(this),window=juce::Component::SafePointer<juce::AlertWindow>(dialog)](int answer) {
+                if(!safe) return;
+                safe->preset_dialog_open_=false;safe->preset_dialog_=nullptr;
+                if(answer && window) safe->storePreset(window->getTextEditorContents("preset_name"));
+                else safe->refreshProgram();
+            }),true);
+        dialog->getTextEditor("preset_name")->grabKeyboardFocus();
+        dialog->getTextEditor("preset_name")->selectAll();
+    }
     void refreshDisplay() {
         auto* parameter=processor_.state.getParameter(NativeHallProcessor::ids[focused_]);
         auto value=parameter->getText(parameter->convertTo0to1(float(sliders_[focused_].getValue())),0);
         if(parameter->getLabel().isNotEmpty()) value+=" "+parameter->getLabel();
         const int program=processor_.getCurrentProgram();
         display_.update(program,native_hall::program_names[program],captions[focused_],value);
+        display_.updatePreset(processor_.presetName(),processor_.presetModified());
     }
     void refreshProgram() {
         const int program=processor_.getCurrentProgram();
@@ -430,6 +587,7 @@ private:
         rom_setup_.setVisible(!ready);
         for(unsigned i=0;i<sliders_.size();++i) sliders_[i].setEnabled(ready && (i!=6 || program!=3));
         algorithm_.setEnabled(ready);
+        display_.preset.setEnabled(ready && !preset_dialog_open_);display_.save.setEnabled(ready && !preset_dialog_open_);
         for(auto& output:outputs_) output.setEnabled(ready);
         for(auto& toggle:toggles_) toggle.setEnabled(ready);
         if(program!=displayed_program_) {
@@ -446,7 +604,7 @@ private:
     InstrumentLook look_;
     juce::TooltipWindow tooltips_{this,650};
     Display display_;
-    std::array<juce::Slider,9> sliders_;
+    std::array<MotorFader,9> sliders_;
     juce::ComboBox algorithm_;
     std::array<juce::ComboBox,2> outputs_;
     std::array<juce::ToggleButton,3> toggles_;
@@ -458,6 +616,8 @@ private:
     std::array<std::unique_ptr<ComboAttachment>,2> output_attachments_;
     std::array<std::unique_ptr<ButtonAttachment>,2> button_attachments_;
     std::unique_ptr<juce::ParameterAttachment> dirt_attachment_;
+    juce::Component::SafePointer<juce::AlertWindow> preset_dialog_;
+    bool preset_dialog_open_=false;
     unsigned focused_=5;
     int displayed_program_=-1;
 };

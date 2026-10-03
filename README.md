@@ -39,6 +39,28 @@ measured T60. Diffusion has no effect in Acoustic Chamber. Small and Large Hall
 B share a topology; their factory settings differ. Changing programs clears
 the previous reverb tail immediately. Pre-delay changes can produce a transient.
 
+The red display includes a **Preset** selector and a disk-shaped **Save preset**
+button. **Save preset** asks only for a name and adds the current settings to
+one managed user preset bank. The red display groups presets in a submenu for
+each algorithm. Select a preset to recall its algorithm and settings;
+saving an existing name offers to replace it. No file or folder chooser is
+required. A preset stores its algorithm, the nine fader values, processing
+switches and output pair. **Low latency** remains an instance setting. The
+bank is stored in `Presets/User Presets.cineolbank` beside the imported ROM
+bank. Previously saved `.cineol224` presets in this default folder are adopted
+when the user bank is first saved; the original files are preserved. The preset
+name and its modified marker (`*`) survive DAW state restoration even if the
+user bank is unavailable.
+
+Loading a preset applies the settings as one complete audio control update.
+The fader caps then animate to their recalled positions over 320 ms, as a
+visual homage to the 960L. This motion does not interpolate the DSP parameters
+or generate extra automation events. Manual edits interrupt the animation.
+Presets using the same selected program retain the existing reverb tail;
+changing the selected program clears it. Moving between Small and Large Hall
+B still counts as a program change, even though they share a topology.
+Pre-delay changes retain the existing transient limitation.
+
 The plugin's **Digital Dirt** switch disables the analog-filter path when
 enabled. Its existing automation parameter remains `analog` / **Analog Filters**
 with the original polarity, so saved sessions keep their meaning. Plugin IDs

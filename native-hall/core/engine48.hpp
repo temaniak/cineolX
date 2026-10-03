@@ -29,21 +29,28 @@ private:
         for(auto& f:output_) f.prepare(false);
         fifo_.fill({});dry_.fill({}); read_=write_=dry_position_=0;
         raw_delay_.fill({});raw_hold_.fill(0);
+        controls_applied_=false;
         params_=Parameters{};gain_=gain_target_=1;gain_db_=0;mix_=1;analog_blend_=1;
     }
 public:
     void set_parameters(const Parameters& p) noexcept {
+        const bool controls_changed=!controls_applied_ || !same_controls(params_.hall,p.hall);
+        const unsigned program=std::min(p.program,program_count-1);
+        const bool program_changed=bank_ && program!=current_program_;
         params_=p; params_.mix=std::clamp(p.mix,0.0f,1.0f);
         params_.output_left=std::clamp(p.output_left,0,3);params_.output_right=std::clamp(p.output_right,0,3);
         float db=std::clamp(p.input_db,-36.0f,12.0f);
         if(db!=gain_db_) {gain_db_=db;gain_target_=std::pow(10.0f,db/20.0f);}
         if(bank_) {
-            params_.program=std::min(p.program,program_count-1);
-            if(params_.program!=current_program_) {
+            params_.program=program;
+            if(program_changed) {
                 current_program_=params_.program;hall_.select_program(current_program_);
             }
         }
-        hall_.set_controls(p.hall);
+        // Keep control polling and audio-rate smoothing unchanged. Only avoid
+        // reapplying the same Hall tables; program resets always need a write.
+        if(controls_changed || program_changed) hall_.set_controls(p.hall);
+        controls_applied_=true;
     }
     // Desktop low-latency mode mixes the direct input at the host rate.
     // The default path (including Daisy) retains its original dry delay/mix.
@@ -111,6 +118,12 @@ public:
         return int16_t(code*int(1u<<(4-range)));
     }
 private:
+    static bool same_controls(const Controls& a,const Controls& b) noexcept {
+        return a.bass==b.bass && a.mid==b.mid && a.crossover==b.crossover
+            && a.treble==b.treble && a.depth==b.depth && a.predelay_ms==b.predelay_ms
+            && a.diffusion==b.diffusion && a.mode_enhancement==b.mode_enhancement
+            && a.decay_optimization==b.decay_optimization;
+    }
     const ProgramBank* bank_=nullptr;
     unsigned current_program_=2;
     float gain_db_=0;
@@ -125,6 +138,7 @@ private:
     std::array<float,4> raw_hold_{};
     uint64_t read_=0,write_=0,dry_position_=0;
     Parameters params_{};
+    bool controls_applied_=false;
     float gain_=1,gain_target_=1,mix_=1,analog_blend_=1;
 };
 } // namespace native_hall

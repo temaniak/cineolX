@@ -29,24 +29,28 @@ public:
         }
         reset();
     }
-    void reset() noexcept {for(auto& h:history_) h.fill(0);count_=next_=0;}
+    void reset() noexcept {for(auto& h:history_) h.fill(0);slot_=phase_=0;}
     template<class Emit> void process(const float* input,Emit&& emit) noexcept {
-        uint64_t n=count_++;
-        for(int c=0;c<Channels;++c) history_[c][n%Taps]=input[c];
-        while(next_/Up<=n) {
-            const auto& weights=weights_[next_%Up];
+        const unsigned n=slot_;
+        for(int c=0;c<Channels;++c) history_[c][n]=input[c];
+        // phase_ is the next output time relative to this input, in 1/Up
+        // units. It stays bounded; phase_<Up matches the original absolute
+        // clock's next_/Up<=input_index condition.
+        while(phase_<Up) {
+            const auto& weights=weights_[phase_];
             float out[Channels]{};
             for(int j=0;j<Taps;++j) {
                 unsigned slot=unsigned((n+1+j)%Taps);
                 for(int c=0;c<Channels;++c) out[c]+=history_[c][slot]*weights[j];
             }
-            emit(out);next_+=Down;
+            emit(out);phase_+=Down;
         }
+        phase_-=Up;slot_=(n+1)%Taps;
     }
 private:
     static double i0(double x) noexcept {double sum=1,t=1;for(int k=1;k<32;++k){t*=x*x/(4*k*k);sum+=t;}return sum;}
     std::array<std::array<float,Taps>,Up> weights_{};
     std::array<std::array<float,Taps>,Channels> history_{};
-    uint64_t count_=0,next_=0;
+    unsigned slot_=0,phase_=0;
 };
 } // namespace native_hall

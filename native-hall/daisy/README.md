@@ -33,6 +33,10 @@ has its own output polarity. The example palette uses on/off GPIO. Replace
 `Init` runs before audio starts. `Read` runs at 500 Hz at the start of every
 second 48-frame audio block, outside the sample loop. Poll already-running ADC
 conversion results there; do not wait for conversion or perform blocking I/O.
+Polling, debounce and quantization keep this cadence even when readings are
+unchanged. Hall coefficients are reapplied only when Hall parameters change,
+after initialization or when selecting another program. Input gain, mix and
+analog-mode smoothing still run at the audio rate with their original constants.
 `WriteRgb` runs when the active program changes. GPIO writes or bounded PWM
 updates are appropriate; formatting text or waiting for a peripheral is not.
 Electrical button polarity and common-anode/common-cathode LED handling are

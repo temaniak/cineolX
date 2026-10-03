@@ -49,7 +49,7 @@ juce_add_plugin(NativeHall224 VERSION ${PROJECT_VERSION} PRODUCT_NAME "Cineol-X 
     VST3_CATEGORIES Fx Reverb MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "Cineol-X 224 processes your audio input." COPY_PLUGIN_AFTER_BUILD FALSE)
 target_sources(NativeHall224 PRIVATE native-hall/plugin/Processor.cpp
-    native-hall/plugin/Editor.cpp native-hall/plugin/RomBank.cpp)
+    native-hall/plugin/Editor.cpp native-hall/plugin/RomBank.cpp native-hall/plugin/Presets.cpp)
 target_link_libraries(NativeHall224 PRIVATE native_hall_core native_224_import cineol_ui_data
     juce::juce_audio_utils juce::juce_recommended_config_flags)
 target_compile_definitions(NativeHall224 PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
