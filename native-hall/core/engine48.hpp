@@ -45,7 +45,9 @@ public:
         }
         hall_.set_controls(p.hall);
     }
-    void process(float left,float right,float& out_left,float& out_right) noexcept {
+    // Desktop low-latency mode mixes the direct input at the host rate.
+    // The default path (including Daisy) retains its original dry delay/mix.
+    void process(float left,float right,float& out_left,float& out_right,bool wet_only=false) noexcept {
         if(!std::isfinite(left)) left=0;
         if(!std::isfinite(right)) right=0;
         gain_+=0.002f*(gain_target_-gain_);mix_+=0.002f*(params_.mix-mix_);
@@ -82,8 +84,8 @@ public:
         // Averaging adjacent samples for fractional delay would dull dry HF.
         auto dry=dry_[(dry_position_+dry_.size()-latency_samples)%dry_.size()];
         ++dry_position_;
-        out_left=dry[0]*(1-mix_)+wet[params_.output_left]*mix_;
-        out_right=dry[1]*(1-mix_)+wet[params_.output_right]*mix_;
+        out_left=wet_only?wet[params_.output_left]:dry[0]*(1-mix_)+wet[params_.output_left]*mix_;
+        out_right=wet_only?wet[params_.output_right]:dry[1]*(1-mix_)+wet[params_.output_right]*mix_;
     }
     Hall& hall() noexcept {return hall_;}
     unsigned active_program() const noexcept {return current_program_;}

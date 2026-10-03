@@ -206,6 +206,60 @@ private:
     juce::String name_,parameter_,value_;
 };
 
+class SettingsButton final : public juce::Button {
+public:
+    SettingsButton():Button("Settings") {
+        setComponentID("settings");setTitle("Settings");setClickingTogglesState(true);
+        setTooltip("Open settings and fine tuning.");
+    }
+    void paintButton(juce::Graphics& g,bool highlighted,bool down) override {
+        auto bounds=getLocalBounds().toFloat().reduced(5);
+        if(highlighted || getToggleState()) {
+            g.setColour(ink.withAlpha(0.08f));g.fillRoundedRectangle(bounds,8);
+        }
+        juce::Path gear;const auto centre=bounds.getCentre();
+        for(int i=0;i<32;++i) {
+            const float angle=juce::MathConstants<float>::twoPi*float(i)/32;
+            const float radius=(i%4==1 || i%4==2)?19.0f:15.0f;
+            const auto point=centre+juce::Point<float>(std::sin(angle)*radius,std::cos(angle)*radius);
+            if(i==0) gear.startNewSubPath(point);else gear.lineTo(point);
+        }
+        gear.closeSubPath();gear.addEllipse(centre.x-7,centre.y-7,14,14);
+        gear.setUsingNonZeroWinding(false);
+        g.setColour(getToggleState() || down?juce::Colour(0xff873d32):ink);g.fillPath(gear);
+        if(hasKeyboardFocus(true)) {g.setColour(ink);g.drawRoundedRectangle(bounds,8,1.5f);}
+    }
+};
+
+class SettingsPanel final : public juce::Component {
+public:
+    explicit SettingsPanel(NativeHallProcessor& processor) {
+        setComponentID("settings_panel");setName("Settings");setWantsKeyboardFocus(true);
+        low_latency_.setComponentID("low_latency");low_latency_.setButtonText("Low latency");
+        low_latency_.setTitle("Low latency");
+        low_latency_.setTooltip("Direct dry signal with zero reported plugin latency. Reverb still passes through its filters and pre-delay.");
+        addAndMakeVisible(low_latency_);
+        attachment_=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+            processor.state,"low_latency",low_latency_);
+    }
+    void paint(juce::Graphics& g) override {
+        auto bounds=getLocalBounds().toFloat().reduced(4);
+        g.setColour(juce::Colour(0xffe9e3d6));g.fillRoundedRectangle(bounds,12);
+        g.setColour(ink.withAlpha(0.3f));g.drawRoundedRectangle(bounds,12,2);
+        g.setColour(ink);g.setFont(font(30,true));
+        g.drawText("Settings",28,20,getWidth()-56,38,juce::Justification::centredLeft);
+        g.setFont(font(22));
+        g.drawText("When enabled: zero-latency dry signal.",28,148,getWidth()-56,30,juce::Justification::centredLeft);
+        g.drawText("Reverb and pre-delay keep their timing.",28,178,getWidth()-56,30,juce::Justification::centredLeft);
+        g.setColour(ink.withAlpha(0.16f));g.drawHorizontalLine(229,28,float(getWidth()-28));
+        // Space below this divider is reserved for future fine-tuning rows.
+    }
+    void resized() override {low_latency_.setBounds(28,75,getWidth()-56,64);}
+private:
+    juce::ToggleButton low_latency_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment_;
+};
+
 class RomSetup final : public juce::Component,private juce::Timer {
 public:
     explicit RomSetup(NativeHallProcessor& processor):processor_(processor),progress_bar_(progress_) {
@@ -282,7 +336,7 @@ private:
 }
 
 struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
-    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panel_png")),rom_setup_(processor) {
+    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor) {
         setLookAndFeel(&look_);setSize(panel_width,panel_height);addAndMakeVisible(display_);
         display_.setBounds(88,100,1294,125);
         for(unsigned i=0;i<sliders_.size();++i) {
@@ -330,6 +384,12 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
         dirt_attachment_->sendInitialUpdate();
         toggles_[0].onClick=[this]{dirt_attachment_->setValueAsCompleteGesture(toggles_[0].getToggleState()?0.0f:1.0f);};
         addChildComponent(rom_setup_);rom_setup_.setBounds(0,0,panel_width,panel_height);
+        addChildComponent(settings_panel_);settings_panel_.setBounds(820,76,550,315);
+        addAndMakeVisible(settings_button_);settings_button_.setBounds(1310,12,64,52);
+        settings_button_.onClick=[this] {
+            settings_panel_.setVisible(settings_button_.getToggleState());
+            if(settings_panel_.isVisible()) {settings_panel_.toFront(false);settings_panel_.grabKeyboardFocus();}
+        };
         refreshProgram();startTimerHz(30);
     }
     ~Panel() override {stopTimer();setLookAndFeel(nullptr);}
@@ -345,6 +405,13 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
         g.setColour(ink);g.drawText("ALGORITHM",98,820,600,34,juce::Justification::centredLeft);
         g.drawText("LEFT",786,820,250,34,juce::Justification::centredLeft);
         g.drawText("RIGHT",1108,820,260,34,juce::Justification::centredLeft);
+    }
+    bool keyPressed(const juce::KeyPress& key) override {
+        if(key==juce::KeyPress::escapeKey && settings_panel_.isVisible()) {
+            settings_panel_.setVisible(false);settings_button_.setToggleState(false,juce::dontSendNotification);
+            settings_button_.grabKeyboardFocus();return true;
+        }
+        return false;
     }
 private:
     using SliderAttachment=juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -384,6 +451,8 @@ private:
     std::array<juce::ComboBox,2> outputs_;
     std::array<juce::ToggleButton,3> toggles_;
     RomSetup rom_setup_;
+    SettingsButton settings_button_;
+    SettingsPanel settings_panel_;
     std::array<std::unique_ptr<SliderAttachment>,9> slider_attachments_;
     std::unique_ptr<ComboAttachment> algorithm_attachment_;
     std::array<std::unique_ptr<ComboAttachment>,2> output_attachments_;

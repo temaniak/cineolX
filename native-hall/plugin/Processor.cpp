@@ -52,6 +52,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout(
     p.add(std::make_unique<AudioParameterChoice>(ParameterID{"output_r",1},"Right Output",StringArray{"A","B","C","D"},2));
     // Append so existing parameter indices/IDs continue to address v0.2 controls.
     p.add(std::move(algorithm));
+    p.add(std::make_unique<AudioParameterBool>(ParameterID{"low_latency",3},"Low latency",false,
+        AudioParameterBoolAttributes{}.withAutomatable(false)));
     return p;
 }
 NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
@@ -59,7 +61,17 @@ NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
     state(*this,nullptr,"NativeHall224",layout()) {
     algorithm_parameter_=static_cast<juce::AudioParameterChoice*>(state.getParameter("algorithm"));
     for(unsigned i=0;i<values_.size();++i) values_[i]=state.getRawParameterValue(ids[i]);
+    low_latency_value_=state.getRawParameterValue("low_latency");
     previous_.fill(std::numeric_limits<float>::quiet_NaN());
+    // Poll outside the audio callback, even with the editor closed. Host
+    // latency notifications can invoke locks/listeners and must stay here.
+    startTimerHz(30);
+}
+NativeHallProcessor::~NativeHallProcessor() {stopTimer();}
+void NativeHallProcessor::updateLatency() {
+    const bool low=low_latency_value_->load(std::memory_order_relaxed)>=0.5f;
+    setLatencySamples(low?0:normal_latency_.load(std::memory_order_relaxed));
+    low_latency_active_.store(low,std::memory_order_relaxed);
 }
 bool NativeHallProcessor::isBusesLayoutSupported(const BusesLayout& l) const {
     return l.getMainOutputChannelSet()==juce::AudioChannelSet::stereo() &&
@@ -69,7 +81,12 @@ void NativeHallProcessor::prepareToPlay(double rate,int block) {
     engine_initialized_=ready();
     if(engine_initialized_) engine_.prepare(rom_bank_->bank(),unsigned(getCurrentProgram()));
     bridge_.setup(int(std::lround(rate)),std::clamp(block,1,8192));
-    setLatencySamples(bridge_.latency()+int(std::lround(native_hall::Engine48::latency_samples*rate/48000)));
+    direct_input_.setSize(2,std::clamp(block,1,8192));
+    host_mix_=values_[8]->load(std::memory_order_relaxed);
+    host_mix_coefficient_=float(1-std::pow(0.998,48000/rate));
+    normal_latency_.store(bridge_.latency()+int(std::lround(native_hall::Engine48::latency_samples*rate/48000)),
+        std::memory_order_relaxed);
+    updateLatency();
     previous_.fill(std::numeric_limits<float>::quiet_NaN());
 }
 void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) {
@@ -93,11 +110,31 @@ void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuf
         p.hall.decay_optimization=v[11]>=0.5f;p.output_left=int(v[12]);p.output_right=int(v[13]);
         engine_.set_parameters(p);
     }
-    const float* right=b.getReadPointer(getTotalNumInputChannels()==1?0:1);
-    bridge_.process(b.getReadPointer(0),right,b.getWritePointer(0),b.getWritePointer(1),b.getNumSamples(),
-        [&](const float* l,const float* r,float* ol,float* ore,int n) {
-            for(int i=0;i<n;++i) engine_.process(l[i],r[i],ol[i],ore[i]);
-        });
+    const bool low=low_latency_active_.load(std::memory_order_relaxed);
+    const int right_channel=getTotalNumInputChannels()==1?0:1;
+    for(int offset=0;offset<b.getNumSamples();) {
+        const int count=std::min(direct_input_.getNumSamples(),b.getNumSamples()-offset);
+        // Preserve both inputs before in-place rendering, including mono.
+        if(low) {
+            direct_input_.copyFrom(0,0,b,0,offset,count);
+            direct_input_.copyFrom(1,0,b,right_channel,offset,count);
+        }
+        auto* left=b.getWritePointer(0,offset);auto* right=b.getWritePointer(1,offset);
+        bridge_.process(left,b.getReadPointer(right_channel,offset),left,right,count,
+            [&](const float* l,const float* r,float* ol,float* ore,int n) {
+                for(int i=0;i<n;++i) engine_.process(l[i],r[i],ol[i],ore[i],low);
+            });
+        for(int i=0;i<count;++i) {
+            host_mix_+=host_mix_coefficient_*(v[8]-host_mix_);
+            if(std::abs(host_mix_-v[8])<1e-5f) host_mix_=v[8];
+            if(low) {
+                const float dl=direct_input_.getSample(0,i),dr=direct_input_.getSample(1,i);
+                left[i]=(std::isfinite(dl)?dl:0)*(1-host_mix_)+left[i]*host_mix_;
+                right[i]=(std::isfinite(dr)?dr:0)*(1-host_mix_)+right[i]*host_mix_;
+            }
+        }
+        offset+=count;
+    }
 }
 int NativeHallProcessor::getCurrentProgram() {
     // Parameter listeners can run before APVTS publishes its raw mirror.
@@ -124,6 +161,12 @@ void NativeHallProcessor::setStateInformation(const void* data,int size) {
         if(!restored.getChildWithProperty("id","algorithm").isValid()) {
             juce::ValueTree algorithm("PARAM");algorithm.setProperty("id","algorithm",nullptr);
             algorithm.setProperty("value",2.0f,nullptr);restored.appendChild(algorithm,nullptr);
+        }
+        // Loading an older session into an already-enabled instance must
+        // restore the original compensated mode, not keep the new setting.
+        if(!restored.getChildWithProperty("id","low_latency").isValid()) {
+            juce::ValueTree low("PARAM");low.setProperty("id","low_latency",nullptr);
+            low.setProperty("value",0.0f,nullptr);restored.appendChild(low,nullptr);
         }
         state.replaceState(restored);
     }

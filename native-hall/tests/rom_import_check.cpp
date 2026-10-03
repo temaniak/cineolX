@@ -95,6 +95,27 @@ int main(int argc,char** argv) {
             require(find(*editor,"rom_setup") && find(*editor,"rom_setup")->isVisible() &&
                     find(*editor,"choose_roms")->isEnabled(),"first-run ROM request missing");
             require(!find(*editor,"algorithm")->isEnabled(),"unimported controls enabled");
+            auto* settings=dynamic_cast<juce::Button*>(find(*editor,"settings"));
+            auto* panel=find(*editor,"settings_panel");
+            auto* low=dynamic_cast<juce::ToggleButton*>(find(*editor,"low_latency"));
+            require(settings && panel && low && !panel->isVisible() && !low->getToggleState(),"first-use Settings missing");
+            settings->setToggleState(true,juce::sendNotificationSync);
+            require(panel->isVisible(),"Settings did not open");
+            low->setToggleState(true,juce::sendNotificationSync);
+            juce::MemoryBlock low_state;processor.getStateInformation(low_state);
+            low->setToggleState(false,juce::sendNotificationSync);
+            processor.setStateInformation(low_state.getData(),int(low_state.getSize()));
+            require(low->getToggleState(),"Low latency setting was not restored");
+            for(int rate:{44100,48000,96000}) {
+                processor.prepareToPlay(rate,256);
+                require(processor.getLatencySamples()==0,"Low latency did not report zero");
+            }
+            dry(processor);dry(processor,true);
+            low->setToggleState(false,juce::sendNotificationSync);
+            settings->setToggleState(false,juce::sendNotificationSync);
+            require(!panel->isVisible(),"Settings did not close");
+            processor.setPlayConfigDetails(2,2,48000,256);processor.prepareToPlay(48000,256);
+            require(processor.getLatencySamples()==70,"normal latency not restored");
             if(mode=="--empty") {
                 if(argc==3) {
                     juce::File file(juce::String::fromUTF8(argv[2]));file.getParentDirectory().createDirectory();

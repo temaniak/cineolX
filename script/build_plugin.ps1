@@ -25,11 +25,15 @@ try {
     if ($env:JUCE_DIR) { $TaskArgs += "-DFETCHCONTENT_SOURCE_DIR_JUCE=$env:JUCE_DIR" }
     Invoke-Checked cmake $TaskArgs
     Invoke-Checked cmake @('--build', $TaskBuild, '--config', 'Release', '--parallel',
-        "$Jobs", '--target', 'NativeHall224_VST3', 'cineol_rom_import_check')
+        "$Jobs", '--target', 'NativeHall224_VST3', 'NativeHall224_Standalone', 'cineol_rom_import_check')
     $env:CINEOL224_CACHE_DIR = Join-Path $TaskBuild ('check-cache-' + [guid]::NewGuid())
     Invoke-Checked (Join-Path $TaskBuild 'cineol_rom_import_check_artefacts/Release/cineol_rom_import_check.exe') @('--empty')
     Write-Host "Cineol-X 224 VST3: $TaskBuild/NativeHall224_artefacts/Release/VST3/Cineol-X 224.vst3"
 } finally {
+    if ($env:CINEOL224_CACHE_DIR -and $env:CINEOL224_CACHE_DIR -ne $TaskOldCache -and
+        (Test-Path $env:CINEOL224_CACHE_DIR)) {
+        Remove-Item -LiteralPath $env:CINEOL224_CACHE_DIR -Recurse -Force
+    }
     $env:PATH = $TaskOldPath
     $env:CINEOL224_CACHE_DIR = $TaskOldCache
 }

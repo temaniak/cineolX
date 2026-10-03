@@ -44,6 +44,22 @@ enabled. Its existing automation parameter remains `analog` / **Analog Filters**
 with the original polarity, so saved sessions keep their meaning. Plugin IDs
 are retained: AU `aufx/Nh24/Rflx`, bundle ID `net.joelanders.nativehall224`.
 
+The gear in the top-right corner opens **Settings**, with room for future fine
+tuning. **Low latency** sends the dry input directly at the project sample rate
+and reports **0 samples** of plugin latency at every supported rate. Only the
+wet signal passes through the resamplers and reverb; its filter delay and
+pre-delay remain unchanged. This changes the timing between dry and wet (by
+70 samples, about 1.46 ms, at 48 kHz). At 100% wet the DSP output is unchanged,
+but the DAW no longer compensates its delay. Audio-interface/buffer latency is
+independent of this setting.
+
+Low latency is saved per instance and defaults to **off**, including when
+loading older sessions. Existing parameter IDs and indices are unchanged.
+The setting is not automatable. Host latency updates happen outside the audio
+callback, even with the editor closed. Switching may produce a brief transient
+or require a transport restart in hosts that defer compensation changes.
+Click the gear again or press Escape to close Settings.
+
 ## ROM requirements and first use
 
 Only the five **original 224 v4.4 ROM1–ROM5** chips are accepted. Each file must
@@ -149,6 +165,37 @@ DAW. The script also runs the first-use check with an isolated empty cache;
 it does not require or distribute ROMs. ROM import and full DSP validation
 require your own supported ROM set. `-Jobs 6` controls build parallelism, and
 `JUCE_DIR` can reuse a local JUCE 8.0.14 checkout.
+
+### Automatic desktop builds and releases
+
+The [Desktop builds workflow](https://github.com/temaniak/cineolX/actions/workflows/desktop-build.yml)
+builds Windows x64 VST3/Standalone and macOS universal AU/VST3/Standalone on
+GitHub-hosted runners. No local Windows machine or private ROM upload is needed.
+Run it from the Actions page or from any authenticated checkout:
+
+```sh
+gh workflow run desktop-build.yml --ref main
+gh run list --workflow desktop-build.yml
+gh run download RUN_ID --dir build/downloaded
+```
+
+Manual runs and pull requests upload downloadable archives without publishing
+by default. On `main`, selecting **publish** (or passing `-f publish=true` to
+`gh workflow run`) creates the version tag and release after both builds pass.
+To publish a version, update the version in `CMakeLists.txt`, add English release
+notes at `docs/releases/vVERSION.md`, commit and push, then push the matching tag:
+
+```sh
+git tag vVERSION
+git push origin vVERSION
+```
+
+Tag builds publish both ZIPs and `SHA256SUMS.txt` only after both platforms pass.
+Actions uses its built-in repository token; no additional release secret is
+required. The packaging script selects only the plugin bundles and public
+documentation, verifies the binary architectures, and checks macOS signatures
+before and after ZIP extraction. CI runs first-use and Settings checks without
+ROMs; full imported-bank DSP tests remain local with private fixtures.
 
 ## Universal Daisy controls
 
