@@ -5,6 +5,8 @@ the six programs of the **original Lexicon 224, firmware v4.4**. The desktop
 plugin is version **0.5.1**, with the current metal-panel artwork and 21-mark
 fader scales.
 
+Primary repository: [temaniak/cineolX](https://github.com/temaniak/cineolX).
+
 ChatGPT was actively used during the creation of this project, assisting with
 code development, debugging, testing and documentation.
 
@@ -77,9 +79,11 @@ need the original files, a computer, an 8080 emulator or runtime ROM loading.
 
 ## Dependencies
 
-Initialize the desktop dependency after cloning this repository:
+Clone the primary repository and initialize the desktop dependency:
 
 ```sh
+git clone https://github.com/temaniak/cineolX.git
+cd cineolX
 ./script/setup_dependencies.sh
 ```
 

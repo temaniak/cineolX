@@ -1,5 +1,6 @@
 # Development guidance
 
+- The primary repository is https://github.com/temaniak/cineolX. Reflexion is an external dependency under `deps/reflexion`.
 - Preserve audio safety: no allocation, file/network I/O, locks or waits in audio processing.
 - Keep DSP, logical controls and hardware I/O separate.
 - Keep the plugin identifiers and parameter IDs stable for existing DAW sessions.

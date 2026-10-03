@@ -3,6 +3,7 @@ out/
 firmware/
 __pycache__/
 .DS_Store
+.codex/
 *.bank224
 *.hall224
 *.wcs
