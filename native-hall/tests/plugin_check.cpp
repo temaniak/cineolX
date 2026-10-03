@@ -2,6 +2,9 @@
 #include <iostream>
 #include <new>
 #include <cstdlib>
+#ifdef _WIN32
+#include <malloc.h>
+#endif
 static thread_local bool audio=false;
 static unsigned allocations=0,releases=0;
 void* operator new(size_t n) {if(audio) ++allocations;if(void* p=std::malloc(n?n:1)) return p;throw std::bad_alloc();}
@@ -10,10 +13,21 @@ void operator delete(void* p,size_t) noexcept {::operator delete(p);}
 void* operator new[](size_t n) {return ::operator new(n);}
 void operator delete[](void* p) noexcept {::operator delete(p);}
 void* operator new(size_t n,std::align_val_t a) {
-    if(audio) ++allocations;void* p=nullptr;if(posix_memalign(&p,size_t(a),n?n:1)) throw std::bad_alloc();return p;
+    if(audio) ++allocations;
+#ifdef _WIN32
+    void* p=_aligned_malloc(n?n:1,size_t(a));if(!p) throw std::bad_alloc();return p;
+#else
+    void* p=nullptr;if(posix_memalign(&p,size_t(a),n?n:1)) throw std::bad_alloc();return p;
+#endif
 }
-void operator delete(void* p,std::align_val_t) noexcept {::operator delete(p);}
-void operator delete(void* p,size_t,std::align_val_t) noexcept {::operator delete(p);}
+void operator delete(void* p,std::align_val_t) noexcept {
+#ifdef _WIN32
+    if(audio && p) ++releases;_aligned_free(p);
+#else
+    ::operator delete(p);
+#endif
+}
+void operator delete(void* p,size_t,std::align_val_t a) noexcept {::operator delete(p,a);}
 static void require(bool ok,const char* s) {if(!ok) {std::cerr<<s<<'\n';std::exit(1);}}
 static void set(NativeHallProcessor& p,const char* id,float value) {
     auto* param=p.state.getParameter(id);param->setValueNotifyingHost(param->convertTo0to1(value));

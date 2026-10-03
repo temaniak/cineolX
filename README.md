@@ -131,7 +131,24 @@ audio input/output in the standalone's audio settings when needed.
 For Intel or a universal macOS build, configure `build/plugin` manually with
 `-DCMAKE_OSX_ARCHITECTURES=x86_64` or `"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"`
 before running the script. Non-macOS builds select VST3 and Standalone, but
-those platforms have not been validated here.
+Linux has not been validated here.
+
+For Windows x64, install Visual Studio 2022 Build Tools with the C++ desktop
+workload and Windows SDK, CMake 3.22 or later, Python 3, and Git for Windows
+(including its `patch` utility). Initialize Reflexion, then build in PowerShell:
+
+```powershell
+git submodule update --init deps/reflexion
+./script/build_plugin.ps1
+```
+
+The Release VST3 bundle is
+`build/windows/NativeHall224_artefacts/Release/VST3/Cineol-X 224.vst3`.
+Copy the entire bundle to `C:\Program Files\Common Files\VST3\` and rescan your
+DAW. The script also runs the first-use check with an isolated empty cache;
+it does not require or distribute ROMs. ROM import and full DSP validation
+require your own supported ROM set. `-Jobs 6` controls build parallelism, and
+`JUCE_DIR` can reuse a local JUCE 8.0.14 checkout.
 
 ## Universal Daisy controls
 
