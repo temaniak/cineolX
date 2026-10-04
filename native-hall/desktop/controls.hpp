@@ -93,7 +93,7 @@ struct ControlProfile {
         settings.coefficients[target.row]=int8_t((target.signs&1)?-int(magnitude):int(magnitude));
     }
     template<class Settings>
-    void apply_static(Settings& settings,const std::array<uint8_t,48>& values) const noexcept {
+    void apply_static(Settings& settings,const std::array<uint8_t,48>& values,unsigned dynamic_reduction=255) const noexcept {
         const auto addresses=layout(values);
         const unsigned lf_count=slots[0].group[0].count,mid_count=slots[1].group[0].count;
         for(const auto& slot:slots) {
@@ -174,9 +174,13 @@ struct ControlProfile {
                 default:break;
             }
         }
+        apply_feedback(settings,values,dynamic_reduction==255?reduction:dynamic_reduction);
+    }
+    template<class Settings>
+    void apply_feedback(Settings& settings,const std::array<uint8_t,48>& values,unsigned amount) const noexcept {
         const unsigned limit=definition_cell==255?feedback_limit:32-(unsigned(values[definition_cell])>>3);
         auto index=[&](uint8_t raw) {const unsigned value=std::max(1u,unsigned(raw)>>3);return uint8_t(limit?std::min(limit-1,value):value);};
-        feedback.apply(settings,index(values[1]),index(values[7]),reduction);
+        feedback.apply(settings,index(values[1]),index(values[7]),amount);
     }
 };
 }

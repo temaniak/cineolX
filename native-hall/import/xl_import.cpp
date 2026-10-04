@@ -222,12 +222,32 @@ static Task<void> prepare_programs(Engine& engine,Machine& machine,LarcOperator&
             for(unsigned pair=0;pair<2;++pair) modulation.negative[i][pair]=
                 lexicon224x::decode(host.dsp->wcs[modulation.rows[i]+pair]).negative;
         }
-        unsigned calls=0;uint64_t first=0,last=0;host.pc_watches[0xad5c]=true;
-        host.pc_observer=[&](uint64_t cycles,lexicon224x::cpu::CpuSnapshot) {
+        unsigned calls=0;uint64_t first=0,last=0;
+        std::array<unsigned,2> dynamics_calls{};std::array<uint64_t,2> dynamics_first{},dynamics_last{};
+        host.pc_watches[0xad5c]=host.pc_watches[0x82cf]=host.pc_watches[0x81b6]=true;
+        host.pc_observer=[&](uint64_t cycles,lexicon224x::cpu::CpuSnapshot cpu) {
+            if(cpu.pc!=0xad5c) {
+                const unsigned i=cpu.pc==0x82cf?0:1;
+                if(!dynamics_calls[i]++) dynamics_first[i]=cycles;
+                dynamics_last[i]=cycles;host.pc_watches[cpu.pc]=true;return;
+            }
             if(!calls++) first=cycles;last=cycles;host.pc_watches[0xad5c]=true;
         };
         for(unsigned n=0;n<10;++n) {co_await report_progress(progress,stage,callbacks);co_await machine.sleep(0.1);}
-        host.pc_watches[0xad5c]=false;host.pc_observer={};
+        host.pc_watches[0xad5c]=host.pc_watches[0x82cf]=host.pc_watches[0x81b6]=false;host.pc_observer={};
+        for(unsigned i=0;i<2;++i) if(dynamics_calls[i]<2 || dynamics_last[i]<=dynamics_first[i])
+            co_await fail("XL level-following clock measurement failed.");
+        data.dynamics.slow_rate_tenths=uint32_t(std::lround(double(dynamics_calls[0]-1)*20480000.0/double(dynamics_last[0]-dynamics_first[0])));
+        data.dynamics.fast_rate_tenths=uint32_t(std::lround(double(dynamics_calls[1]-1)*20480000.0/double(dynamics_last[1]-dynamics_first[1])));
+        data.dynamics.base_period=host.memory[0x3c5b];data.dynamics.shared_stop=(host.memory[0x3df9]&64)!=0;
+        data.dynamics.enabled=(host.memory[0x3e07]&1)==0;
+        auto& initial=data.initial_dynamics;
+        initial.held=uint16_t(word(0x3e0f));initial.average=host.memory[0x3c50];initial.flags=host.memory[0x3c51];
+        initial.low=host.memory[0x3c52];initial.mid=host.memory[0x3c53];initial.trigger_peak=host.memory[0x3c54];
+        initial.stop_counter=host.memory[0x3c5f];initial.stopped=host.memory[0x3e11];initial.amount=host.memory[0x3e12];
+        initial.divider=host.memory[0x3e13];initial.period=host.memory[0x3e14];initial.peak_divider=host.memory[0x3c38];
+        initial.peak_input=host.memory[0x3c61];std::copy_n(host.memory.begin()+0x3e15,11,initial.history.begin());
+        initial.feedback_mid=uint8_t(host.memory[0x3e3e]<<3);initial.feedback_amount=initial.amount;
         if(!(!taps || (calls>100 && last>first))) co_await fail("XL modulation clock measurement failed.");
         modulation.rate_tenths=taps?uint32_t(std::lround(double(calls-1)*20480000.0/double(last-first))):1;
         auto& state=data.initial_modulation;

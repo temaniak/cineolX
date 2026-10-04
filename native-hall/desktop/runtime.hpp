@@ -21,15 +21,15 @@ public:
             std::copy_n(data_->coefficients.begin(),settings.rows,settings.coefficients.begin());
             std::copy_n(data_->offsets.begin(),settings.rows,settings.offsets.begin());
             engine.activate(settings);engine.set_modulation(data_->modulation,data_->initial_modulation,true);
+            engine.set_dynamics(data_->dynamics,data_->initial_dynamics);
         });
         alignment_.fill({});alignment_position_=0;
     }
-    void controls(const std::array<uint8_t,48>& values,bool enhancement,float gain,float mix,float clean,int left,int right) noexcept {
+    void controls(const std::array<uint8_t,48>& values,bool enhancement,float gain,float mix,float clean,int left,int right,bool optimization=false) noexcept {
         visit([&](auto& engine){
             using Audio=std::decay_t<decltype(engine)>;
             auto settings=data_->template settings<Audio::graph_id>();
-            data_->controls.apply_size(settings,values);data_->controls.apply_static(settings,values);
-            engine.set_controls(settings);
+            engine.set_native_controls(settings,data_->controls,values,optimization);
             if(data_->chorus_page) engine.set_chorus(values[data_->pages[data_->chorus_page-1].cells[data_->chorus_slot]]);
             engine.enable_modulation(enhancement);engine.set_global(gain,mix,clean,left,right);
         });

@@ -14,7 +14,7 @@ records = subprocess.check_output(['git','-C',str(root),'ls-files','--stage','-z
 pins = json.loads((root/'dependencies.json').read_text())
 private = []
 if args.rom_directory:
-    private = [p.read_bytes() for p in args.rom_directory.iterdir() if p.is_file() and p.stat().st_size==2048]
+    private = [p.read_bytes() for p in args.rom_directory.iterdir() if p.is_file() and p.stat().st_size in (2048,4096)]
 count=0
 for record in records:
     if not record: continue
@@ -23,7 +23,7 @@ for record in records:
         assert name.startswith('deps/') and oid.decode()==pins[name.split('/')[1]]['commit'], 'Dependency pin mismatch'
         continue
     assert not name.startswith(('build/','firmware/','out/','deps/')), f'Private/generated/dependency contents staged: {name}'
-    assert not name.endswith(('.bank224','.hall224','.wcs','.rom','.bin','.elf','.hex','.map','.ru.md','.local.hpp')), name
+    assert not name.endswith(('.bank224','.bankxl','.hall224','.wcs','.rom','.bin','.elf','.hex','.map','.ru.md','.local.hpp')), name
     data=subprocess.check_output(['git','-C',str(root),'show',':'+name])
     assert not any(chip in data for chip in private), f'ROM bytes staged in {name}'
     if Path(name).suffix not in ('.png',):

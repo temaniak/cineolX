@@ -28,6 +28,8 @@ CineolRomBank::CineolRomBank():Thread("Cineol ROM preparation") {
     status_=ready() && xlReady()?"224 v4.4 and 224XL v8.21 ready.":
         ready()?"224 v4.4 ready. Import 224XL v8.21 to add native XL programs.":
         xlReady()?"224XL v8.21 ready. Import 224 v4.4 to add the original programs.":missing_roms;
+    if(!xlReady() && xl.getSiblingFile("programs-v821-native-v3.bankxl").existsAsFile())
+        status_="Re-import the original 224XL v8.21 ROM set once to prepare the native dynamics update.";
 }
 CineolRomBank::~CineolRomBank() {
     // Cancellation is checked during emulation; never force-kill a thread

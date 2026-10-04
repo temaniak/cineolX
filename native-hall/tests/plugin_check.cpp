@@ -37,6 +37,16 @@ static juce::Component* find(juce::Component& root,const char* id) {
     for(auto* child:root.getChildren()) if(auto* found=find(*child,id)) return found;
     return nullptr;
 }
+static void next_page(juce::Component& editor) {
+    auto* display=find(editor,"display");unsigned count=0;
+    for(unsigned i=1;i<=9;++i) if(auto* button=find(editor,("parameter_page_"+juce::String(i)).toRawUTF8()))
+        if(button->isVisible()) ++count;
+    require(display && count,"numbered page controls missing");
+    const unsigned next=(unsigned(int(display->getProperties()["page_index"]))+1)%count+1;
+    auto* button=dynamic_cast<juce::Button*>(find(editor,("parameter_page_"+juce::String(next)).toRawUTF8()));
+    require(button && bool(button->onClick),"numbered page action missing");button->onClick();
+}
+
 static juce::Component* findNamed(juce::Component& root,const juce::String& name) {
     if(root.getName()==name) return &root;
     for(auto* child:root.getChildren()) if(auto* found=findNamed(*child,name)) return found;
@@ -115,7 +125,7 @@ static void check_editor() {
         auto shot=editor->createComponentSnapshot(editor->getLocalBounds());
         require(shot.isValid() && shot.getWidth()==width,"resized editor snapshot failed");
     }
-    auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page"));
+    auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_1"));
     require(page && find(*editor,"firmware"),"page/firmware controls missing");
     set(p,"algorithm",2);set(p,"diffusion",31);
     const float saved_depth=p.state.getRawParameterValue("depth")->load();
@@ -132,23 +142,23 @@ static void check_editor() {
     second_page->onClick();require(int(display->getProperties()["page_index"])==1 && second_page->getToggleState() && !first_page->getToggleState(),"direct detail-page selection failed");
     second_page->onClick();first_page->onClick();
     require(int(display->getProperties()["page_index"])==0 && first_page->getToggleState() && page_events.changes==0,"direct page selection changed parameters");
-    page->onClick();
+    next_page(*editor);
     require(int(display->getProperties()["page_index"])==1 && !bass->isVisible() && diffusion->isVisible(),"detail page binding failed");
     for(unsigned slot=0;slot<6;++slot) if(slot!=4) {
         auto* inactive=dynamic_cast<juce::Slider*>(find(*editor,("inactive_"+juce::String(slot+1)).toRawUTF8()));
         require(inactive && inactive->isVisible() && !inactive->isEnabled() && inactive->getValue()==0,"inactive fader parking failed");
     }
-    page->onClick();
+    next_page(*editor);
     require(int(display->getProperties()["page_index"])==0 && bass->isVisible() && !diffusion->isVisible(),"main page binding failed");
     require(page_events.changes==0 && p.state.getRawParameterValue("depth")->load()==saved_depth &&
         p.state.getRawParameterValue("diffusion")->load()==saved_diffusion,"page navigation changed DSP/automation");
-    page->onClick();set(p,"algorithm",3);
+    next_page(*editor);set(p,"algorithm",3);
     const auto parking_deadline=juce::Time::getMillisecondCounterHiRes()+400;
     while(juce::Time::getMillisecondCounterHiRes()<parking_deadline) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
     require(!diffusion->isEnabled() && diffusion->getProperties()["motor_position"]==juce::var(0.0) &&
         p.state.getRawParameterValue("diffusion")->load()==saved_diffusion,"Chamber parking wrote the parameter");
     for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->removeListener(&page_events);
-    page->onClick();
+    next_page(*editor);
     set(p,"algorithm",2);
     juce::MemoryBlock page_state;p.getStateInformation(page_state);NativeHallProcessor reference;
     reference.setStateInformation(page_state.getData(),int(page_state.getSize()));
@@ -158,7 +168,7 @@ static void check_editor() {
     for(unsigned block=0;block<200;++block) {
         actual.clear();expected.clear();
         if(block==0) {actual.setSample(0,0,0.5f);expected.setSample(0,0,0.5f);}
-        if(block%2) page->onClick();
+        if(block%2) next_page(*editor);
         else (int(display->getProperties()["page_index"])==0?second_page:first_page)->onClick();
         p.processBlock(actual,midi);reference.processBlock(expected,midi);
         for(int c=0;c<2;++c) for(int i=0;i<256;++i) {
@@ -171,11 +181,11 @@ static void check_editor() {
 }
 static void check_fader_limits() {
     NativeHallProcessor p;std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
-    auto* display=find(*editor,"display");auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page"));
+    auto* display=find(*editor,"display");auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_1"));
     require(display && page,"limit-check display/page missing");unsigned checked=0;
     for(int program=0;program<p.getNumPrograms();++program) {
         p.setCurrentProgram(program);
-        while(int(display->getProperties()["page_index"])!=0) page->onClick();
+        while(int(display->getProperties()["page_index"])!=0) next_page(*editor);
         const unsigned pages=p.parameterPages();
         for(unsigned i=0;i<9;++i) {
             auto* button=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(i+1)).toRawUTF8()));
@@ -184,12 +194,12 @@ static void check_fader_limits() {
         auto* last=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(pages)).toRawUTF8()));
         auto* first=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_1"));
         last->onClick();require(int(display->getProperties()["page_index"])==int(pages-1) && last->getToggleState(),"direct jump to last parameter page failed");
-        require(page->getButtonText()=="PAGE "+juce::String(pages)+"/"+juce::String(pages),"direct page selection lost PAGE n/n indicator");
+        require(!find(*editor,"parameter_page"),"duplicate cyclic page control remains");
         first->onClick();
         for(unsigned current=0;current<pages;++current) {
             const unsigned count=p.usesXL()?6:9;
             auto* active=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(current+1)).toRawUTF8()));
-            require(active && active->getToggleState() && int(display->getProperties()["page_index"])==int(current),"cyclic and direct page selectors disagree");
+            require(active && active->getToggleState() && int(display->getProperties()["page_index"])==int(current),"numbered page selection disagrees with bindings");
             for(unsigned i=0;i<pages;++i) {
                 auto* button=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(i+1)).toRawUTF8()));
                 require(button->getToggleState()==(i==current),"more than one page selector is active");
@@ -207,10 +217,10 @@ static void check_fader_limits() {
                 }
                 ++checked;
             }
-            if(current+1<pages) page->onClick();
+            if(current+1<pages) next_page(*editor);
         }
     }
-    p.setCurrentProgram(6);while(int(display->getProperties()["page_index"])!=0) page->onClick();
+    p.setCurrentProgram(6);while(int(display->getProperties()["page_index"])!=0) next_page(*editor);
     auto* crossover=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_3"));require(crossover && crossover->isEnabled(),"Crossover limit fixture missing");
     crossover->setValue(0,juce::sendNotificationSync);crossover->setValue(252,juce::sendNotificationSync);
     require(display->getName().endsWith("19.0 kHz"),"last finite XL Crossover value was lost");
@@ -219,7 +229,7 @@ static void check_fader_limits() {
         require(display->getName().endsWith("INF kHz") && p.state.getRawParameterValue("xl_02")->load()==value,
             "XL infinite frequency display changed control value or remained dashes");
     }
-    p.setCurrentProgram(11);while(int(display->getProperties()["page_index"])!=0) page->onClick();
+    p.setCurrentProgram(11);while(int(display->getProperties()["page_index"])!=0) next_page(*editor);
     auto* decay=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_1"));require(decay && decay->isEnabled(),"decay limit fixture missing");
     decay->setValue(0,juce::sendNotificationSync);decay->setValue(decay->getMaximum(),juce::sendNotificationSync);
     require(display->getName().endsWith("INF s"),"XL infinite decay was displayed as an unavailable parameter");
@@ -887,20 +897,33 @@ static void check_xl() {
     auto* badge=dynamic_cast<juce::Button*>(find(*editor,"firmware"));
     require(algorithms && bool(algorithms->onClick) && algorithms->getParentComponent()==find(*editor,"display") && badge && badge->getButtonText()=="224 XL","unified XL UI missing");
     require(find(*editor,"xl_slot_1")->isVisible() && !find(*editor,"bass")->isVisible(),"XL fader binding failed");
-    auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page"));
+    auto* dynamic=dynamic_cast<juce::Button*>(find(*editor,"xl_dynamic_decay"));
+    auto* optimization=dynamic_cast<juce::Button*>(find(*editor,"decay_opt"));
+    require(dynamic && dynamic->isVisible() && dynamic->isEnabled() && optimization && optimization->isEnabled(),"XL dynamics switches unavailable");
+    dynamic->onClick();require((p->xlControl(42)&1)!=0,"dynamic switch did not update logical control");
+    set(*p,"decay_opt",0);require(p->saveBankPreset("Dynamics",false,bank).wasOk(),"dynamic preset save failed");
+    dynamic->onClick();set(*p,"decay_opt",1);
+    require(p->loadBankPreset("Dynamics",bank).wasOk() && (p->xlControl(42)&1)!=0 &&
+        p->state.getRawParameterValue("decay_opt")->load()==0 && !p->presetModified(),"dynamic switches did not round trip through preset");
+    juce::MemoryBlock dynamic_session;p->getStateInformation(dynamic_session);NativeHallProcessor dynamic_restored;
+    dynamic_restored.setStateInformation(dynamic_session.getData(),int(dynamic_session.getSize()));
+    require((dynamic_restored.xlControl(42)&1)!=0 && dynamic_restored.state.getRawParameterValue("decay_opt")->load()==0,"DAW session lost dynamic switches");
+    require(p->loadBankPreset("XL",bank).wasOk(),"dynamic fixture restoration failed");
+    auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_1"));
     require(page && page->isEnabled() && p->parameterPages()==5,"XL pages unavailable");
     const float saved_lf=p->state.getRawParameterValue("xl_00")->load();
-    page->onClick();
+    next_page(*editor);
     require(int(find(*editor,"display")->getProperties()["page_index"])==1 &&
         find(*editor,"xl_slot_3")->getProperties()["parameter_id"]=="xl_chorus","XL page control rebinding failed");
     auto* chorus=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_3"));
     chorus->setValue(72,juce::sendNotificationSync);
     require(p->state.getRawParameterValue("xl_chorus")->load()==9 && p->state.getRawParameterValue("xl_00")->load()==saved_lf,"XL fader wrote the wrong page parameter");
-    page->onClick();page->onClick();page->onClick();
+    next_page(*editor);next_page(*editor);next_page(*editor);
     auto* size=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_1"));
     require(size->getProperties()["parameter_id"]=="xl_43","XL Size binding targets marker rather than logical Size");
     require(!find(*editor,"xl_slot_2")->isEnabled(),"XL inactive slot is enabled");
-    page->onClick();
+    require(find(*editor,"xl_slot_3")->isEnabled(),"XL reverb stop delay unavailable");
+    next_page(*editor);
     require(p->loadBankPreset("XL",bank).wasOk(),"XL page fixture reset failed");
     for(int rate:{44100,48000,96000}) {
         p->setCurrentProgram(2);reference->setCurrentProgram(2);
@@ -1185,7 +1208,7 @@ int main(int argc,char** argv) {
             while(juce::Time::getMillisecondCounterHiRes()<end) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
         }
         if(argc==5 && (std::string(argv[4])=="detail" || std::string(argv[4])=="last")) {
-            const auto id=std::string(argv[4])=="last" ? "parameter_page_"+std::to_string(p.parameterPages()) : "parameter_page";
+            const auto id=std::string(argv[4])=="last" ? "parameter_page_"+std::to_string(p.parameterPages()) : "parameter_page_2";
             auto* button=dynamic_cast<juce::Button*>(find(*editor,id.c_str()));
             require(button!=nullptr,"Page button missing");button->onClick();
             const auto end=juce::Time::getMillisecondCounterHiRes()+400;

@@ -2,13 +2,14 @@
 #include "concert.hpp"
 #include "diffusion.hpp"
 #include "controls.hpp"
+#include "dynamics.hpp"
 #include "../core/profile.hpp"
 #include <cstring>
 #include <cstdio>
 
 namespace cineol::xl {
 // Local, immutable coefficients, offsets, control metadata and modulation data.
-// Version 3 prepares every native graph and semantic control descriptors.
+// Version 4 adds prepared level-following control clocks and initial state.
 // Runtime control integration is validated separately from bank preparation.
 struct ProgramData {
     ControlProfile controls{};
@@ -32,6 +33,8 @@ struct ProgramData {
     DiffusionProfile diffusion{};
     uint8_t chorus=16,diffusion_index=16;
     uint8_t predelay_base=0;
+    DynamicsProfile dynamics{};
+    DynamicsState initial_dynamics{};
     unsigned predelay_maximum(const std::array<uint8_t,48>& raw) const noexcept {
         const unsigned length=controls.layout(raw).lengths[1];
         const unsigned available=uint16_t(0xfff6-length);
@@ -53,6 +56,12 @@ struct ProgramData {
         const auto& page=pages[page_index];const unsigned cell=page.cells[slot];
         if(cell>=48) return {};
         auto result=page.values[slot][raw[cell]];
+        const unsigned stop=dynamics.shared_stop?6:12;
+        if(dynamics.enabled && (cell==stop || cell==stop+1)) {
+            if(raw[cell]>=253) std::snprintf(result.data(),result.size(),"-- s");
+            else std::snprintf(result.data(),result.size(),"%.1f s",controls.decay_duration(raw[cell],0,raw)*0.1);
+            return result;
+        }
         for(const auto& control:controls.slots) if(control.cell==cell &&
             (control.kind==ControlKind::low_decay || control.kind==ControlKind::mid_decay)) {
             if(raw[cell]>=253) std::snprintf(result.data(),result.size(),"-- s");
@@ -68,6 +77,9 @@ struct ProgramData {
     }
     bool control_active(unsigned cell) const noexcept {
         if(cell>=48) return false;
+        if(cell==45) return dynamics.enabled;
+        if((dynamics.shared_stop && (cell==6 || cell==7)) ||
+            (!dynamics.shared_stop && (cell==12 || cell==13))) return dynamics.enabled;
         if(size_cell(cell)) return controls.size.enabled;
         for(const auto& slot:controls.slots) if(slot.cell==cell) {
             if(slot.kind==ControlKind::chorus) return (modulation.flags&15)!=0;
@@ -87,7 +99,7 @@ struct ProgramData {
             if(page.names[slot].back() || page.factory_values[slot].back()) return false;
             for(const auto& value:page.values[slot]) if(value.back()) return false;
         }
-        return controls.valid(rows) && modulation.valid(rows) && initial_modulation.valid() && diffusion.valid(rows) &&
+        return dynamics.valid() && controls.valid(rows) && modulation.valid(rows) && initial_modulation.valid() && diffusion.valid(rows) &&
             chorus<32 && diffusion_index<64 && diffusion.half_scale && !diffusion.separate_stop;
     }
     template<Graph graph> typename Network<graph>::Settings settings() const noexcept {
@@ -105,7 +117,7 @@ struct Bank {
 };
 struct BankHeader {
     char magic[8]={'B','X','L','8','2','1',0,0};
-    uint32_t version=3,size=sizeof(Bank),checksum=0;
+    uint32_t version=4,size=sizeof(Bank),checksum=0;
 };
 inline bool read_bank(const void* data,size_t size,Bank& result) noexcept {
     if(!data || size!=sizeof(BankHeader)+sizeof(Bank)) return false;

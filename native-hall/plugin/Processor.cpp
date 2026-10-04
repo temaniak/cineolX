@@ -159,7 +159,7 @@ void NativeHallProcessor::applyControls(const std::array<float,parameter_count>&
         if(data.chorus_page) controls[data.pages[data.chorus_page-1].cells[data.chorus_slot]]=uint8_t(unsigned(v[15])*8);
         if(data.diffusion_page) controls[data.pages[data.diffusion_page-1].cells[data.diffusion_slot]]=uint8_t(unsigned(v[16])*4);
         data.resolve_controls(controls);
-        slots_[active_slot_].xl_engine.controls(controls,v[10]>=0.5f,v[7],v[8],clean,int(v[12]),int(v[13]));
+        slots_[active_slot_].xl_engine.controls(controls,v[10]>=0.5f,v[7],v[8],clean,int(v[12]),int(v[13]),v[11]>=0.5f);
     }
     else {
         native_hall::Parameters p;

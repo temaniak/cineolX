@@ -375,3 +375,55 @@ and their executable hashes matched the build. Previous installations are
 retained in build/install-backups/20261004-143509-focus-fix-v0.9.5.
 Installed Audio Unit validation passed. Plugin identifiers, parameter IDs,
 sound processing, Daisy files and dependency checkouts are unchanged.
+
+## Native XL dynamics update after the published 0.9.5 release
+
+The desktop source now implements XL Dynamic Decay/gating, LF/MID STOP DECAY,
+REV STOP DLY and Decay Optimization. The existing Decay Opt switch selects the
+appropriate controller for original 224 or XL. Dynamic Decay uses the existing
+`xl_42` logical control's dynamic bit; both switches and the stop parameters
+belong to format-4 sound presets and DAW state. No parameter ID or host index
+was added or reordered. Daisy processing is unchanged.
+
+The native controller measures the input headroom and the graph's transfer
+output, follows a logarithmic peak, recognizes falls and retriggers, counts the
+stop delay, compiles the effective LF/MID decay and adjusts feedback diffusion.
+Decay and feedback have distinct commit boundaries. Fixed-size state and
+rational clocks use nominal call rates measured during offline ROM import;
+audio never interprets a CPU or loads ROMs. The CD Plates retain the firmware's
+zero-valued 256-tick optimization divider. Non-reverb Chorus/Echo, Resonant
+Chords and Multiband Delay do not expose reverb dynamics.
+
+The version-4 prepared XL cache adds controller metadata and initial state.
+Upgrading from the published version requires one new import of the user's
+complete original 224XL v8.21 ROM set. The old XL cache is retained; the
+original 224 v4.4 cache and existing presets remain compatible.
+
+Dynamic Decay occupies the former Page n/n cell in the red header, beside
+Mod Enh and Decay Opt. Numbered page selectors provide all page navigation.
+The permanent column boundaries, typography and fader alignment are retained.
+Quick preset keys no longer draw hover/focus underlines; selection uses the LED.
+
+The independent `cineol_xl_dynamics_check` compares slow and fast controller
+transitions and committed decay/feedback coefficients with the private v8.21
+firmware. It exercises all four switch combinations, pulse/drop/retrigger
+levels and a nonzero stop delay. Separate 48 kHz native renders verify that
+both switches change the tail, keep output finite and allocate/release no
+memory. The full plugin checks cover presets/session recall, numbered pages,
+all 28 algorithms at 44.1/48/96 kHz and host block-size independence.
+These checks establish native control behavior; they do not establish exact
+physical hardware timing or an auditory match to a particular hardware unit.
+For listening, compare a sustained input and a stopped input with Dynamic
+Decay on/off, shorten STOP DECAY, vary REV STOP DLY, compare Decay Opt on/off,
+and recall the same settings through a saved preset.
+
+On 2026-10-04 the complete dynamics oracle passed for all 19 reverb programs
+and all four switch combinations. The three other XL effects have no reverb
+dynamics. Native audio checks passed for all 19 reverbs with finite output and
+zero allocations/releases. Full plugin regression passed all 28 algorithms,
+618 active fader endpoints, preset/session recall and block independence at
+44.1/48/96 kHz. The signed universal AU, VST3 and standalone were installed,
+their executable hashes matched the build, and installed AU validation passed.
+The user's existing v3 cache was preserved beside the new private v4 cache.
+The README screenshots show the actual updated editor. Listening in the host
+remains necessary to assess the musical behavior and hardware similarity.

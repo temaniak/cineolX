@@ -376,11 +376,11 @@ public:
         addAndMakeVisible(preset);preset.setBounds(12,18,910,50);
         addAndMakeVisible(save);save.setBounds(944,18,52,52);
         addAndMakeVisible(algorithm);algorithm.setBounds(12,87,608,38);
+        addAndMakeVisible(dynamic);dynamic.setBounds(display_global_x,82,140,56);dynamic.setClickingTogglesState(true);
+        dynamic.setTitle("XL Dynamic Decay");dynamic.setTooltip("Use STOP DECAY after a falling input level; REV STOP DLY sets the hold time. Saved in presets.");
         algorithm.setTooltip("Choose an algorithm. Selection switches its engine and clears the tail.");
         addAndMakeVisible(firmware);firmware.setBounds(display_global_x+2*global_fader_step,8,140,56);
         firmware.setTooltip("Engine used by the selected algorithm. Click to import ROMs.");
-        addAndMakeVisible(page);page.setBounds(display_global_x,82,140,56);
-        page.setTooltip("Next parameter page. Page changes preserve settings and the tail.");
         for(unsigned i=0;i<outputs.size();++i) {addAndMakeVisible(outputs[i]);outputs[i].setBounds(display_global_x+int(i)*global_fader_step,8,140,56);}
         for(unsigned i=0;i<modes.size();++i) {addAndMakeVisible(modes[i]);modes[i].setBounds(display_global_x+int(i+1)*global_fader_step,82,140,56);modes[i].setClickingTogglesState(true);}
         for(unsigned i=0;i<page_buttons.size();++i) {
@@ -429,9 +429,10 @@ public:
     }
     PresetButton preset;
     SavePresetButton save;
-    LedButton firmware{"firmware",2.5f,true,"MODEL"},page{"parameter_page",2.5f,true,"PAGE"},algorithm{"algorithm",4.5f,false};
+    LedButton firmware{"firmware",2.5f,true,"MODEL"},algorithm{"algorithm",4.5f,false};
     std::array<LedButton,2> outputs{LedButton{"output_l",2.5f,true,"LEFT"},LedButton{"output_r",2.5f,true,"RIGHT"}};
     std::array<LedButton,2> modes{LedButton{"mode_enh",2.5f,true,"MOD ENH"},LedButton{"decay_opt",2.5f,true,"DECAY OPT"}};
+    LedButton dynamic{"xl_dynamic_decay",2.5f,true,"DYN DECAY"};
     std::array<LedButton,9> page_buttons{LedButton{"parameter_page_1",4.0f},LedButton{"parameter_page_2",4.0f},
         LedButton{"parameter_page_3",4.0f},LedButton{"parameter_page_4",4.0f},LedButton{"parameter_page_5",4.0f},
         LedButton{"parameter_page_6",4.0f},LedButton{"parameter_page_7",4.0f},LedButton{"parameter_page_8",4.0f},LedButton{"parameter_page_9",4.0f}};
@@ -533,7 +534,6 @@ public:
         g.drawText(juce::String(slot_+1),cap.translated(0,-8),juce::Justification::centred);
         g.setFont(font(18));g.setColour(ink);
         g.drawFittedText(preset_.isEmpty()?"Empty":preset_,0,162,getWidth(),28,juce::Justification::centredTop,1,0.8f);
-        if(hasKeyboardFocus(true) || (over && isEnabled())) {g.setColour(ink.withAlpha(0.6f));g.drawHorizontalLine(188,30,float(getWidth()-30));}
     }
 private:
     unsigned slot_=0;
@@ -839,7 +839,6 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
         display_.setBounds(variable_fader_x,100,1512,240);
         display_.algorithm.onClick=[this]{showAlgorithms();};
         page_=processor_.editorPage();
-        display_.page.onClick=[this]{changePage((page_+1)%int(processor_.parameterPages()));};
         for(unsigned i=0;i<display_.page_buttons.size();++i) display_.page_buttons[i].onClick=[this,i]{changePage(int(i));};
         display_.firmware.onClick=[this]{rom_setup_.openChooser();};
         display_.preset.onClick=[this]{showPresets();};
@@ -902,6 +901,14 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
             button_attachments_[i]=std::make_unique<ButtonAttachment>(processor_.state,id,button);
             button.onStateChange=[this]{refreshDisplay();};
         }
+        dynamic_attachment_=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("xl_42"),
+            [this](float){refreshDisplay();});
+        display_.dynamic.onClick=[this] {
+            // Keep the existing logical control ID and every DAW parameter
+            // index. The dynamic bit already belongs to sound presets.
+            const uint8_t raw=processor_.xlControl(42);
+            dynamic_attachment_->setValueAsCompleteGesture(float(raw^1));refreshDisplay();
+        };
         dirt_.setLookAndFeel(&look_);dirt_.setComponentID("dirt");dirt_.setName("Dirt");dirt_.setTitle("Dirt");
         dirt_.setSliderStyle(juce::Slider::LinearVertical);dirt_.setRange(0,1,0.001);dirt_.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);
         dirt_.setSliderSnapsToMousePosition(false);dirt_.setDoubleClickReturnValue(true,0);dirt_.connect(processor_);
@@ -1153,16 +1160,19 @@ private:
         }
         display_.updateSlots(names,values);
         if(xl) display_.update(program,processor_.getProgramName(program),names[focused_xl_slot_],values[focused_xl_slot_]);
-        display_.page.setButtonText("PAGE "+juce::String(page_+1)+"/"+juce::String(processor_.parameterPages()));
         display_.updatePages(processor_.parameterPages(),unsigned(page_),processor_.ready());
         display_.getProperties().set("page_index",page_);
         for(unsigned i=0;i<2;++i) {
             const auto* parameter=processor_.state.getParameter(NativeHallProcessor::ids[12+i]);
             display_.outputs[i].setButtonText(juce::String(i==0?"LEFT ":"RIGHT ")+juce::String::charToString(char('A'+int(parameter->convertFrom0to1(parameter->getValue())))));
             const auto* data=processor_.xlProgram();
-            const bool unavailable=xl && (i==1 || !data || !(data->modulation.flags&15));
+            const bool unavailable=xl && (!data || (i==0?!(data->modulation.flags&15):!data->dynamics.enabled));
             display_.modes[i].setButtonText(juce::String(i==0?"MOD ENH ":"DECAY OPT ")+(unavailable?juce::String("--"):display_.modes[i].getToggleState()?juce::String("ON"):juce::String("OFF")));
         }
+        display_.dynamic.setToggleState((processor_.xlControl(42)&1)!=0,juce::dontSendNotification);
+        const auto* dynamics_data=processor_.xlProgram();
+        const bool dynamics_available=xl && dynamics_data && dynamics_data->dynamics.enabled;
+        display_.dynamic.setButtonText(juce::String("DYN DECAY ")+(dynamics_available?(display_.dynamic.getToggleState()?"ON":"OFF"):"--"));
     }
     void refreshProgram() {
         const int program=processor_.getCurrentProgram();
@@ -1184,7 +1194,6 @@ private:
         if(const auto* data=processor_.xlProgram()) synchronizeXL(*data);
         for(unsigned slot=0;slot<6;++slot) parked_[slot].setVisible(!xl && page_==1 && slot!=4);
         if(engine_changed) for(unsigned slot=0;slot<6;++slot) slotFader(slot).animateFrom(positions[slot]);
-        display_.page.setEnabled(ready && processor_.parameterPages()>1);
         // The unified list remains accessible so a missing bank cannot trap the UI.
         display_.algorithm.setEnabled(processor_.programAvailable(0) || processor_.programAvailable(6));
         display_.preset.setEnabled((processor_.programAvailable(0) || processor_.programAvailable(6)) && !preset_dialog_open_);
@@ -1192,8 +1201,9 @@ private:
         for(auto& output:display_.outputs) output.setEnabled(ready);
         dirt_.setEnabled(ready);
         const auto* data=processor_.xlProgram();
-        for(unsigned i=0;i<display_.modes.size();++i) display_.modes[i].setEnabled(ready && (!xl || (i==0 && data && (data->modulation.flags&15))));
-        display_.modes[1].setTooltip(xl?"Decay Optimization is pending in the native XL preview.":"Decay Optimization");
+        for(unsigned i=0;i<display_.modes.size();++i) display_.modes[i].setEnabled(ready && (!xl || (data && (i==0?(data->modulation.flags&15):data->dynamics.enabled))));
+        display_.modes[1].setTooltip("Decay Optimization: adapts feedback diffusion during the decay. Saved in presets.");
+        display_.dynamic.setEnabled(ready && xl && data && data->dynamics.enabled);
         if(program!=displayed_program_) {
             displayed_program_=program;
             sliders_[6].setTooltip(program==3?"Acoustic Chamber does not use Diffusion.":
@@ -1230,6 +1240,7 @@ private:
     std::array<MotorFader,9> sliders_;
     std::array<MotorFader,6> parked_;
     std::array<MotorFader,6> xl_sliders_;
+    std::unique_ptr<juce::ParameterAttachment> dynamic_attachment_;
     std::array<std::unique_ptr<juce::ParameterAttachment>,6> xl_attachments_;
     bool binding_xl_=false,bound_ready_=false;
     std::array<bool,6> xl_dragging_{};

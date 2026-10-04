@@ -1,6 +1,7 @@
 #pragma once
 #include "concert.hpp"
 #include "analog_xl48.hpp"
+#include "dynamics.hpp"
 #include "../core/engine48.hpp"
 #include <numeric>
 
@@ -24,6 +25,7 @@ public:
         for(auto& filter:input_) filter.prepare(true);
         for(auto& filter:output_) filter.prepare(false);
         fifo_.fill({});dry_.fill({});raw_delay_.fill({});raw_hold_.fill(0);
+        control_profile_=nullptr;
         read_=write_=position_=0;gain_=gain_target_=mix_=mix_target_=analog_=analog_target_=1;
         left_=0;right_=2;wet_fade_=1;return true;
     }
@@ -32,11 +34,26 @@ public:
     // only state and fixed delay storage, retaining the precomputed kernels.
     bool activate(const Settings& settings) noexcept {
         if(!concert_.prepare(settings)) return false;
+        control_profile_=nullptr;
         down_.reset();up_.reset();for(auto& f:input_) f.reset();for(auto& f:output_) f.reset();
         fifo_.fill({});dry_.fill({});raw_delay_.fill({});raw_hold_.fill(0);read_=write_=position_=0;wet_fade_=0;
         return true;
     }
     void set_controls(const Settings& settings) noexcept {concert_.set_controls(settings);}
+    void set_dynamics(const DynamicsProfile& profile,const DynamicsState& initial) noexcept {
+        dynamics_profile_=profile;dynamics_.reset(initial);slow_clock_=fast_clock_=0;
+    }
+    void set_native_controls(const Settings& base,const ControlProfile& controls,const std::array<uint8_t,48>& raw,
+        bool optimization) noexcept {
+        const bool dynamic=(raw[42]&1)!=0;
+        bool update_decay=control_profile_!=&controls || dynamic!=dynamic_enabled_;
+        for(unsigned cell:{0u,1u,6u,7u,12u,13u,43u,44u}) update_decay|=raw[cell]!=control_values_[cell];
+        control_profile_=&controls;control_base_=base;control_values_=raw;
+        dynamic_enabled_=dynamic;optimization_enabled_=optimization;
+        dynamics_.parameters(dynamics_profile_,controls,raw,dynamic_enabled_,optimization,update_decay);
+        compile_dynamics();
+    }
+    const DynamicsState& dynamics_state() const noexcept {return dynamics_.state();}
     void set_chorus(uint8_t raw) noexcept {concert_.set_chorus(raw);}
     void enable_modulation(bool enabled) noexcept {concert_.enable_modulation(enabled);}
     void set_diffusion(const DiffusionProfile& profile,uint8_t index) noexcept {concert_.set_diffusion(profile,index);}
@@ -64,6 +81,21 @@ public:
                 words[c]=int16_t(std::lround(bare+analog_*(float(clean)-bare)));
             }
             int16_t output[4];concert_.process(words[0],words[1],output);
+            if(control_profile_ && dynamics_profile_.enabled) {
+                dynamics_.observe(input[0],input[1],concert_.control_output());
+                bool changed=false;
+                fast_clock_+=dynamics_profile_.fast_rate_tenths*Core::rate_denominator;
+                if(fast_clock_>=Core::rate_numerator*10) {
+                    fast_clock_-=Core::rate_numerator*10;
+                    changed|=dynamics_.fast_poll(dynamics_profile_,*control_profile_,control_values_);
+                }
+                slow_clock_+=dynamics_profile_.slow_rate_tenths*Core::rate_denominator;
+                if(slow_clock_>=Core::rate_numerator*10) {
+                    slow_clock_-=Core::rate_numerator*10;
+                    changed|=dynamics_.slow_poll(dynamics_profile_,*control_profile_,control_values_,dynamic_enabled_,optimization_enabled_);
+                }
+                if(changed) compile_dynamics();
+            }
             float samples[4];
             for(unsigned c=0;c<4;++c) samples[c]=raw_hold_[c]=native_hall::Engine48::dac(output[c])/32768.0f;
             up_.process(samples,[&](const float* upsampled) {
@@ -84,6 +116,22 @@ public:
     }
     const Core& concert() const noexcept {return concert_;}
 private:
+    void compile_dynamics() noexcept {
+        auto effective=control_values_;effective[0]=dynamics_.state().low;effective[1]=dynamics_.state().mid;
+        auto settings=control_base_;control_profile_->apply_size(settings,control_values_);
+        control_profile_->apply_static(settings,effective,dynamics_.state().amount);
+        // A decay compile and a feedback compile have distinct controller
+        // boundaries. Preserve the last committed feedback between them.
+        effective[1]=dynamics_.state().feedback_mid;
+        control_profile_->apply_feedback(settings,effective,dynamics_.state().feedback_amount);concert_.set_controls(settings);
+    }
+    DynamicsProfile dynamics_profile_{};
+    Dynamics dynamics_;
+    const ControlProfile* control_profile_=nullptr;
+    Settings control_base_{};
+    std::array<uint8_t,48> control_values_{};
+    uint32_t slow_clock_=0,fast_clock_=0;
+    bool dynamic_enabled_=false,optimization_enabled_=false;
     Core concert_;
     native_hall::RationalFilter<down_num,down_den,64,2> down_;
     native_hall::RationalFilter<down_den,down_num,32,4> up_;

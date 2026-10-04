@@ -26,8 +26,8 @@ Changes since the previous published release, 0.6.0:
 
 Spillover and quick presets are desktop features. This release's UI and transition
 changes leave Daisy processing unchanged. Plugin identifiers and existing
-parameter IDs remain stable. The XL preview's pending dynamic-decay controls
-are disabled; it does not claim complete hardware equivalence.
+parameter IDs remain stable. The published 0.9.5 archive predates the native
+XL dynamics update described below.
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
@@ -102,7 +102,7 @@ clears the previous reverb tail immediately. The desktop-only Spillover option
 preserves it with a timed fade. Pre-delay changes can produce a transient.
 
 The expanded red display has six labels aligned with the six variable faders.
-Click **Page 1/2** / **Page 2/2**, or a numbered page selector, to switch pages. Main contains
+Click a numbered selector beside the algorithm name to switch pages. Main contains
 Bass, Mid, Crossover, Treble, Depth and Pre-delay; Detail places Diffusion in
 slot five. Unused slots are disabled and their caps park at the bottom, with
 `--` on the display. Parking never writes a parameter minimum. Page changes
@@ -140,15 +140,25 @@ levels, delays, pan, feedback and Size where used. Size updates the decay-time
 labels and available variable pre-delay range. Inactive controls are parked,
 dark and marked `--`. XL's unbounded upper frequency/decay display values are
 shown as `INF` with their units, so an active fader at its limit does not look
-unavailable. Dynamic decay, its stop controls, the stop delay and
-Decay Optimization remain pending and disabled. Mode Enhancement is available
-only for algorithms with modulation taps. This is a native control preview,
-not a claim of complete hardware equivalence.
+unavailable. The current source build enables **Dynamic Decay**, LF/MID
+**STOP DECAY**, **REV STOP DLY**, and **Decay Optimization** for XL reverb
+algorithms. Dynamic Decay switches to the stop decay times after the input
+level falls; shorter stop times produce gated tails. REV STOP DLY holds the
+normal decay before that change. The existing **Decay Opt** switch controls
+the selected engine, including original 224 and XL, and adapts feedback
+diffusion during decay. Both switches and every stop setting are saved in
+presets and DAW sessions. Mode Enhancement is available for algorithms with
+modulation taps; reverb dynamics are unavailable on the three non-reverb
+effects, matching their firmware controls. Arithmetic and controller checks
+do not establish complete hardware equivalence.
 
 Numbered selectors beside the algorithm name jump directly to a parameter page;
-the selected page is bright and other numbers are dim. The **Page n/n** control
-also cycles through pages. The right header uses **Left / Right / Model** above
-**Page / Mod Enh / Decay Opt**, aligned with the three permanent fader columns.
+the selected page is bright and other numbers are dim. These numbered buttons
+are the only page selectors in the current source build. The right header uses
+**Left / Right / Model** above **Dyn Decay / Mod Enh / Decay Opt**, aligned with
+the three permanent fader columns. Dynamic Decay replaces the duplicate
+**Page n/n** button, keeping the existing header geometry. Quick preset keys use their LEDs for selection and have
+no hover or selection underline.
 The settings gear uses colour feedback without an enclosing frame.
 
 Preset format 4 records the firmware identity and every parameter,
@@ -160,8 +170,8 @@ The red display includes a **Preset** selector and a disk-shaped **Save preset**
 button. Preset and algorithm names occupy the left side of the display; the
 large numeric program indicator has been removed to give these names more room.
 Long preset names scroll at a fixed text size, with a two-second pause at each
-end. The upper-right display area contains output A–D selection, Mode Enhancement,
-Decay Optimization, engine identity and page navigation.
+end. The upper-right display area contains output A–D selection, Dynamic Decay,
+Mode Enhancement, Decay Optimization and engine identity.
 **Save preset** asks only for a name and adds the current settings to
 one managed user preset bank. Click the preset name to open the themed browser:
 all presets appear in one alphabetical list, with their algorithm/model beside
@@ -283,7 +293,7 @@ On macOS the resulting cache is stored at:
 
 ```text
 ~/Library/Application Support/Cineol-X 224/programs-v44-import-v1.bank224
-~/Library/Application Support/Cineol-X 224/programs-v821-native-v3.bankxl
+~/Library/Application Support/Cineol-X 224/programs-v821-native-v4.bankxl
 ```
 
 Later launches use that cache without asking for the original files. A corrupt
@@ -554,19 +564,24 @@ page and global setting as one complete audio update.
 
 ![Cineol-X 224 XL preview](docs/images/cineol-x-224-xl.png)
 
-Dynamic decay/gating, Decay Optimization and the associated stop controls remain
-pending. These controls are disabled rather than presented as working switches.
-Daisy continues to use the original-224 engine.
+The current source build includes native XL dynamic decay/gating, stop controls
+and Decay Optimization. A new version-4 prepared XL bank stores their initial
+state and measured control clocks. **Import your original 224XL v8.21 ROM set
+once again when upgrading from the published 0.9.5 build**; the previous
+version-3 cache is retained and the original 224 v4.4 cache is unchanged.
+Presets keep format 4 and existing DAW parameter IDs/indices. Daisy continues
+to use the original-224 engine.
 
 With your own complete ROM set, build and run the independent checks:
 
 ```sh
-cmake --build build/plugin --target cineol_xl_concert_check cineol_xl_graphs_check cineol_xl_controls_check cineol_xl_display_check
+cmake --build build/plugin --target cineol_xl_concert_check cineol_xl_graphs_check cineol_xl_controls_check cineol_xl_display_check cineol_xl_dynamics_check
 build/plugin/native-hall/cineol_xl_concert_check '/path/to/224XL-v8.21-ROMs'
 build/plugin/native-hall/cineol_xl_graphs_check '/path/to/224XL-v8.21-ROMs'
 build/plugin/native-hall/cineol_xl_extract '/path/to/224XL-v8.21-ROMs' '/private/path/programs.bankxl'
 build/plugin/native-hall/cineol_xl_controls_check '/path/to/224XL-v8.21-ROMs' '/private/path/programs.bankxl'
 build/plugin/native-hall/cineol_xl_display_check '/path/to/224XL-v8.21-ROMs' '/private/path/programs.bankxl'
+build/plugin/native-hall/cineol_xl_dynamics_check '/path/to/224XL-v8.21-ROMs' '/private/path/programs.bankxl'
 build/plugin/native_hall_plugin_check_artefacts/Release/native_hall_plugin_check --banks '/private/path/programs.bank224' '/private/path/programs.bankxl'
 ```
 
