@@ -288,3 +288,66 @@ Signed universal arm64/x86_64 version 0.9.4 was installed as AU, VST3 and standa
 on 2026-10-04. The installer verified all three bundles and saved version 0.9.3 in
 `build/install-backups/7ad5917b4121426cb1c638fca159e6d4`. Installed Audio Unit
 validation passed.
+
+## Desktop spillover (v0.9.5)
+
+The plugin Settings panel adds an optional Spillover toggle and a 1–10 second
+duration selector on the same row (default 5 seconds). Two complete runtimes are prepared before
+processing. Algorithm changes retain the old runtime's memory, controls and
+output pair, transfer input over 5 ms and fade its wet output with a smooth
+amplitude envelope. A shared dry delay avoids interruptions or doubled dry audio.
+
+Only one outgoing tail is retained. Another algorithm selection retires the
+oldest tail within 20 ms before reusing its runtime, bounding processing to two
+active algorithms. These instance options are saved in DAW state and excluded
+from sound presets. Old sessions restore the original hard-switch default.
+Disabling spillover smoothly retires any existing tail; subsequent switches use
+the original path. No Daisy files, DSP kernels or dependency pins are changed.
+
+The offline plugin check compares 1/5/10 second fades against independent old
+and new processor instances. It checks 224/XL/split transitions, rapid changes,
+turning the option off, shared dry continuity, low latency, mono/stereo,
+44.1/48/96 kHz, different host block sizes and zero callback allocations/releases.
+These checks do not establish DAW realtime CPU margin or replace listening tests.
+
+## Desktop quick preset keys (v0.9.5)
+
+Eight numbered keyboard-style keys occupy an extended lower faceplate. The
+logical panel is 1640 × 1240, with the upper display and faders unchanged and the
+bottom frame and mounting screws moved below the keys. A newly generated
+full-size faceplate preserves uniform photographic grain across the entire
+panel, with no stretched bands or joins. Keys use a shared transparent photograph
+of a rounded ivory plastic keycap with no enclosing frames. Each key has a preset
+caption and red current-preset indicator; editing sound parameters clears it.
+
+The preset browser adds Assign to... beside Load preset. Its eight-slot menu
+shows the existing assignments. Selecting a slot replaces its name reference
+without loading sound or notifying audio parameters. A populated key recalls
+the named preset through the existing atomic preset application, including
+224/XL engine changes and optional spillover. Empty slots are inactive. A
+missing or unavailable preset reports an error and preserves current sound.
+
+Mappings and the last selected key are instance metadata stored in DAW state,
+not new host parameters or sound-preset data. Old sessions restore empty slots.
+Named bank entries are resolved on each recall, so replacing a bank preset also
+updates its assigned keys. The feature performs no file I/O in audio processing
+and does not modify Daisy builds or either DSP implementation.
+
+Final UI review removed the lower horizontal seam and decorative rules beside
+QUICK PRESETS. The faceplate now stays visually continuous into the key row.
+
+Validation passed for eight-slot assignment/replacement, canonical bank names,
+224/XL quick recall, host state-change notifications without parameter events,
+DAW state round trips and legacy-session empty slots, unchanged instance
+options, current bank contents and failed-load sound preservation. A separate
+macOS GUI check exercised the actual eight-item assignment menu, its captured
+selection and quick-key click/indicator behavior. Full plugin regression
+covered all 28 algorithms, 575 fader endpoints and spillover at 44.1/48/96 kHz;
+audio callbacks retained zero allocations and releases. Final editor and
+browser snapshots are in docs/images/cineol-x-224-quick-*.png.
+
+Signed universal arm64/x86_64 version 0.9.5 was installed as AU, VST3 and
+standalone on 2026-10-04. The installer verified signatures and executable
+hashes, retaining the previous bundles in
+build/install-backups/20261004-123543-quick-presets-v0.9.5. Installed Audio Unit
+validation passed. Dependency checkouts and Daisy/core files remain unchanged.

@@ -2,7 +2,7 @@
 
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
 the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
-preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.4**, with the metal-panel artwork, 21-mark fader scales
+preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.5**, with the metal-panel artwork, 21-mark fader scales
 and six page-bound faders beside permanent Dirt, Input and Mix faders.
 
 Primary repository: [temaniak/cineolX](https://github.com/temaniak/cineolX).
@@ -62,8 +62,9 @@ controls, Input, Mix and Dirt are retained.
 
 Bass/Mid labels use the original discrete time scale; they are not a promise of
 measured T60. Diffusion has no effect in Acoustic Chamber. Small and Large Hall
-B share a topology; their factory settings differ. Changing programs clears
-the previous reverb tail immediately. Pre-delay changes can produce a transient.
+B share a topology; their factory settings differ. By default, changing programs
+clears the previous reverb tail immediately. The desktop-only Spillover option
+preserves it with a timed fade. Pre-delay changes can produce a transient.
 
 The expanded red display has six labels aligned with the six variable faders.
 Click **Main 1/2** / **Detail 2/2** on the display to switch pages. Main contains
@@ -78,9 +79,10 @@ dark grey rather than translucent. Values appear only on the red display;
 the longer rails occupy the space previously used by the numeric text boxes.
 The three permanent faders on the right are Dirt, Input and Mix. Their display
 cells use the same text size as the other parameter names; no labels or values
-are repeated on the metal panel. The wider panel has no footer controls. Its lower metal band is half the original artwork height; the long faders and four corner screws retain their geometry.
-The metal faceplate uses one continuous bitmap without stitched texture bands
-or screw overlays. The red display has one shared divider and three right-side
+are repeated on the metal panel. The lower plate extends below the long faders
+to hold eight quick preset keys; the bottom mounting screws sit below that row.
+The faceplate uses one full-size photographic bitmap with uniform grain; its
+lower area is drawn into the new asset rather than stitched from stretched strips. The red display has one shared divider and three right-side
 columns aligned with Dirt, Input and Mix.
 
 Internal menus, settings and preset dialogs use a separate, evenly worn metal
@@ -130,9 +132,23 @@ to filter by one or several algorithms. Checked algorithms form a union;
 list, or use **Load preset** to recall its algorithm and settings. Filtering
 and searching do not alter audio or parameters. The browser refreshes the
 shared bank each time it opens. See the [browser preview](docs/images/cineol-x-224-preset-browser.png), with isolated demonstration presets.
+
+Eight numbered **Quick presets** keys sit on the extended lower faceplate,
+above the mounting screws. Select a preset in the browser, choose **Assign to...**,
+then choose a key from 1 to 8. Assignment replaces that key's previous preset
+without loading sound. Press a populated key to recall the preset; empty keys
+are inactive. A red indicator marks the recalled preset and clears when its
+sound settings are edited. Keys refer to named entries in the shared bank, so
+replacing a bank preset updates future recalls. Assignments are saved per plugin
+instance in DAW sessions and are excluded from sound presets. Older sessions
+restore eight empty keys. Missing or unavailable presets leave the current
+sound unchanged and display an error.
+See the [quick keys](docs/images/cineol-x-224-quick-presets.png) and
+[assignment browser](docs/images/cineol-x-224-quick-preset-browser.png) previews,
+including the [eight-slot menu](docs/images/cineol-x-224-quick-assignment-menu.png).
 Saving an existing name offers to replace it. No file or folder chooser is
 required. A preset stores its firmware, algorithm, all fader values, processing
-switches and output pair. **Low latency** remains an instance setting. The
+switches and output pair. **Low latency** and **Spillover** remain instance settings. The
 bank is stored in `Presets/User Presets.cineolbank` beside the imported ROM
 bank. Previously saved `.cineol224` presets in this default folder are adopted
 when the user bank is first saved; the original files are preserved. The preset
@@ -144,7 +160,7 @@ The fader caps then animate to their recalled positions over 320 ms, as a
 visual homage to the 960L. This motion does not interpolate the DSP parameters
 or generate extra automation events. Manual edits interrupt the animation.
 Presets using the same selected program retain the existing reverb tail;
-changing the selected program clears it. Moving between Small and Large Hall
+changing the selected program clears it unless Spillover is enabled. Moving between Small and Large Hall
 B still counts as a program change, even though they share a topology.
 Pre-delay changes retain the existing transient limitation.
 
@@ -158,14 +174,31 @@ and named **Clean Amount**; old boolean values still map to the two endpoints.
 Fractional Dirt is stored in presets and DAW state. Plugin IDs
 are retained: AU `aufx/Nh24/Rflx`, bundle ID `net.joelanders.nativehall224`.
 
-The gear in the top-right corner opens **Settings**, with room for future fine
-tuning. **Low latency** sends the dry input directly at the project sample rate
+The gear in the top-right corner opens **Settings**. **Low latency** sends the dry input directly at the project sample rate
 and reports **0 samples** of plugin latency at every supported rate. Only the
 wet signal passes through the resamplers and reverb; its filter delay and
 pre-delay remain unchanged. This changes the timing between dry and wet (by
 70 samples, about 1.46 ms, at 48 kHz). At 100% wet the DSP output is unchanged,
 but the DAW no longer compensates its delay. Audio-interface/buffer latency is
 independent of this setting.
+
+**Spillover** in Settings preserves the outgoing algorithm's wet tail while the
+new algorithm starts. The time selector on the same row sets a smooth amplitude fade from **1 to 10
+seconds**, default **5 seconds**. Spillover defaults to **off**. It works within
+224, within 224 XL and across both engines, including split algorithms. The
+old engine retains its controls and output routing; its input fades out over
+5 ms as input is transferred to the new engine. Mix remains a common control
+for the combined wet signal; the dry path is continuous and mixed once.
+
+Two preallocated runtimes bound the processing load. During a transition, both
+algorithms run, so DSP cost is approximately their sum. A new selection while
+a tail is still fading accelerates that oldest tail's fade to at most 20 ms
+before recycling its runtime; the current algorithm continues in that interval.
+Turning Spillover off also retires an audible old tail smoothly, then restores
+hard switching. Changing Tail fade applies to the next transition. Both options
+are non-automatable, saved in DAW sessions, and excluded from sound presets.
+Sessions saved before these options existed restore Spillover off and 5 seconds.
+The Daisy 224 processing path and shared DSP algorithms are unchanged.
 
 Low latency is saved per instance and defaults to **off**, including when
 loading older sessions. Existing parameter IDs and indices are unchanged.
@@ -459,8 +492,9 @@ Definition, LF/MID decay, filters, depth, levels, delays, pan, feedback and Size
 are prepared/compiled without an 8080 or ROM interpreter in audio.
 
 Selecting an algorithm switches the engine automatically. Prepared banks are
-shared and immutable; DSP state belongs to each instance. A switch clears the
-tail using fixed storage and a short wet fade-in. XL paths align to 57 internal
+shared and immutable; DSP state belongs to each instance. With Spillover off, a
+switch clears the tail using fixed storage and a short wet fade-in. With it on,
+the previous runtime fades independently while the new algorithm runs. XL paths align to 57 internal
 host samples, followed by 13 samples to share the original 224 delay of 70.
 Page changes preserve controls and the tail; preset recall publishes every
 page and global setting as one complete audio update.

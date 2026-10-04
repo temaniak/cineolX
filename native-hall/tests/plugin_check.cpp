@@ -49,8 +49,19 @@ static void check_editor() {
     auto* settings=dynamic_cast<juce::Button*>(find(*editor,"settings"));
     auto* settings_panel=find(*editor,"settings_panel");
     auto* low_latency=dynamic_cast<juce::ToggleButton*>(find(*editor,"low_latency"));
+    auto* spillover=dynamic_cast<juce::ToggleButton*>(find(*editor,"spillover"));
+    auto* duration=dynamic_cast<juce::ComboBox*>(find(*editor,"spillover_time"));
     require(dirt && bass && delay && algorithm && output && diffusion && display,"editor controls missing");
     require(settings && settings_panel && low_latency && !settings_panel->isVisible(),"Settings controls/default missing");
+    require(spillover && duration && !spillover->getToggleState() && !duration->isEnabled() &&
+            duration->getSelectedId()==5,"Spillover UI/default missing");
+    require(spillover->getBounds().getCentreY()==duration->getBounds().getCentreY() &&
+            duration->getX()>spillover->getRight(),"Spillover checkbox and time selector are not on one row");
+    spillover->setToggleState(true,juce::sendNotificationSync);duration->setSelectedId(10,juce::sendNotificationSync);
+    require(duration->isEnabled() && p.state.getRawParameterValue("spillover")->load()==1 &&
+            p.state.getRawParameterValue("spillover_time")->load()==10,"Spillover options are not attached");
+    set(p,"spillover",0);set(p,"spillover_time",5);
+    require(!duration->isEnabled(),"Spillover duration did not follow host state");
     require(find(*editor,"preset") && find(*editor,"save_preset"),"display preset controls missing");
     settings->setToggleState(true,juce::sendNotificationSync);
     require(settings_panel->isVisible(),"gear did not open Settings");
@@ -95,7 +106,7 @@ static void check_editor() {
         require(display->getName().startsWith(juce::String(program+1).paddedLeft('0',2)+" | "),"host algorithm display failed");
     }
     for(int width:{882,1029,1470}) {
-        editor->setSize(width,int(std::lround(width*1040.0/1640)));
+        editor->setSize(width,int(std::lround(width*1240.0/1640)));
         auto shot=editor->createComponentSnapshot(editor->getLocalBounds());
         require(shot.isValid() && shot.getWidth()==width,"resized editor snapshot failed");
     }
@@ -402,6 +413,52 @@ static void check_preset_bank() {
         "unavailable firmware recall changed current sound");
     std::cout<<"Preset bank: named save/replace, persistent shared listing, legacy adoption, algorithm grouping/recall, Unicode names, visual recall, validation pass\n";
 }
+static void check_quick_presets() {
+    PresetTestFiles files;NativeHallProcessor p;
+    const auto bank=files.folder.getChildFile("Quick.cineolbank");
+    p.setCurrentProgram(2);set(p,"bass",9);require(p.saveBankPreset("Quick Hall",false,bank).wasOk(),"quick Hall fixture failed");
+    p.setCurrentProgram(6);set(p,"analog",0.32f);require(p.saveBankPreset("Quick XL",false,bank).wasOk(),"quick XL fixture failed");
+    require(p.loadBankPreset("Quick Hall",bank).wasOk(),"quick baseline failed");
+    juce::MemoryBlock old_state;p.getStateInformation(old_state);
+    const auto before=bank.loadFileAsString();
+    struct HostEvents final : juce::AudioProcessorListener {
+        unsigned parameters=0,metadata=0;
+        void audioProcessorParameterChanged(juce::AudioProcessor*,int,float) override {++parameters;}
+        void audioProcessorChanged(juce::AudioProcessor*,const ChangeDetails& details) override {if(details.nonParameterStateChanged) ++metadata;}
+    } host;
+    p.addListener(&host);
+    for(unsigned slot=0;slot<8;++slot) require(p.assignQuickPreset(slot,slot%2?"quick xl":"quick hall",bank).wasOk(),"eight-slot assignment failed");
+    p.removeListener(&host);
+    require(p.quickPresetNames()[0]=="Quick Hall" && p.quickPresetNames()[7]=="Quick XL" &&
+        bank.loadFileAsString()==before && p.getCurrentProgram()==2 && !p.presetModified() && host.parameters==0 && host.metadata==8,
+        "assignment changed sound/bank, lost canonical names or failed to notify host state");
+    set(p,"spillover",1);set(p,"spillover_time",10);set(p,"low_latency",1);
+    require(p.loadQuickPreset(7,bank).wasOk() && p.usesXL() && p.activeQuickPreset()==7 &&
+        std::abs(p.state.getRawParameterValue("analog")->load()-0.32f)<1e-5f &&
+        p.state.getRawParameterValue("spillover_time")->load()==10 && p.state.getRawParameterValue("spillover")->load()==1 &&
+        p.state.getRawParameterValue("low_latency")->load()==1,"quick XL recall or instance options failed");
+    set(p,"mix",0.3f);require(p.activeQuickPreset()==-1,"edited quick preset kept its active light");
+    require(p.loadQuickPreset(0,bank).wasOk() && !p.usesXL() && p.activeQuickPreset()==0 &&
+        p.state.getRawParameterValue("bass")->load()==9,"quick recall back to 224 failed");
+    require(p.assignQuickPreset(0,"Quick XL",bank).wasOk() && !p.usesXL() && p.quickPresetNames()[0]=="Quick XL" &&
+        p.loadQuickPreset(0,bank).wasOk() && p.activeQuickPreset()==0,"quick slot replacement failed");
+    juce::MemoryBlock saved;p.getStateInformation(saved);NativeHallProcessor restored;
+    restored.setStateInformation(saved.getData(),int(saved.getSize()));
+    require(restored.quickPresetNames()==p.quickPresetNames() && restored.activeQuickPreset()==0 &&
+        restored.loadQuickPreset(6,bank).wasOk() && !restored.usesXL(),"quick session round trip failed");
+    restored.setStateInformation(old_state.getData(),int(old_state.getSize()));
+    for(const auto& name:restored.quickPresetNames()) require(name.isEmpty(),"older session retained newer assignments");
+    require(restored.loadQuickPreset(0,bank).failed() && p.assignQuickPreset(8,"Quick Hall",bank).failed() &&
+        p.loadQuickPreset(8,bank).failed() && p.assignQuickPreset(0,"missing",bank).failed() &&
+        p.quickPresetNames()[0]=="Quick XL","invalid quick action altered assignments");
+    require(p.loadQuickPreset(2,bank).wasOk(),"quick replacement baseline failed");
+    set(p,"bass",11);require(p.saveBankPreset("Quick Hall",true,bank).wasOk() && p.loadQuickPreset(2,bank).wasOk() &&
+        p.state.getRawParameterValue("bass")->load()==11,"quick key did not follow a replaced bank preset");
+    require(p.saveBankPreset("Portable",false,bank).wasOk() && !bank.loadFileAsString().contains("quick_preset"),"instance mappings leaked into sound presets");
+    require(bank.deleteFile() && p.loadQuickPreset(0,bank).failed() && p.getCurrentProgram()==2 &&
+        p.presetName()=="Portable" && !p.presetModified(),"missing quick preset changed current sound");
+    std::cout<<"Quick presets: eight assignments, replacement, 224/XL recall, instance options, session/legacy state, latest bank contents and failed-load guards pass\n";
+}
 static void check_preset_browser() {
     NativeHallProcessor p;const auto bank=NativeHallProcessor::presetBankFile();
     const bool existed=bank.existsAsFile();const auto previous=bank.loadFileAsString();
@@ -419,7 +476,8 @@ static void check_preset_browser() {
     auto* all=dynamic_cast<juce::Button*>(find(*editor,"preset_all_algorithms"));
     auto* load=dynamic_cast<juce::Button*>(find(*editor,"load_browser_preset"));
     auto* close=dynamic_cast<juce::Button*>(find(*editor,"close_preset_browser"));
-    require(browser && browser->isVisible() && filters && presets && search && all && load && close,"preset browser controls missing");
+    auto* assign=dynamic_cast<juce::Button*>(find(*editor,"assign_quick_preset"));
+    require(browser && browser->isVisible() && filters && presets && search && all && load && close && assign,"preset browser controls missing");
     auto query=[&](const char* text) {
         // Drive the same callback as typed text without posting delayed
         // notifications after earlier modal tests have stopped their loop.
@@ -441,9 +499,27 @@ static void check_preset_browser() {
     all->onClick();require(presets->getListBoxModel()->getNumRows()==3,"all algorithms reset failed");
     query("bRoWsEr xL");require(presets->getListBoxModel()->getNumRows()==1,"case-insensitive preset search failed");
     query("Concert");require(presets->getListBoxModel()->getNumRows()==2,"algorithm search failed");
-    query("no matching fixture");require(presets->getListBoxModel()->getNumRows()==0 && !load->isEnabled(),"empty search load guard failed");
+    query("no matching fixture");require(presets->getListBoxModel()->getNumRows()==0 && !load->isEnabled() && !assign->isEnabled(),"empty search action guard failed");
     query("224 XL");require(presets->getListBoxModel()->getNumRows()==1,"model search failed");
     require(events.changes==0 && p.getCurrentProgram()==2 && p.presetName()=="Browser Hall","filtering/search changed sound or automation");
+    presets->selectRow(0);require(assign->isEnabled(),"assignment did not enable for selected row");
+    if(juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()!=nullptr &&
+        !juce::MessageManager::getInstance()->hasStopMessageBeenSent()) {
+        assign->onClick();juce::Component* menu=nullptr;auto& desktop=juce::Desktop::getInstance();
+        for(int i=0;i<desktop.getNumComponents();++i) if(desktop.getComponent(i)->getName()=="menu") menu=desktop.getComponent(i);
+        require(menu && &menu->getLookAndFeel()==&assign->getLookAndFeel(),"assignment menu missing or lost its theme");
+        query("Browser Plate"); // The menu must keep the row selected when it was opened.
+        for(unsigned i=0;i<8;++i) menu->keyPressed(juce::KeyPress(juce::KeyPress::downKey));
+        menu->keyPressed(juce::KeyPress(juce::KeyPress::returnKey));
+        juce::MessageManager::callAsync([&] {
+            require(p.quickPresetNames()[7]=="Browser XL" && events.changes==0 && p.presetName()=="Browser Hall",
+                "menu assignment loaded sound or used a later selected row");
+            juce::MessageManager::getInstance()->stopDispatchLoop();
+        });
+        juce::MessageManager::getInstance()->runDispatchLoop();
+        require(p.quickPresetNames()[7]=="Browser XL","assignment callback was not dispatched");
+    } else require(p.assignQuickPreset(7,"Browser XL").wasOk(),"headless assignment failed");
+    query("224 XL");
     for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->removeListener(&events);
     presets->selectRow(0);require(load->isEnabled(),"browser load did not enable for selected preset");load->onClick();
     require(p.usesXL() && p.presetName()=="Browser XL" && !p.presetModified() &&
@@ -451,6 +527,12 @@ static void check_preset_browser() {
     query("");presets->selectRow(0);presets->getListBoxModel()->returnKeyPressed(0);
     require(!p.usesXL() && p.presetName()=="Browser Hall" && !p.presetModified(),"browser keyboard recall back to 224 failed");
     close->onClick();require(!browser->isVisible(),"browser close failed");
+    for(unsigned slot=0;slot<8;++slot) {
+        auto* key=dynamic_cast<juce::Button*>(find(*editor,("quick_preset_"+juce::String(slot+1)).toRawUTF8()));
+        require(key && key->isVisible() && key->getY()>900 && key->getBottom()<1160 &&
+            key->isEnabled()==(slot==7),"quick key layout/empty-slot guard failed");
+        if(slot==7) {key->onClick();require(p.usesXL() && p.activeQuickPreset()==7 && key->getToggleState(),"quick key click/active light failed");}
+    }
     open->onClick();require(browser->isVisible() && presets->getListBoxModel()->getNumRows()==3,"browser reopen failed");
     require(p.saveBankPreset("Added while open").wasOk(),"browser refresh fixture failed");
     close->onClick();open->onClick();require(presets->getListBoxModel()->getNumRows()==4,"browser did not refresh the shared bank on reopen");
@@ -545,6 +627,10 @@ static void check_state_and_ranges() {
     require(p->state.getParameter("low_latency")->getParameterIndex()==15 &&
             !p->state.getParameter("low_latency")->isAutomatable() &&
             p->state.getRawParameterValue("low_latency")->load()==0,"Low latency parameter compatibility/default");
+    require(p->state.getParameter("spillover")->getParameterIndex()==int(NativeHallProcessor::parameter_count)+1 &&
+            !p->state.getParameter("spillover")->isAutomatable() &&
+            p->state.getRawParameterValue("spillover")->load()==0 &&
+            p->state.getRawParameterValue("spillover_time")->load()==5,"Spillover parameter compatibility/default");
     auto* delay=p->state.getParameter("predelay");
     for(int program=0;program<6;++program) {
         p->setCurrentProgram(program);
@@ -560,14 +646,18 @@ static void check_state_and_ranges() {
     set(*p,"bass",20);set(*p,"predelay",88);
     auto legacy=p->state.copyState();legacy.removeChild(legacy.getChildWithProperty("id","algorithm"),nullptr);
     legacy.removeChild(legacy.getChildWithProperty("id","low_latency"),nullptr);
+    legacy.removeChild(legacy.getChildWithProperty("id","spillover"),nullptr);
+    legacy.removeChild(legacy.getChildWithProperty("id","spillover_time"),nullptr);
     auto xml=legacy.createXml();juce::MemoryBlock old;
     juce::AudioProcessor::copyXmlToBinary(*xml,old);
-    set(*p,"low_latency",1);
+    set(*p,"low_latency",1);set(*p,"spillover",1);set(*p,"spillover_time",10);
     p->setStateInformation(old.getData(),int(old.getSize()));
     require(p->getCurrentProgram()==2 && p->state.getRawParameterValue("bass")->load()==20 &&
             p->state.getRawParameterValue("predelay")->load()==88,"v0.2 state migration");
     require(delay->getText(delay->getValue(),0)=="88","legacy pre-delay changed");
     require(p->state.getRawParameterValue("low_latency")->load()==0,"old session retained enabled Low latency");
+    require(p->state.getRawParameterValue("spillover")->load()==0 &&
+            p->state.getRawParameterValue("spillover_time")->load()==5,"old session retained Spillover options");
     std::cout<<NativeHallProcessor::program_count<<" host programs, parameter indices, pre-delay ranges/text entry, v0.2 migration pass\n";
 }
 static void check_low_latency() {
@@ -804,6 +894,162 @@ static void check_xl() {
     require(block.getSample(0,0)==0.25f,"XL low latency dry not immediate");
     for(int i=1;i<128;++i) require(block.getSample(0,i)==0,"XL dry path modified input");
 }
+// Exercise the complete plugin path; all event positions are independent of host block size.
+static std::vector<float> spillover_render(int rate,int block,int from,int to,bool low,bool rapid=false,bool disable=false,bool mono=false,float mix=1) {
+    NativeHallProcessor p;set(p,"spillover",1);set(p,"spillover_time",1);set(p,"mix",mix);
+    set(p,"low_latency",low?1.0f:0.0f);p.setCurrentProgram(from);
+    p.setPlayConfigDetails(mono?1:2,2,rate,128);p.prepareToPlay(rate,128);
+    const int change=rate/4,second=change+rate/100,third=second+rate/100,end=rate*3/2;
+    juce::AudioBuffer<float> b(2,20000);juce::MidiBuffer midi;std::vector<float> result(size_t(end)*2);
+    for(int pos=0;pos<end;) {
+        if(pos==change) p.setCurrentProgram(to);
+        if(rapid && pos==second) p.setCurrentProgram(1);
+        if(rapid && pos==third) p.setCurrentProgram(27);
+        if(disable && pos==rate/2) set(p,"spillover",0);
+        int n=std::min(block,end-pos);
+        for(int event:{change,second,third,rate/2}) if(pos<event && pos+n>event) n=event-pos;
+        b.setSize(2,n,false,false,true);
+        for(int i=0;i<n;++i) {
+            const int at=pos+i;
+            const float input=at<rate/8 || (rapid && at>=change && at<rate/2)?0.12f*std::sin(at*0.117f):0;
+            b.setSample(0,i,input);b.setSample(1,i,mono?input:input*0.7f);
+        }
+        audio=true;p.processBlock(b,midi);audio=false;
+        for(int i=0;i<n;++i) for(int c=0;c<2;++c) {
+            const float value=b.getSample(c,i);require(std::isfinite(value) && std::abs(value)<4,"Spillover nonfinite/runaway output");
+            result[size_t(pos+i)*2+c]=value;
+        }
+        pos+=n;
+    }
+    return result;
+}
+static std::vector<float> spillover_catalog(int rate,int block) {
+    NativeHallProcessor p;set(p,"spillover",1);set(p,"spillover_time",10);
+    p.setPlayConfigDetails(2,2,rate,128);p.prepareToPlay(rate,128);
+    const int section=rate/10,end=section*int(NativeHallProcessor::program_count);
+    juce::AudioBuffer<float> b(2,20000);juce::MidiBuffer midi;std::vector<float> result(size_t(end)*2);
+    for(int pos=0;pos<end;) {
+        if(pos%section==0) p.setCurrentProgram(pos/section);
+        int n=std::min({block,end-pos,section-pos%section});b.setSize(2,n,false,false,true);
+        for(int i=0;i<n;++i) {b.setSample(0,i,0.08f*std::sin((pos+i)*0.117f));b.setSample(1,i,0.06f*std::cos((pos+i)*0.093f));}
+        audio=true;p.processBlock(b,midi);audio=false;
+        for(int i=0;i<n;++i) for(int c=0;c<2;++c) {
+            const float value=b.getSample(c,i);require(std::isfinite(value) && std::abs(value)<4,"Spillover catalog produced nonfinite/runaway output");
+            result[size_t(pos+i)*2+c]=value;
+        }
+        pos+=n;
+    }
+    return result;
+}
+static void check_spillover_early_disable() {
+    NativeHallProcessor p,old,fresh;
+    set(p,"spillover",1);set(p,"spillover_time",1);set(p,"mix",0.25f);
+    p.setCurrentProgram(6);old.setCurrentProgram(6);fresh.setCurrentProgram(2);
+    for(auto* processor:{&p,&old,&fresh}) {processor->setPlayConfigDetails(2,2,48000,128);processor->prepareToPlay(48000,128);}
+    constexpr int change=12000,disable=change+240,end=change+2400;
+    juce::AudioBuffer<float> actual(2,128),previous(2,128),next(2,128);juce::MidiBuffer midi;
+    auto signal=[](int at) {return at>=0?0.12f*std::sin(at*0.117f):0.0f;};
+    auto smooth=[](float x) {return x*x*(3-2*x);};
+    float worst=0;
+    for(int pos=0;pos<end;) {
+        if(pos==change) p.setCurrentProgram(2);
+        if(pos==disable) set(p,"spillover",0);
+        int n=std::min(128,end-pos);
+        for(int event:{change,disable}) if(pos<event && pos+n>event) n=event-pos;
+        for(auto* b:{&actual,&previous,&next}) b->setSize(2,n,false,false,true);
+        for(int i=0;i<n;++i) for(int c=0;c<2;++c) {
+            const int at=pos+i,elapsed=at-change;
+            const float old_input=elapsed<0?1:std::max(0.0f,1-float(elapsed)/240);
+            actual.setSample(c,i,signal(at));previous.setSample(c,i,signal(at)*old_input);
+            next.setSample(c,i,signal(at)*(1-old_input));
+        }
+        audio=true;p.processBlock(actual,midi);old.processBlock(previous,midi);
+        if(pos>=change) fresh.processBlock(next,midi);audio=false;
+        for(int i=0;i<n;++i) for(int c=0;c<2;++c) {
+            const int at=pos+i,elapsed=at-change;
+            float wet=previous.getSample(c,i);
+            if(elapsed>=0) {
+                const float gain=at<disable?smooth(1-float(elapsed)/48000):
+                    smooth(1-240.0f/48000)*smooth(std::max(0.0f,1-float(at-disable)/960));
+                wet=wet*gain+next.getSample(c,i);
+            }
+            const float expected=signal(at-70)*0.75f+wet*0.25f;
+            worst=std::max(worst,std::abs(actual.getSample(c,i)-expected));
+        }
+        pos+=n;
+    }
+    require(worst<2e-7f,"early Spillover disable jumped in mix level, duplicated dry or lost new input");
+    std::cout<<"Spillover early disable: continuous new input, 25% wet, common dry, 20ms retirement match independent references; error="<<worst<<'\n';
+}
+static void check_spillover() {
+    check_spillover_early_disable();
+    PresetTestFiles files;NativeHallProcessor options;
+    const auto preset=files.folder.getChildFile("Spillover.cineol224");
+    require(options.savePreset(preset).wasOk(),"Spillover preset fixture failed");
+    set(options,"spillover",1);set(options,"spillover_time",7);
+    require(options.loadPreset(preset).wasOk() && options.state.getRawParameterValue("spillover")->load()==1 &&
+            options.state.getRawParameterValue("spillover_time")->load()==7,"preset overwrote instance Spillover options");
+    juce::MemoryBlock state;options.getStateInformation(state);NativeHallProcessor restored;
+    restored.setStateInformation(state.getData(),int(state.getSize()));
+    require(restored.state.getRawParameterValue("spillover")->load()==1 &&
+            restored.state.getRawParameterValue("spillover_time")->load()==7,"session lost Spillover options");
+    // Compare to two independent reference instances, preserving the old
+    // settings, output pair and delay memory. No new input follows the switch.
+    for(int seconds:{1,5,10}) {
+        NativeHallProcessor p,old,fresh;set(p,"spillover",1);set(p,"spillover_time",float(seconds));
+        p.setCurrentProgram(2);old.setCurrentProgram(2);fresh.setCurrentProgram(6);
+        for(auto* processor:{&p,&old,&fresh}) {processor->setPlayConfigDetails(2,2,48000,128);processor->prepareToPlay(48000,128);}
+        const int change=12000,length=seconds*48000,end=change+length+256;
+        juce::AudioBuffer<float> actual(2,128),previous(2,128),next(2,128);juce::MidiBuffer midi;
+        double tail_energy=0;float worst=0;
+        for(int pos=0;pos<end;) {
+            if(pos==change) p.setCurrentProgram(6);
+            int n=std::min(128,end-pos);if(pos<change && pos+n>change) n=change-pos;
+            for(auto* b:{&actual,&previous,&next}) b->setSize(2,n,false,false,true);
+            next.clear();
+            for(int i=0;i<n;++i) for(int c=0;c<2;++c) {
+                float input=pos+i<6000?0.12f*std::sin((pos+i)*0.117f):0;
+                actual.setSample(c,i,input);previous.setSample(c,i,input);
+            }
+            audio=true;p.processBlock(actual,midi);old.processBlock(previous,midi);
+            if(pos>=change) fresh.processBlock(next,midi);audio=false;
+            for(int i=0;i<n;++i) for(int c=0;c<2;++c) {
+                const int elapsed=pos+i-change;
+                float expected=previous.getSample(c,i);
+                if(elapsed>=0) {
+                    const float x=std::max(0.0f,1-float(elapsed)/length);
+                    expected=expected*x*x*(3-2*x)+next.getSample(c,i);
+                    if(elapsed<4800) tail_energy+=double(actual.getSample(c,i))*actual.getSample(c,i);
+                }
+                worst=std::max(worst,std::abs(actual.getSample(c,i)-expected));
+            }
+            pos+=n;
+        }
+        require(tail_energy>1e-6 && worst<2e-7f,"Spillover tail/fade differs from independent reference or exceeds duration");
+        std::cout<<"Spillover "<<seconds<<"s: old tail + silent new algorithm match independent reference, maximum error="<<worst<<'\n';
+    }
+    for(int rate:{44100,48000,96000}) {
+        const auto catalog=spillover_catalog(rate,128);
+        require(catalog==spillover_catalog(rate,511) && catalog==spillover_catalog(rate,20000),
+                "Spillover across all 28 programs depends on host block size");
+        for(auto pair:{std::pair{2,1},std::pair{6,7},std::pair{2,6},std::pair{6,2},std::pair{27,2},std::pair{2,27}}) {
+            auto a=spillover_render(rate,128,pair.first,pair.second,false);
+            require(a==spillover_render(rate,511,pair.first,pair.second,false) &&
+                    a==spillover_render(rate,20000,pair.first,pair.second,true),"Spillover depends on host blocks or changes low-latency wet audio");
+        }
+        auto rapid=spillover_render(rate,128,2,6,false,true);
+        require(rapid==spillover_render(rate,511,2,6,false,true) &&
+                rapid==spillover_render(rate,20000,2,6,false,true),"rapid Spillover retirement depends on block size");
+        auto disabled=spillover_render(rate,128,6,2,false,false,true);
+        require(disabled==spillover_render(rate,511,6,2,false,false,true),"disabling Spillover depends on block size");
+        for(bool low:{false,true}) for(bool mono:{false,true}) {
+            const auto dry=spillover_render(rate,128,2,6,low,true,false,mono,0);
+            require(dry==spillover_render(rate,128,27,1,low,true,false,mono,0),"Spillover duplicated or reset the common dry path");
+        }
+        std::cout<<"Spillover "<<rate<<" Hz: 224/XL/split transitions, 128/511/20000 blocks, rapid retirement, disable, mono/stereo dry + low-latency pass\n";
+    }
+    require(allocations==0 && releases==0,"Spillover audio allocated or released memory");
+}
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
     // Offline fixtures belong only to an isolated test cache, never to the
@@ -812,7 +1058,7 @@ int main(int argc,char** argv) {
         juce::File folder;
         ~TestCache() {if(folder.isDirectory()) folder.deleteRecursively();}
     } test_cache;
-    if((argc==3 && std::string(argv[1])=="--bank") || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check"))) {
+    if((argc==3 && std::string(argv[1])=="--bank") || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check" || std::string(argv[1])=="--spillover-check" || std::string(argv[1])=="--quick-check"))) {
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getNonexistentChildFile("cineol-plugin-check",{},false);
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");
@@ -820,8 +1066,12 @@ int main(int argc,char** argv) {
         require(juce::File(juce::String::fromUTF8(argv[2])).copyFileTo(CineolRomBank::cacheFile()),"could not seed test bank");
         if(argc==4) require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed XL bank");
     }
+    if(argc==4 && std::string(argv[1])=="--quick-check") {check_quick_presets();check_preset_browser();return 0;}
+    if(argc==4 && std::string(argv[1])=="--spillover-check") {
+        check_state_and_ranges();check_editor();check_spillover();return 0;
+    }
     if(argc==4 && std::string(argv[1])=="--preset-check") {
-        check_presets();check_preset_bank();check_preset_browser();check_preset_audio();return 0;
+        check_presets();check_preset_bank();check_quick_presets();check_preset_browser();check_preset_audio();return 0;
     }
     if(argc==4 && std::string(argv[1])=="--limits-check") {check_fader_limits();return 0;}
     const bool previewBundle=juce::File::getSpecialLocation(juce::File::currentExecutableFile)
@@ -838,9 +1088,9 @@ int main(int argc,char** argv) {
         } window(p);
         juce::MessageManager::getInstance()->runDispatchLoop();return 0;
     }
-    if(argc==5 && std::string(argv[1])=="--editor" && std::string(argv[4])=="presets") {
+    if(argc==5 && std::string(argv[1])=="--editor" && (std::string(argv[4])=="presets" || std::string(argv[4])=="quick" || std::string(argv[4])=="assign")) {
         const auto original=CineolRomBank::cacheFile(),xl=CineolRomBank::xlCacheFile();
-        test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("cineol-browser-preview",{},false);
+        test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cineol-browser-preview-"+juce::Uuid().toString());
         require(test_cache.folder.createDirectory().wasOk(),"browser preview cache failed");
         setenv("CINEOL224_CACHE_DIR",test_cache.folder.getFullPathName().toRawUTF8(),1);
         require(original.copyFileTo(CineolRomBank::cacheFile()) && xl.copyFileTo(CineolRomBank::xlCacheFile()),"browser preview banks failed");
@@ -848,12 +1098,17 @@ int main(int argc,char** argv) {
     if((argc==3 || argc==4 || argc==5 || argc==6) && std::string(argv[1])=="--editor") {
         NativeHallProcessor p;
         PresetTestFiles demo;
-        if(argc==5 && std::string(argv[4])=="presets") {
+        if(argc==5 && (std::string(argv[4])=="presets" || std::string(argv[4])=="quick" || std::string(argv[4])=="assign")) {
             for(const auto& fixture:std::array<std::pair<int,const char*>,6>{{{2,"Warm Hall"},{1,"Soft Vocal Plate"},{6,"Airy Concert"},{7,"Bright Space"},{2,"Wide Hall"},{6,"Long Concert"}}}) {
                 p.setCurrentProgram(fixture.first);require(p.saveBankPreset(fixture.second).wasOk(),"browser preview preset failed");
             }
         }
         if(argc>=4) p.setCurrentProgram(std::atoi(argv[3]));
+        if(argc==5 && (std::string(argv[4])=="presets" || std::string(argv[4])=="quick" || std::string(argv[4])=="assign")) {
+            const std::array<const char*,6> names{{"Warm Hall","Soft Vocal Plate","Airy Concert","Bright Space","Wide Hall","Long Concert"}};
+            for(unsigned slot=0;slot<names.size();++slot) require(p.assignQuickPreset(slot,names[slot]).wasOk(),"preview quick assignment failed");
+            require(p.loadQuickPreset(0).wasOk(),"preview quick recall failed");
+        }
         if(argc==5 && std::string(argv[4])=="preset")
             require(p.savePreset(demo.folder.getChildFile("Warm Concert Hall.cineol224")).wasOk(),"preview preset failed");
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
@@ -880,14 +1135,15 @@ int main(int argc,char** argv) {
             snapshot=juce::Component::getCurrentlyModalComponent();
             require(dynamic_cast<juce::AlertWindow*>(snapshot)!=nullptr,"Save dialog missing");
         }
-        if(argc==5 && std::string(argv[4])=="presets") {
+        if(argc==5 && (std::string(argv[4])=="presets" || std::string(argv[4])=="assign")) {
             auto* button=dynamic_cast<juce::Button*>(find(*editor,"preset"));
             require(button && bool(button->onClick),"Preset browser button missing");button->onClick();
             require(find(*editor,"preset_browser") && find(*editor,"preset_browser")->isVisible(),"Preset browser missing");
         }
-        if(argc==5 && (std::string(argv[4])=="algorithms" || std::string(argv[4])=="outputs")) {
+        if(argc==5 && (std::string(argv[4])=="algorithms" || std::string(argv[4])=="outputs" || std::string(argv[4])=="assign")) {
+            require(juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()!=nullptr,"Popup preview requires access to the macOS desktop");
             const auto mode=std::string(argv[4]);
-            auto* button=dynamic_cast<juce::Button*>(find(*editor,mode=="outputs"?"output_l":"algorithm"));
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,mode=="outputs"?"output_l":mode=="assign"?"assign_quick_preset":"algorithm"));
             require(button!=nullptr,"Menu button missing");button->onClick();
             auto& desktop=juce::Desktop::getInstance();
             for(int i=0;i<desktop.getNumComponents();++i)
@@ -901,10 +1157,10 @@ int main(int argc,char** argv) {
             snapshot->createComponentSnapshot(snapshot->getLocalBounds()),output),"editor screenshot failed");
         return 0;
     }
-    check_state_and_ranges();check_editor();check_presets();check_preset_bank();check_preset_audio();
+    check_state_and_ranges();check_editor();check_presets();check_preset_bank();check_quick_presets();check_preset_audio();
     if(std::string(argc>1?argv[1]:"")=="--bank" || std::string(argc>1?argv[1]:"")=="--banks") check_daisy_engine(argv[2]);
     check_low_latency();
-    if(argc==4 && std::string(argv[1])=="--banks") {check_preset_browser();check_fader_limits();check_xl();check_dirt();}
+    if(argc==4 && std::string(argv[1])=="--banks") {check_preset_browser();check_fader_limits();check_xl();check_dirt();check_spillover();}
     for(int program=0;program<6;++program) for(int rate:{44100,48000,96000}) {
         auto a=run(rate,128,false,program), b=run(rate,511,true,program),c=run(rate,20000,false,program);
         require(a==b && b==c,"algorithm switching/block-size or offline/realtime output differs");

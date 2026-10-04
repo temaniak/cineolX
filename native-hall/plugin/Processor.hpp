@@ -51,6 +51,11 @@ public:
     juce::Result presetNames(juce::StringArray&,const juce::File& bank=presetBankFile());
     juce::Result saveBankPreset(const juce::String& name,bool replace=false,const juce::File& bank=presetBankFile());
     juce::Result loadBankPreset(const juce::String& name,const juce::File& bank=presetBankFile());
+    static constexpr unsigned quick_preset_count=8;
+    std::array<juce::String,quick_preset_count> quickPresetNames();
+    int activeQuickPreset();
+    juce::Result assignQuickPreset(unsigned slot,const juce::String& name,const juce::File& bank=presetBankFile());
+    juce::Result loadQuickPreset(unsigned slot,const juce::File& bank=presetBankFile());
     juce::String presetName();
     bool presetModified();
     int editorPage() {const juce::ScopedLock lock(preset_write_lock_);return std::clamp(int(state.state.getProperty("editor_page",0)),0,8);}
@@ -69,10 +74,31 @@ private:
     void updateLatency();
     void timerCallback() override {updateLatency();}
     juce::SharedResourcePointer<CineolRomBank> rom_bank_;
-    native_hall::Engine48 engine_;
-    cineol::xl::Runtime xl_engine_;
-    std::array<std::array<float,2>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> xl_alignment_{};
-    unsigned xl_alignment_position_=0;
+    // Desktop-only double buffering. Both complete runtimes are constructed
+    // before audio starts; transitions exchange indices, never DSP storage.
+    struct AudioSlot {
+        native_hall::Engine48 engine;
+        cineol::xl::Runtime xl_engine;
+        std::array<std::array<float,2>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> alignment{};
+        unsigned alignment_position=0;
+        int program=-1;
+        void process(float,float,float&,float&,bool) noexcept;
+    };
+    std::array<AudioSlot,2> slots_;
+    unsigned active_slot_=0;
+    int tail_slot_=-1;
+    unsigned tail_length_=0,tail_position_=0,tail_input_remaining_=0;
+    float tail_start_gain_=1;
+    bool tail_shortened_=false;
+    static constexpr unsigned input_fade_samples=240,retire_samples=960; // 5/20 ms at 48 kHz.
+    float tailGain() const noexcept;
+    void shortenTail() noexcept;
+    void selectProgram(int,const std::array<float,parameter_count>&,bool);
+    void applyControls(const std::array<float,parameter_count>&);
+    std::array<std::array<float,2>,native_hall::Engine48::latency_samples> transition_dry_{};
+    unsigned transition_dry_position_=0;
+    float transition_mix_=1;
+    bool transition_mixing_=false;
     int active_program_=-1;
     lexplug::RateBridge bridge_;
     juce::AudioParameterChoice* algorithm_parameter_=nullptr;
@@ -82,6 +108,8 @@ private:
     juce::CriticalSection preset_write_lock_; // Preset/session writers only; never used by processBlock.
     std::atomic<unsigned> parameter_transaction_{0},preset_recall_revision_{0};
     std::atomic<float>* low_latency_value_=nullptr;
+    std::atomic<float>* spillover_value_=nullptr;
+    std::atomic<float>* spillover_time_value_=nullptr;
     std::atomic<bool> low_latency_active_{false};
     std::atomic<int> normal_latency_{native_hall::Engine48::latency_samples};
     juce::AudioBuffer<float> direct_input_;

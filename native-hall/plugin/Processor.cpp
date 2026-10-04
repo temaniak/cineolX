@@ -63,6 +63,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout(
     p.add(std::make_unique<AudioParameterInt>(ParameterID{"xl_diffusion",4},"XL Diffusion",0,63,16,percent));
     for(unsigned cell=0;cell<48;++cell) p.add(std::make_unique<AudioParameterInt>(
         ParameterID{ids[xl_parameter_begin+cell],5},"XL Control "+String(cell+1),-1,255,-1));
+    p.add(std::make_unique<AudioParameterBool>(ParameterID{"spillover",6},"Spillover",false,
+        AudioParameterBoolAttributes{}.withAutomatable(false)));
+    p.add(std::make_unique<AudioParameterFloat>(ParameterID{"spillover_time",6},"Spillover time",
+        NormalisableRange<float>(1.0f,10.0f,1.0f),5.0f,
+        AudioParameterFloatAttributes{}.withLabel("s").withAutomatable(false)));
     return p;
 }
 NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
@@ -74,6 +79,8 @@ NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
         values_[i]=state.getRawParameterValue(ids[i]);stable_values_[i]=values_[i]->load();
     }
     low_latency_value_=state.getRawParameterValue("low_latency");
+    spillover_value_=state.getRawParameterValue("spillover");
+    spillover_time_value_=state.getRawParameterValue("spillover_time");
     previous_.fill(std::numeric_limits<float>::quiet_NaN());
     // Poll outside the audio callback, even with the editor closed. Host
     // latency notifications can invoke locks/listeners and must stay here.
@@ -90,9 +97,12 @@ bool NativeHallProcessor::isBusesLayoutSupported(const BusesLayout& l) const {
         (l.getMainInputChannelSet()==juce::AudioChannelSet::stereo() || l.getMainInputChannelSet()==juce::AudioChannelSet::mono());
 }
 void NativeHallProcessor::prepareToPlay(double rate,int block) {
-    engine_.prepare_audio();
-    engine_initialized_=false;active_program_=-1;
-    xl_alignment_.fill({});xl_alignment_position_=0;
+    for(auto& slot:slots_) {slot.engine.prepare_audio();slot.program=-1;slot.alignment.fill({});slot.alignment_position=0;}
+    engine_initialized_=false;active_program_=-1;active_slot_=0;tail_slot_=-1;
+    tail_length_=tail_position_=tail_input_remaining_=0;tail_shortened_=false;
+    transition_dry_.fill({});transition_dry_position_=0;
+    transition_mix_=values_[8]->load(std::memory_order_relaxed);
+    transition_mixing_=false;
     bridge_.setup(int(std::lround(rate)),std::clamp(block,1,8192));
     direct_input_.setSize(2,std::clamp(block,1,8192));
     host_mix_=values_[8]->load(std::memory_order_relaxed);
@@ -101,6 +111,66 @@ void NativeHallProcessor::prepareToPlay(double rate,int block) {
         std::memory_order_relaxed);
     updateLatency();
     previous_.fill(std::numeric_limits<float>::quiet_NaN());
+}
+void NativeHallProcessor::AudioSlot::process(float l,float r,float& ol,float& ore,bool wet) noexcept {
+    if(!NativeHallProcessor::isXL(program)) {engine.process(l,r,ol,ore,wet);return;}
+    float a,c;xl_engine.process(l,r,a,c,wet);
+    auto& delayed=alignment[alignment_position];
+    ol=delayed[0];ore=delayed[1];delayed={a,c};
+    alignment_position=(alignment_position+1)%alignment.size();
+}
+float NativeHallProcessor::tailGain() const noexcept {
+    if(tail_slot_<0 || tail_position_>=tail_length_) return 0;
+    const float x=1-float(tail_position_)/float(tail_length_);
+    return tail_start_gain_*x*x*(3-2*x); // Smooth amplitude fade with rounded endpoints.
+}
+void NativeHallProcessor::shortenTail() noexcept {
+    if(tail_slot_<0 || tail_shortened_) return;
+    tail_start_gain_=tailGain();
+    tail_length_=std::min(retire_samples,tail_length_-tail_position_);tail_position_=0;
+    tail_shortened_=true;
+}
+void NativeHallProcessor::selectProgram(int requested,const std::array<float,parameter_count>& v,bool spill) {
+    if(spill && engine_initialized_ && requested!=active_program_) {
+        // The caller retires an older tail before recycling its slot.
+        tail_slot_=int(active_slot_);active_slot_=1-active_slot_;
+        tail_length_=unsigned(std::lround(std::clamp(spillover_time_value_->load(std::memory_order_relaxed),1.0f,10.0f)*48000));
+        tail_position_=0;tail_input_remaining_=input_fade_samples;tail_start_gain_=1;tail_shortened_=false;
+        engine_initialized_=false;
+    }
+    auto& slot=slots_[active_slot_];
+    if(!engine_initialized_ || (requested!=active_program_ && (isXL(requested) || isXL(active_program_)))) {
+        if(isXL(requested)) slot.xl_engine.select(rom_bank_->xlBank(),unsigned(requested-native_hall::program_count));
+        else slot.engine.activate(rom_bank_->bank(),unsigned(requested));
+        slot.alignment.fill({});slot.alignment_position=0;
+        previous_.fill(std::numeric_limits<float>::quiet_NaN());engine_initialized_=true;
+    }
+    active_program_=slot.program=requested;
+    bool changed=false;for(unsigned i=0;i<v.size();++i) changed|=v[i]!=previous_[i];
+    if(changed) {previous_=v;applyControls(v);}
+}
+void NativeHallProcessor::applyControls(const std::array<float,parameter_count>& v) {
+    const float dirt=1-v[9],clean=1-dirt*dirt;
+    if(isXL(active_program_)) {
+        const auto& data=rom_bank_->xlBank().programs[unsigned(active_program_)-native_hall::program_count];
+        auto controls=data.controls.factory;
+        for(unsigned cell=0;cell<controls.size();++cell) if(v[xl_parameter_begin+cell]>=0)
+            controls[cell]=uint8_t(std::clamp(int(v[xl_parameter_begin+cell]),0,255));
+        if(data.chorus_page) controls[data.pages[data.chorus_page-1].cells[data.chorus_slot]]=uint8_t(unsigned(v[15])*8);
+        if(data.diffusion_page) controls[data.pages[data.diffusion_page-1].cells[data.diffusion_slot]]=uint8_t(unsigned(v[16])*4);
+        data.resolve_controls(controls);
+        slots_[active_slot_].xl_engine.controls(controls,v[10]>=0.5f,v[7],v[8],clean,int(v[12]),int(v[13]));
+    }
+    else {
+        native_hall::Parameters p;
+        p.hall.bass=int(v[0]);p.hall.mid=int(v[1]);p.hall.crossover=int(v[2]);p.hall.treble=int(v[3]);
+        p.program=unsigned(std::clamp(active_program_,0,int(native_hall::program_count)-1));
+        p.hall.depth=int(v[4]);p.hall.predelay_ms=int(v[5])-24+native_hall::predelay_minima[p.program];
+        p.hall.diffusion=int(v[6]);
+        p.input_db=v[7];p.mix=v[8];p.analog=true;p.dirt=dirt*dirt;p.hall.mode_enhancement=v[10]>=0.5f;
+        p.hall.decay_optimization=v[11]>=0.5f;p.output_left=int(v[12]);p.output_right=int(v[13]);
+        slots_[active_slot_].engine.set_parameters(p);
+    }
 }
 void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) {
     juce::ScopedNoDenormals noDenormals;
@@ -115,46 +185,19 @@ void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuf
         if(parameter_transaction_.load(std::memory_order_acquire)==transaction) stable_values_=v=candidate;
     }
     const int requested=std::clamp(int(v[14]),0,int(program_count)-1);
-    const bool xl=isXL(requested);
     if(!programAvailable(requested)) {
         if(getTotalNumInputChannels()==1) b.copyFrom(1,0,b,0,0,b.getNumSamples());
-        engine_initialized_=false;active_program_=-1;return;
+        engine_initialized_=false;active_program_=-1;tail_slot_=-1;return;
     }
-    if(!engine_initialized_ || (requested!=active_program_ && (xl || isXL(active_program_)))) {
-        // All kernels were prepared before processing. Switching only resets
-        // fixed DSP storage; immutable banks are published by the import worker.
-        if(xl) xl_engine_.select(rom_bank_->xlBank(),unsigned(requested-native_hall::program_count));
-        else engine_.activate(rom_bank_->bank(),unsigned(requested));
-        xl_alignment_.fill({});xl_alignment_position_=0;
-        previous_.fill(std::numeric_limits<float>::quiet_NaN());engine_initialized_=true;
-    }
-    active_program_=requested;
-    bool changed=false;
-    for(unsigned i=0;i<v.size();++i) changed|=v[i]!=previous_[i];
-    if(changed) {
-        previous_=v;
-        const float dirt=1-v[9],clean=1-dirt*dirt;
-        if(xl) {
-            const auto& data=rom_bank_->xlBank().programs[unsigned(requested)-native_hall::program_count];
-            auto controls=data.controls.factory;
-            for(unsigned cell=0;cell<controls.size();++cell) if(v[xl_parameter_begin+cell]>=0)
-                controls[cell]=uint8_t(std::clamp(int(v[xl_parameter_begin+cell]),0,255));
-            if(data.chorus_page) controls[data.pages[data.chorus_page-1].cells[data.chorus_slot]]=uint8_t(unsigned(v[15])*8);
-            if(data.diffusion_page) controls[data.pages[data.diffusion_page-1].cells[data.diffusion_slot]]=uint8_t(unsigned(v[16])*4);
-            data.resolve_controls(controls);
-            xl_engine_.controls(controls,v[10]>=0.5f,v[7],v[8],clean,int(v[12]),int(v[13]));
-        }
-        else {
-            native_hall::Parameters p;
-            p.hall.bass=int(v[0]);p.hall.mid=int(v[1]);p.hall.crossover=int(v[2]);p.hall.treble=int(v[3]);
-            p.program=unsigned(std::clamp(int(v[14]),0,int(native_hall::program_count)-1));
-            p.hall.depth=int(v[4]);p.hall.predelay_ms=int(v[5])-24+native_hall::predelay_minima[p.program];
-            p.hall.diffusion=int(v[6]);
-            p.input_db=v[7];p.mix=v[8];p.analog=true;p.dirt=dirt*dirt;p.hall.mode_enhancement=v[10]>=0.5f;
-            p.hall.decay_optimization=v[11]>=0.5f;p.output_left=int(v[12]);p.output_right=int(v[13]);
-            engine_.set_parameters(p);
-        }
-    }
+    const bool spill=spillover_value_->load(std::memory_order_relaxed)>=0.5f;
+    // Keep the common mixer after its first use until the stream is prepared
+    // again. Newly activated kernels start their private mix smoothing at 1;
+    // returning to that mixer during an early disable would jump in level.
+    transition_mixing_|=spill;
+    if(!spill && tail_slot_>=0) shortenTail();
+    const bool pending=spill && engine_initialized_ && requested!=active_program_ && tail_slot_>=0;
+    if(pending) shortenTail();
+    else selectProgram(requested,v,spill);
     const bool low=low_latency_active_.load(std::memory_order_relaxed);
     const int right_channel=getTotalNumInputChannels()==1?0:1;
     for(int offset=0;offset<b.getNumSamples();) {
@@ -168,12 +211,26 @@ void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuf
         bridge_.process(left,b.getReadPointer(right_channel,offset),left,right,count,
             [&](const float* l,const float* r,float* ol,float* ore,int n) {
                 for(int i=0;i<n;++i) {
-                    if(!xl) engine_.process(l[i],r[i],ol[i],ore[i],low);
-                    else {
-                        float a,c;xl_engine_.process(l[i],r[i],a,c,low);
-                        auto& delayed=xl_alignment_[xl_alignment_position_];
-                        ol[i]=delayed[0];ore[i]=delayed[1];delayed={a,c};
-                        xl_alignment_position_=(xl_alignment_position_+1)%xl_alignment_.size();
+                    // A rapid third selection waits only for the oldest tail's
+                    // bounded 20 ms retirement, then switches at an internal sample.
+                    if(pending && tail_slot_<0 && active_program_!=requested) selectProgram(requested,v,true);
+                    const float il=std::isfinite(l[i])?l[i]:0,ir=std::isfinite(r[i])?r[i]:0;
+                    const auto dry=transition_dry_[transition_dry_position_];
+                    transition_dry_[transition_dry_position_]={il,ir};
+                    transition_dry_position_=(transition_dry_position_+1)%transition_dry_.size();
+                    transition_mix_+=0.002f*(v[8]-transition_mix_);
+                    const bool separate_wet=transition_mixing_;
+                    const float old_input=tail_slot_>=0?float(tail_input_remaining_)/input_fade_samples:0;
+                    slots_[active_slot_].process(il*(1-old_input),ir*(1-old_input),ol[i],ore[i],low || separate_wet);
+                    if(tail_slot_>=0) {
+                        float tl,tr;slots_[unsigned(tail_slot_)].process(il*old_input,ir*old_input,tl,tr,true);
+                        const float gain=tailGain();ol[i]+=tl*gain;ore[i]+=tr*gain;
+                        if(tail_input_remaining_) --tail_input_remaining_;
+                        if(++tail_position_>=tail_length_) {tail_slot_=-1;tail_input_remaining_=0;}
+                    }
+                    if(separate_wet && !low) {
+                        ol[i]=dry[0]*(1-transition_mix_)+ol[i]*transition_mix_;
+                        ore[i]=dry[1]*(1-transition_mix_)+ore[i]*transition_mix_;
                     }
                 }
             });
@@ -272,6 +329,10 @@ void NativeHallProcessor::setStateInformation(const void* data,int size) {
         if(!restored.getChildWithProperty("id","low_latency").isValid()) {
             juce::ValueTree low("PARAM");low.setProperty("id","low_latency",nullptr);
             low.setProperty("value",0.0f,nullptr);restored.appendChild(low,nullptr);
+        }
+        for(const char* id:{"spillover","spillover_time"}) if(!restored.getChildWithProperty("id",id).isValid()) {
+            juce::ValueTree value("PARAM");value.setProperty("id",id,nullptr);
+            value.setProperty("value",juce::String(id)=="spillover"?0.0f:5.0f,nullptr);restored.appendChild(value,nullptr);
         }
         for(const char* id:{"xl_chorus","xl_diffusion"}) if(!restored.getChildWithProperty("id",id).isValid()) {
             juce::ValueTree value("PARAM");value.setProperty("id",id,nullptr);value.setProperty("value",16.0f,nullptr);restored.appendChild(value,nullptr);

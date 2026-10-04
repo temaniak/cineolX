@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(CineolX224 VERSION 0.9.4 LANGUAGES C CXX)
+project(CineolX224 VERSION 0.9.5 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
@@ -42,7 +42,8 @@ if(APPLE)
 endif()
 juce_add_binary_data(cineol_ui_data HEADER_NAME CineolUIData.h NAMESPACE CineolUIData
     SOURCES native-hall/plugin/assets/panel.png native-hall/plugin/assets/fadercap.png
-        native-hall/plugin/assets/panel-monolithic.png native-hall/plugin/assets/menu-metal.png)
+        native-hall/plugin/assets/panel-monolithic.png native-hall/plugin/assets/menu-metal.png
+        native-hall/plugin/assets/quick-key.png native-hall/plugin/assets/panel-quick-presets.png)
 juce_add_plugin(NativeHall224 VERSION ${PROJECT_VERSION} PRODUCT_NAME "Cineol-X 224" COMPANY_NAME "Reflexion224"
     BUNDLE_ID "net.joelanders.nativehall224" PLUGIN_MANUFACTURER_CODE Rflx PLUGIN_CODE Nh24
     FORMATS ${_formats} IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE

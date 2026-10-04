@@ -3,7 +3,7 @@
 #include <algorithm>
 
 namespace {
-constexpr int panel_width=1640,panel_height=1040;
+constexpr int panel_width=1640,panel_height=1240;
 constexpr int variable_fader_x=64,fader_step=164,global_fader_x=1098,global_fader_step=fader_step;
 constexpr int fader_y=370,fader_height=525;
 constexpr int display_global_x=global_fader_x-variable_fader_x,display_divider_x=display_global_x-30;
@@ -454,23 +454,74 @@ public:
         addAndMakeVisible(low_latency_);
         attachment_=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
             processor.state,"low_latency",low_latency_);
+        spillover_.setComponentID("spillover");spillover_.setButtonText("Spillover");spillover_.setTitle("Spillover");
+        spillover_.setTooltip("Preserve the previous algorithm's tail with a smooth fade when switching 224 or 224 XL programs.");
+        addAndMakeVisible(spillover_);
+        duration_.setComponentID("spillover_time");duration_.setTitle("Tail fade time");
+        duration_.setTooltip("Fade the previous tail over 1 to 10 seconds. This setting applies to the next transition.");
+        for(int seconds=1;seconds<=10;++seconds) duration_.addItem(juce::String(seconds)+" s",seconds);
+        addAndMakeVisible(duration_);
+        spillover_.onStateChange=[this]{duration_.setEnabled(spillover_.getToggleState());};
+        spillover_attachment_=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+            processor.state,"spillover",spillover_);
+        duration_attachment_=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            processor.state,"spillover_time",duration_);
+        duration_.setEnabled(spillover_.getToggleState());
     }
     void paint(juce::Graphics& g) override {
         auto bounds=getLocalBounds().toFloat().reduced(4);
         auto& look=static_cast<InstrumentLook&>(getLookAndFeel());
         look.drawMetalSurface(g,bounds);
         look.drawScreenHeader(g,"Settings",{28,20,float(getWidth()-56),38},25);
-        g.setColour(ink);
-        g.setFont(font(22));
-        g.drawText("When enabled: zero-latency dry signal.",28,148,getWidth()-56,30,juce::Justification::centredLeft);
-        g.drawText("Reverb and pre-delay keep their timing.",28,178,getWidth()-56,30,juce::Justification::centredLeft);
-        g.setColour(ink.withAlpha(0.16f));g.drawHorizontalLine(229,28,float(getWidth()-28));
-        // Space below this divider is reserved for future fine-tuning rows.
+        g.setColour(ink);g.setFont(font(22));
+        g.drawText("When enabled: zero-latency dry signal.",28,145,getWidth()-56,30,juce::Justification::centredLeft);
+        g.drawText("Reverb and pre-delay keep their timing.",28,175,getWidth()-56,30,juce::Justification::centredLeft);
+        g.setColour(ink.withAlpha(0.16f));g.drawHorizontalLine(215,28,float(getWidth()-28));
+        g.setColour(ink);g.setFont(font(21));
+        g.drawText("Old tail fades while the new effect plays.",28,315,getWidth()-56,30,juce::Justification::centredLeft);
+        g.drawText("Transitions temporarily increase CPU use.",28,345,getWidth()-56,30,juce::Justification::centredLeft);
     }
-    void resized() override {low_latency_.setBounds(28,75,getWidth()-56,64);}
+    void resized() override {
+        low_latency_.setBounds(28,75,getWidth()-56,64);
+        spillover_.setBounds(28,235,245,64);duration_.setBounds(280,243,170,48);
+    }
 private:
-    juce::ToggleButton low_latency_;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment_;
+    juce::ToggleButton low_latency_,spillover_;
+    juce::ComboBox duration_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment_,spillover_attachment_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> duration_attachment_;
+};
+
+class QuickPresetKey final : public juce::Button {
+public:
+    QuickPresetKey():Button("Quick preset") {}
+    void setImage(const juce::Image& image) {cap_=image;}
+    void update(unsigned slot,const juce::String& preset,bool active,bool available) {
+        const bool changed=slot_!=slot || preset_!=preset || active_!=active;
+        slot_=slot;preset_=preset;active_=active;
+        setEnabled(available && preset.isNotEmpty());setToggleState(active,juce::dontSendNotification);
+        setTitle("Quick preset "+juce::String(slot+1)+": "+(preset.isEmpty()?"Empty":preset));
+        setTooltip(preset.isEmpty()?"Assign a preset to key "+juce::String(slot+1)+" in the preset bank.":"Load "+preset);
+        if(changed) repaint();
+    }
+    void paintButton(juce::Graphics& g,bool over,bool down) override {
+        const float centre=getWidth()*0.5f;
+        g.setColour(juce::Colour(0xff282523));g.fillEllipse(centre-7,4,14,14);
+        g.setColour(active_?juce::Colour(0xffed3226):juce::Colour(0xff5e2e28));g.fillEllipse(centre-4.5f,6.5f,9,9);
+        if(active_) {g.setColour(juce::Colour(0xffffb498));g.fillEllipse(centre-2,7.5f,3,3);}
+        const juce::Rectangle<float> cap(centre-62,30+(down?3.0f:0.0f),124,124-(down?3.0f:0.0f));
+        g.drawImage(cap_,cap,juce::RectanglePlacement::centred);
+        g.setColour(ink.withAlpha(preset_.isEmpty()?0.45f:1.0f));g.setFont(font(35,true));
+        g.drawText(juce::String(slot_+1),cap.translated(0,-8),juce::Justification::centred);
+        g.setFont(font(18));g.setColour(ink);
+        g.drawFittedText(preset_.isEmpty()?"Empty":preset_,0,162,getWidth(),28,juce::Justification::centredTop,1,0.8f);
+        if(hasKeyboardFocus(true) || (over && isEnabled())) {g.setColour(ink.withAlpha(0.6f));g.drawHorizontalLine(188,30,float(getWidth()-30));}
+    }
+private:
+    unsigned slot_=0;
+    juce::String preset_;
+    juce::Image cap_;
+    bool active_=false;
 };
 
 class PresetBrowser final : public juce::Component {
@@ -498,7 +549,10 @@ public:
         load_.onClick=[this]{loadRow(presets_.getSelectedRow(),false);};
         save_.setComponentID("save_browser_preset");save_.setButtonText("Save preset...");
         save_.onClick=[this]{dismiss();if(onSave) onSave();};
-        for(auto* button:{&all_,&close_,&load_,&save_}) addAndMakeVisible(*button);
+        assign_.setComponentID("assign_quick_preset");assign_.setButtonText("Assign to...");
+        assign_.setTooltip("Assign the selected preset to one of the eight quick keys. Replaces that key's previous assignment.");
+        assign_.onClick=[this]{showAssignments();};
+        for(auto* button:{&all_,&close_,&load_,&save_,&assign_}) addAndMakeVisible(*button);
         addAndMakeVisible(search_);
         setVisible(false);
     }
@@ -534,6 +588,7 @@ public:
         filters_.setBounds(left,top+72,292,bounds.getHeight()-255);
         presets_.setBounds(left+312,top+72,bounds.getWidth()-352,bounds.getHeight()-255);
         save_.setBounds(left,bounds.getBottom()-53,188,34);
+        assign_.setBounds(bounds.getRight()-530,bounds.getBottom()-53,170,34);
         load_.setBounds(bounds.getRight()-340,bounds.getBottom()-53,170,34);
         close_.setBounds(bounds.getRight()-150,bounds.getBottom()-53,130,34);
     }
@@ -542,7 +597,7 @@ public:
         if(key==juce::KeyPress::returnKey) {loadRow(presets_.getSelectedRow(),false);return true;}
         return false;
     }
-    std::function<void()> onClose,onSave,onLoad;
+    std::function<void()> onClose,onSave,onLoad,onAssign;
 private:
     juce::Rectangle<int> body() const {return {230,175,1180,690};}
     juce::String algorithmLabel(const NativeHallProcessor::PresetInfo& entry) const {
@@ -574,6 +629,24 @@ private:
     void updateLoad() {
         const int row=presets_.getSelectedRow();
         load_.setEnabled(juce::isPositiveAndBelow(row,visible_.size()) && available(entries_[visible_[row]]));
+        assign_.setEnabled(juce::isPositiveAndBelow(row,visible_.size()));
+    }
+    void showAssignments() {
+        const auto row=presets_.getSelectedRow();
+        if(!juce::isPositiveAndBelow(row,visible_.size())) return;
+        const auto selected=entries_[visible_[row]].name;
+        const auto names=processor_.quickPresetNames();
+        juce::PopupMenu menu;menu.setLookAndFeel(&getLookAndFeel());
+        for(unsigned slot=0;slot<names.size();++slot)
+            menu.addItem(int(slot+1),juce::String(slot+1)+"   "+(names[slot].isEmpty()?"Empty":names[slot]));
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&assign_).withMinimumWidth(240),
+            [safe=juce::Component::SafePointer<PresetBrowser>(this),selected](int choice) {
+                if(!safe || choice<1 || choice>int(NativeHallProcessor::quick_preset_count)) return;
+                const auto result=safe->processor_.assignQuickPreset(unsigned(choice-1),selected);
+                safe->status_=result.wasOk()?selected+" assigned to key "+juce::String(choice):result.getErrorMessage();
+                if(result.wasOk() && safe->onAssign) safe->onAssign();
+                safe->repaint();
+            });
     }
     void toggleFilter(int row) {
         if(!juce::isPositiveAndBelow(row,int(selected_.size()))) return;
@@ -632,7 +705,7 @@ private:
     FilterModel filter_model_;PresetModel preset_model_;
     juce::ListBox filters_,presets_;
     juce::TextEditor search_;
-    juce::TextButton all_,close_,load_,save_;
+    juce::TextButton all_,close_,load_,save_,assign_;
     juce::String status_;
 };
 
@@ -713,7 +786,7 @@ private:
 }
 
 struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
-    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panelmonolithic_png")),bezel_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor),preset_browser_(processor) {
+    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panelquickpresets_png")),bezel_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor),preset_browser_(processor) {
         setLookAndFeel(&look_);setSize(panel_width,panel_height);addAndMakeVisible(display_);
         display_.setBounds(variable_fader_x,100,1512,240);
         display_.algorithm.onClick=[this]{showAlgorithms();};
@@ -804,11 +877,19 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
         dirt_attachment_->sendInitialUpdate();
         algorithm_attachment_=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("algorithm"),[this](float){refreshProgram();});
         algorithm_attachment_->sendInitialUpdate();
+        const auto quick_cap=trimTransparentPadding(loadImage("quickkey_png"));
+        for(unsigned slot=0;slot<quick_keys_.size();++slot) {
+            auto& key=quick_keys_[slot];key.setComponentID("quick_preset_"+juce::String(slot+1));
+            key.setImage(quick_cap);
+            key.setBounds(100+int(slot)*180,950,180,190);addAndMakeVisible(key);
+            key.onClick=[this,slot]{reportPresetResult(processor_.loadQuickPreset(slot));};
+        }
         addChildComponent(rom_setup_);rom_setup_.setBounds(0,0,panel_width,panel_height);
-        addChildComponent(settings_panel_);settings_panel_.setBounds(990,76,550,315);
+        addChildComponent(settings_panel_);settings_panel_.setBounds(990,76,550,400);
         addChildComponent(preset_browser_);preset_browser_.setBounds(0,0,panel_width,panel_height);
         preset_browser_.onClose=[this]{display_.preset.grabKeyboardFocus();};
         preset_browser_.onSave=[this]{namePreset();};preset_browser_.onLoad=[this]{refreshProgram();};
+        preset_browser_.onAssign=[this]{refreshProgram();};
         addAndMakeVisible(settings_button_);settings_button_.setBounds(1480,12,64,52);
         settings_button_.onClick=[this] {
             settings_panel_.setVisible(settings_button_.getToggleState());
@@ -822,16 +903,12 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
         setLookAndFeel(nullptr);
     }
     void paint(juce::Graphics& g) override {
-        // One continuous faceplate bitmap, including frame and screws. Never
-        // stretch separate texture regions: their joins remain visible.
+        // One full-size photographic faceplate: no stretched strips or joins.
         g.drawImage(background_,getLocalBounds().toFloat(),juce::RectanglePlacement::stretchToFit);
-        // The lower plate retains its intended mechanical seam; the metal
-        // texture is continuous across it, with no second background layer.
-        g.setColour(ink.withAlpha(0.55f));g.drawHorizontalLine(900,10,float(panel_width-10));
-        g.setColour(juce::Colour(0xfff3edde).withAlpha(0.65f));g.drawHorizontalLine(901,10,float(panel_width-10));
         drawBezel(g,bezel_,{60,65,1354,178},{52,78,1536,274},12);
         g.setColour(ink);g.setFont(font(40,true));g.drawText("Cineol-X 224",84,17,800,44,juce::Justification::centredLeft);
         g.setColour(ink.withAlpha(0.45f));g.drawVerticalLine(global_fader_x-30,370,883.0f);
+        g.setFont(font(21,true));g.setColour(ink);g.drawText("QUICK PRESETS",600,916,440,28,juce::Justification::centred);
     }
     bool keyPressed(const juce::KeyPress& key) override {
         if(key==juce::KeyPress::escapeKey && settings_panel_.isVisible()) {
@@ -1067,7 +1144,12 @@ private:
                 "Diffusion: drag or use arrow keys. Double-click resets.");
             repaint();
         }
-        refreshDisplay();
+        refreshDisplay();refreshQuickPresets();
+    }
+    void refreshQuickPresets() {
+        const auto names=processor_.quickPresetNames();const int active=processor_.activeQuickPreset();
+        const bool available=processor_.programAvailable(0) || processor_.programAvailable(6);
+        for(unsigned slot=0;slot<quick_keys_.size();++slot) quick_keys_[slot].update(slot,names[slot],active==int(slot),available && !preset_dialog_open_);
     }
     void timerCallback() override {refreshProgram();}
     NativeHallProcessor& processor_;
@@ -1087,6 +1169,7 @@ private:
     bool displayed_xl_=false;
     int page_=0;
     MotorFader dirt_;
+    std::array<QuickPresetKey,NativeHallProcessor::quick_preset_count> quick_keys_;
     bool binding_dirt_=false,dragging_dirt_=false;
     RomSetup rom_setup_;
     SettingsButton settings_button_;
@@ -1104,8 +1187,8 @@ private:
 };
 
 CineolEditor::CineolEditor(NativeHallProcessor& processor):AudioProcessorEditor(processor),panel_(std::make_unique<Panel>(processor)) {
-    addAndMakeVisible(*panel_);setResizable(true,true);setResizeLimits(984,624,1640,1040);
-    getConstrainer()->setFixedAspectRatio(double(panel_width)/panel_height);setSize(1148,728);
+    addAndMakeVisible(*panel_);setResizable(true,true);setResizeLimits(984,744,panel_width,panel_height);
+    getConstrainer()->setFixedAspectRatio(double(panel_width)/panel_height);setSize(1148,868);
 }
 CineolEditor::~CineolEditor()=default;
 void CineolEditor::resized() {

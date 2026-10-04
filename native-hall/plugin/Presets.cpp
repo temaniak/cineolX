@@ -222,3 +222,48 @@ juce::Result NativeHallProcessor::loadBankPreset(const juce::String& name,const 
     auto entry=bank.getChild(index);
     return applyPreset(entry,entry.getProperty("name").toString());
 }
+std::array<juce::String,NativeHallProcessor::quick_preset_count> NativeHallProcessor::quickPresetNames() {
+    const juce::ScopedLock lock(preset_write_lock_);
+    std::array<juce::String,quick_preset_count> names;
+    for(unsigned slot=0;slot<names.size();++slot)
+        names[slot]=state.state.getProperty("quick_preset_"+juce::String(slot+1)).toString().substring(0,80);
+    return names;
+}
+int NativeHallProcessor::activeQuickPreset() {
+    const juce::ScopedLock lock(preset_write_lock_);
+    if(presetModified()) return -1;
+    const auto current=presetName();const auto names=quickPresetNames();
+    const int preferred=int(state.state.getProperty("quick_preset_active",-1));
+    if(juce::isPositiveAndBelow(preferred,int(names.size())) && names[unsigned(preferred)].isNotEmpty() &&
+        names[unsigned(preferred)]==current) return preferred;
+    for(unsigned slot=0;slot<names.size();++slot) if(names[slot].isNotEmpty() && names[slot]==current) return int(slot);
+    return -1;
+}
+juce::Result NativeHallProcessor::assignQuickPreset(unsigned slot,const juce::String& name,const juce::File& bank) {
+    if(slot>=quick_preset_count) return juce::Result::fail("Choose a quick preset key from 1 to 8.");
+    juce::Array<PresetInfo> entries;auto result=presetBankEntries(entries,bank);if(result.failed()) return result;
+    for(const auto& entry:entries) if(entry.name.equalsIgnoreCase(name)) {
+        {
+            const juce::ScopedLock lock(preset_write_lock_);
+            // Instance metadata only. Assignment never loads sound or emits parameter events.
+            state.state.setProperty("quick_preset_"+juce::String(slot+1),entry.name,nullptr);
+        }
+        updateHostDisplay(ChangeDetails{}.withNonParameterStateChanged(true));
+        return juce::Result::ok();
+    }
+    return juce::Result::fail("This preset is no longer in the bank.");
+}
+juce::Result NativeHallProcessor::loadQuickPreset(unsigned slot,const juce::File& bank) {
+    if(slot>=quick_preset_count) return juce::Result::fail("Choose a quick preset key from 1 to 8.");
+    const auto name=quickPresetNames()[slot];
+    if(name.isEmpty()) return juce::Result::fail("Assign a preset to this key in the preset bank first.");
+    auto result=loadBankPreset(name,bank);
+    if(result.wasOk()) {
+        {
+            const juce::ScopedLock lock(preset_write_lock_);
+            state.state.setProperty("quick_preset_active",int(slot),nullptr);
+        }
+        updateHostDisplay(ChangeDetails{}.withNonParameterStateChanged(true));
+    }
+    return result;
+}
