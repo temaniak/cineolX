@@ -65,6 +65,31 @@ static void compare(NativeHallProcessor& processor) {
             require(block.getSample(c,i)==wanted[i][c],"imported processor differs from native engine");
     }
 }
+static void compare_xl(NativeHallProcessor& processor) {
+    juce::MemoryBlock bytes;require(CineolRomBank::xlCacheFile().loadFileAsData(bytes),"missing XL bank");
+    auto bank=std::make_unique<cineol::xl::Bank>();
+    require(cineol::xl::read_bank(bytes.getData(),bytes.getSize(),*bank),"invalid XL bank");
+    auto reference=std::make_unique<cineol::xl::Runtime>();reference->select(*bank,0);
+    reference->controls(bank->programs[0].controls.factory,true,0,1,1,0,2);
+    std::array<std::array<float,2>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> delay{};unsigned position=0;
+    juce::AudioBuffer<float> block(2,256);juce::MidiBuffer midi;
+    for(int repeat=0;repeat<100;++repeat) {
+        std::array<std::array<float,2>,256> wanted{};
+        for(int i=0;i<256;++i) {
+            const float l=0.12f*std::sin(float(i+repeat*256)*0.1f),r=(i==0 && repeat==0)?0.3f:0;
+            block.setSample(0,i,l);block.setSample(1,i,r);float a,b;reference->process(l,r,a,b,false);
+            wanted[i]=delay[position];delay[position]={a,b};position=(position+1)%delay.size();
+        }
+        audio=true;processor.processBlock(block,midi);audio=false;
+        for(int i=0;i<256;++i) for(int c=0;c<2;++c)
+            require(block.getSample(c,i)==wanted[i][c],"published XL differs from native runtime");
+    }
+    auto corrupted=bytes;static_cast<uint8_t*>(corrupted.getData())[corrupted.getSize()-1]^=1;
+    require(!cineol::xl::read_bank(corrupted.getData(),corrupted.getSize(),*bank),"XL checksum did not reject corruption");
+    corrupted=bytes;cineol::xl::BankHeader bad;std::memcpy(&bad,bytes.getData(),sizeof bad);bad.version=99;
+    std::memcpy(corrupted.getData(),&bad,sizeof bad);
+    require(!cineol::xl::read_bank(corrupted.getData(),corrupted.getSize(),*bank),"XL version not validated");
+}
 static void wait(NativeHallProcessor& processor) {
     const double deadline=juce::Time::getMillisecondCounterHiRes()+1800000;
     juce::String last;
@@ -82,9 +107,23 @@ int main(int argc,char** argv) {
     const std::string mode=argv[1];
     {
         NativeHallProcessor processor;
-        if(mode=="--cached") {
+        if(mode=="--cached" || mode=="--cached-xl") {
+            if(mode=="--cached-xl") processor.setCurrentProgram(6);
             require(processor.ready() && !processor.importingRoms(),"restart did not use cached bank");
-            processor.prepareToPlay(48000,256);compare(processor);
+            processor.prepareToPlay(48000,256);if(mode=="--cached-xl") compare_xl(processor);else compare(processor);
+        } else if(mode=="--add-xl") {
+            require(argc==4 && processor.ready() && !processor.programAvailable(6),"add-XL test requires only original cache");
+            juce::MemoryBlock original;require(CineolRomBank::cacheFile().loadFileAsData(original),"original bank missing");
+            NativeHallProcessor second;processor.setCurrentProgram(6);second.setCurrentProgram(6);dry(processor);
+            processor.setPlayConfigDetails(2,2,48000,256);processor.prepareToPlay(48000,256);
+            std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+            require(!find(*editor,"rom_setup")->isVisible() && find(*editor,"algorithm")->isEnabled(),"missing XL trapped existing 224 UI");
+            require(processor.importRoms({juce::File(juce::String::fromUTF8(argv[2]))}),"adding XL did not start");
+            wait(processor);require(processor.ready() && second.ready(),"added XL not published to instances");
+            juce::MemoryBlock got,wanted,unchanged;
+            require(CineolRomBank::xlCacheFile().loadFileAsData(got) && juce::File(juce::String::fromUTF8(argv[3])).loadFileAsData(wanted) && got==wanted,"added XL differs from offline preparation");
+            require(CineolRomBank::cacheFile().loadFileAsData(unchanged) && original==unchanged,"adding XL changed original bank");
+            compare_xl(processor);
         } else {
             require(!processor.ready(),"test requires a fresh or invalid cache");
             dry(processor);dry(processor,true);processor.setPlayConfigDetails(2,2,48000,256);processor.prepareToPlay(48000,256);
@@ -137,21 +176,22 @@ int main(int argc,char** argv) {
                     processor.cancelRomImport();
                 }
                 wait(processor);
+                if(mode=="--import-xl") {processor.setCurrentProgram(6);second.setCurrentProgram(6);}
                 if(mode=="--reject" || mode=="--cancel") {
                     require(!processor.ready() && !second.ready(),"unsupported/cancelled import activated processor");
                     if(mode=="--reject") require(processor.romStatus().contains("224 v4.4"),"missing compatibility error");
                     require(!CineolRomBank::cacheFile().existsAsFile(),"failed import saved a bank");
                     dry(processor);
                 } else {
-                    require(mode=="--import" && argc==4,"invalid test mode");
+                    require((mode=="--import" || mode=="--import-xl") && argc==4,"invalid test mode");
                     require(processor.ready() && second.ready(),"completed bank not shared with second instance");
                     juce::Timer::callPendingTimersSynchronously();
                     require(!find(*editor,"rom_setup")->isVisible() && find(*editor,"algorithm")->isEnabled(),
                             "completed import did not reveal the plugin controls");
                     juce::MemoryBlock got,wanted;
-                    require(CineolRomBank::cacheFile().loadFileAsData(got) &&
+                    require((mode=="--import-xl"?CineolRomBank::xlCacheFile():CineolRomBank::cacheFile()).loadFileAsData(got) &&
                         juce::File(juce::String::fromUTF8(argv[3])).loadFileAsData(wanted) && got==wanted,"runtime bank differs from build-time bank");
-                    compare(processor);
+                    if(mode=="--import-xl") compare_xl(processor);else compare(processor);
                 }
             }
         }

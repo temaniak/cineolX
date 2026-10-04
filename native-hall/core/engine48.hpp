@@ -11,6 +11,7 @@ struct Parameters {
     bool analog=true;
     int output_left=0,output_right=2;
     unsigned program=2;
+    float dirt=0; // Optional continuous desktop control; hardware defaults retain their sound.
 };
 class Engine48 {
 public:
@@ -22,11 +23,21 @@ public:
         bank_=&bank;current_program_=std::min(program,program_count-1);
         hall_.prepare(bank,current_program_);initialize();params_.program=current_program_;return true;
     }
-private:
-    void initialize() noexcept {
+    // Desktop firmware switches reuse kernels prepared outside processing.
+    // Existing prepare() behavior and the portable Daisy signal path are retained.
+    void prepare_audio() noexcept {
         down_.prepare();up_.prepare();
         for(auto& f:input_) f.prepare(true);
         for(auto& f:output_) f.prepare(false);
+    }
+    bool activate(const ProgramBank& bank,unsigned program=2) noexcept {
+        bank_=&bank;current_program_=std::min(program,program_count-1);
+        hall_.prepare(bank,current_program_);reset_audio();params_.program=current_program_;return true;
+    }
+private:
+    void initialize() noexcept {prepare_audio();reset_audio();}
+    void reset_audio() noexcept {
+        down_.reset();up_.reset();for(auto& f:input_) f.reset();for(auto& f:output_) f.reset();
         fifo_.fill({});dry_.fill({}); read_=write_=dry_position_=0;
         raw_delay_.fill({});raw_hold_.fill(0);
         controls_applied_=false;
@@ -58,8 +69,9 @@ public:
         if(!std::isfinite(left)) left=0;
         if(!std::isfinite(right)) right=0;
         gain_+=0.002f*(gain_target_-gain_);mix_+=0.002f*(params_.mix-mix_);
-        analog_blend_+=0.002f*((params_.analog?1.0f:0.0f)-analog_blend_);
-        if(std::abs(analog_blend_-(params_.analog?1.0f:0.0f))<1e-5f) analog_blend_=params_.analog?1.0f:0.0f;
+        const float clean=params_.analog?1-std::clamp(params_.dirt,0.0f,1.0f):0;
+        analog_blend_+=0.002f*(clean-analog_blend_);
+        if(std::abs(analog_blend_-clean)<1e-5f) analog_blend_=clean;
         float raw[]={left*gain_,right*gain_},in[2];
         for(unsigned c=0;c<2;++c) in[c]=input_[c].process(raw[c]);
         down_.process(in,[&](const float* native) {

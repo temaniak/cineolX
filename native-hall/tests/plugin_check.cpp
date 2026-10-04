@@ -37,39 +37,14 @@ static juce::Component* find(juce::Component& root,const char* id) {
     for(auto* child:root.getChildren()) if(auto* found=find(*child,id)) return found;
     return nullptr;
 }
-// Count distinct bright LED cores in a rendered digit. Adjacent segments must
-// remain separate even at the editor's smallest supported scale.
-static int lit_segments(const juce::Image& image,juce::Rectangle<int> area) {
-    std::vector<bool> visited(size_t(area.getWidth()*area.getHeight()));
-    std::vector<juce::Point<int>> pending;int count=0;
-    auto lit=[&](int x,int y) {
-        auto c=image.getPixelAt(x,y);
-        return c.getAlpha()>240 && c.getRed()>240 && c.getGreen()<100 && c.getBlue()<100;
-    };
-    auto index=[&](int x,int y){return size_t((y-area.getY())*area.getWidth()+x-area.getX());};
-    for(int y=area.getY();y<area.getBottom();++y) for(int x=area.getX();x<area.getRight();++x) {
-        if(visited[index(x,y)] || !lit(x,y)) continue;
-        ++count;pending.push_back({x,y});visited[index(x,y)]=true;
-        while(!pending.empty()) {
-            auto point=pending.back();pending.pop_back();
-            for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx) {
-                int nx=point.x+dx,ny=point.y+dy;
-                if(area.contains(nx,ny) && !visited[index(nx,ny)] && lit(nx,ny)) {
-                    visited[index(nx,ny)]=true;pending.push_back({nx,ny});
-                }
-            }
-        }
-    }
-    return count;
-}
 static void check_editor() {
     NativeHallProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
-    auto* dirt=dynamic_cast<juce::ToggleButton*>(find(*editor,"digital_dirt"));
+    auto* dirt=dynamic_cast<juce::Slider*>(find(*editor,"dirt"));
     auto* bass=dynamic_cast<juce::Slider*>(find(*editor,"bass"));
     auto* delay=dynamic_cast<juce::Slider*>(find(*editor,"predelay"));
-    auto* algorithm=dynamic_cast<juce::ComboBox*>(find(*editor,"algorithm"));
-    auto* output=dynamic_cast<juce::ComboBox*>(find(*editor,"output_r"));
+    auto* algorithm=dynamic_cast<juce::Button*>(find(*editor,"algorithm"));
+    auto* output=dynamic_cast<juce::Button*>(find(*editor,"output_r"));
     auto* diffusion=find(*editor,"diffusion");auto* display=find(*editor,"display");
     auto* settings=dynamic_cast<juce::Button*>(find(*editor,"settings"));
     auto* settings_panel=find(*editor,"settings_panel");
@@ -86,100 +61,236 @@ static void check_editor() {
     require(low_latency->getToggleState(),"Low latency checkbox restoration failed");
     settings->setToggleState(false,juce::sendNotificationSync);
     require(!settings_panel->isVisible(),"gear did not close Settings");
-    require(!dirt->getToggleState() && p.state.getRawParameterValue("analog")->load()==1,"Digital Dirt default inversion");
-    dirt->setToggleState(true,juce::sendNotificationSync);
+    require(dirt->getValue()==0 && p.state.getRawParameterValue("analog")->load()==1,"Digital Dirt default inversion");
+    dirt->setValue(1,juce::sendNotificationSync);
     require(p.state.getRawParameterValue("analog")->load()==0,"Digital Dirt ON did not bypass filters");
-    dirt->setToggleState(false,juce::sendNotificationSync);
+    dirt->setValue(0,juce::sendNotificationSync);
     require(p.state.getRawParameterValue("analog")->load()==1,"Digital Dirt OFF did not enable filters");
-    set(p,"analog",0);require(dirt->getToggleState(),"legacy automation did not update Digital Dirt");
-    set(p,"analog",1);require(!dirt->getToggleState(),"legacy clean state did not clear Digital Dirt");
+    set(p,"analog",0);require(dirt->getValue()==1,"legacy automation did not update Digital Dirt");
+    set(p,"analog",1);require(dirt->getValue()==0,"legacy clean state did not clear Digital Dirt");
+    dirt->setValue(0.35,juce::sendNotificationSync);
+    require(std::abs(p.state.getRawParameterValue("analog")->load()-0.65f)<1e-5f,"continuous Dirt control failed");
+    require(algorithm->getParentComponent()==display && output->getParentComponent()==display && bool(algorithm->onClick) && bool(output->onClick),"algorithm/output not on red display");
+    for(const char* id:{"mode_enh","decay_opt"}) require(find(*editor,id)->getParentComponent()==display,"mode outside red display");
+    require(!find(*editor,"digital_dirt") && dirt->getBounds().getHeight()>500,"old bottom controls or short fader retained");
+    set(p,"analog",1);
     bass->setValue(20,juce::sendNotificationSync);
     require(p.state.getRawParameterValue("bass")->load()==20 && display->getName().contains("BASS 4.6 s"),
             "fader/display did not update together");
-    algorithm->setSelectedId(4,juce::sendNotificationSync);
+    p.setCurrentProgram(3);
     require(p.getCurrentProgram()==3 && !diffusion->isEnabled() && display->getName().startsWith("04 | Acoustic Chamber"),
             "algorithm display/Chamber state did not update");
     delay->setValue(88,juce::sendNotificationSync);
     require(display->getName().contains("PRE-DELAY 89 ms"),"Chamber pre-delay display is wrong");
-    algorithm->setSelectedId(2,juce::sendNotificationSync);
+    p.setCurrentProgram(1);
     require(diffusion->isEnabled() && display->getName().startsWith("02 | Vocal Plate") &&
             display->getName().contains("PRE-DELAY 64 ms"),"Plate display/minimum did not update with unchanged fader");
-    output->setSelectedId(2,juce::sendNotificationSync);
+    set(p,"output_r",1);
     require(p.state.getRawParameterValue("output_r")->load()==1,"output selection attachment failed");
     set(p,"analog",0);juce::MemoryBlock saved;p.getStateInformation(saved);set(p,"analog",1);
     p.setStateInformation(saved.getData(),int(saved.getSize()));
-    require(dirt->getToggleState(),"Digital Dirt saved-state restoration failed");
+    require(dirt->getValue()==1,"Digital Dirt saved-state restoration failed");
     for(int program=0;program<6;++program) {
         set(p,"algorithm",float(program));
         require(display->getName().startsWith(juce::String(program+1).paddedLeft('0',2)+" | "),"host algorithm display failed");
-        constexpr int segments[]={2,5,5,4,5,6};
-        for(float scale:{0.6f,0.7f,1.0f}) {
-            auto shot=display->createComponentSnapshot(display->getLocalBounds(),true,scale);
-            auto area=[&](float x){return juce::Rectangle<float>(x,5,72,116).transformedBy(
-                juce::AffineTransform::scale(scale)).getSmallestIntegerContainer();};
-            require(lit_segments(shot,area(62))==6 && lit_segments(shot,area(152))==segments[program],
-                    "LED digit segments touch, overlap, or disappear at an editor size");
-        }
     }
     for(int width:{882,1029,1470}) {
-        editor->setSize(width,int(std::lround(width*1070.0/1470)));
+        editor->setSize(width,int(std::lround(width*1040.0/1640)));
         auto shot=editor->createComponentSnapshot(editor->getLocalBounds());
         require(shot.isValid() && shot.getWidth()==width,"resized editor snapshot failed");
     }
-    std::cout<<"Editor: fader/display, six algorithms, separated LED segments, outputs, inverted Digital Dirt + legacy automation/state, three sizes pass\n";
+    auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page"));
+    require(page && find(*editor,"firmware"),"page/firmware controls missing");
+    set(p,"algorithm",2);set(p,"diffusion",31);
+    const float saved_depth=p.state.getRawParameterValue("depth")->load();
+    const float saved_diffusion=p.state.getRawParameterValue("diffusion")->load();
+    struct PageEvents final : juce::AudioProcessorParameter::Listener {
+        unsigned changes=0;
+        void parameterValueChanged(int,float) override {++changes;}
+        void parameterGestureChanged(int,bool) override {}
+    } page_events;
+    for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->addListener(&page_events);
+    auto* first_page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_1"));
+    auto* second_page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_2"));
+    require(first_page && second_page && first_page->isVisible() && second_page->isVisible() && first_page->getToggleState(),"direct page selectors missing or unselected");
+    second_page->onClick();require(int(display->getProperties()["page_index"])==1 && second_page->getToggleState() && !first_page->getToggleState(),"direct detail-page selection failed");
+    second_page->onClick();first_page->onClick();
+    require(int(display->getProperties()["page_index"])==0 && first_page->getToggleState() && page_events.changes==0,"direct page selection changed parameters");
+    page->onClick();
+    require(int(display->getProperties()["page_index"])==1 && !bass->isVisible() && diffusion->isVisible(),"detail page binding failed");
+    for(unsigned slot=0;slot<6;++slot) if(slot!=4) {
+        auto* inactive=dynamic_cast<juce::Slider*>(find(*editor,("inactive_"+juce::String(slot+1)).toRawUTF8()));
+        require(inactive && inactive->isVisible() && !inactive->isEnabled() && inactive->getValue()==0,"inactive fader parking failed");
+    }
+    page->onClick();
+    require(int(display->getProperties()["page_index"])==0 && bass->isVisible() && !diffusion->isVisible(),"main page binding failed");
+    require(page_events.changes==0 && p.state.getRawParameterValue("depth")->load()==saved_depth &&
+        p.state.getRawParameterValue("diffusion")->load()==saved_diffusion,"page navigation changed DSP/automation");
+    page->onClick();set(p,"algorithm",3);
+    const auto parking_deadline=juce::Time::getMillisecondCounterHiRes()+400;
+    while(juce::Time::getMillisecondCounterHiRes()<parking_deadline) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
+    require(!diffusion->isEnabled() && diffusion->getProperties()["motor_position"]==juce::var(0.0) &&
+        p.state.getRawParameterValue("diffusion")->load()==saved_diffusion,"Chamber parking wrote the parameter");
+    for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->removeListener(&page_events);
+    page->onClick();
+    set(p,"algorithm",2);
+    juce::MemoryBlock page_state;p.getStateInformation(page_state);NativeHallProcessor reference;
+    reference.setStateInformation(page_state.getData(),int(page_state.getSize()));
+    p.prepareToPlay(48000,256);reference.prepareToPlay(48000,256);
+    juce::AudioBuffer<float> actual(2,256),expected(2,256);juce::MidiBuffer midi;
+    double tail_energy=0;
+    for(unsigned block=0;block<200;++block) {
+        actual.clear();expected.clear();
+        if(block==0) {actual.setSample(0,0,0.5f);expected.setSample(0,0,0.5f);}
+        if(block%2) page->onClick();
+        else (int(display->getProperties()["page_index"])==0?second_page:first_page)->onClick();
+        p.processBlock(actual,midi);reference.processBlock(expected,midi);
+        for(int c=0;c<2;++c) for(int i=0;i<256;++i) {
+            require(actual.getSample(c,i)==expected.getSample(c,i),"page navigation altered audio or cleared the tail");
+            if(block>100) tail_energy+=double(actual.getSample(c,i))*actual.getSample(c,i);
+        }
+    }
+    require(tail_energy>1e-9,"page-navigation tail fixture was silent");
+    std::cout<<"Editor: fader/display, six algorithms, expanded preset display, outputs, inverted Digital Dirt + legacy automation/state, three sizes pass\n";
+}
+static void check_fader_limits() {
+    NativeHallProcessor p;std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* display=find(*editor,"display");auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page"));
+    require(display && page,"limit-check display/page missing");unsigned checked=0;
+    for(int program=0;program<p.getNumPrograms();++program) {
+        p.setCurrentProgram(program);
+        while(int(display->getProperties()["page_index"])!=0) page->onClick();
+        const unsigned pages=p.parameterPages();
+        for(unsigned i=0;i<9;++i) {
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(i+1)).toRawUTF8()));
+            require(button && button->isVisible()==(i<pages),"direct page selector count differs from algorithm pages");
+        }
+        auto* last=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(pages)).toRawUTF8()));
+        auto* first=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_1"));
+        last->onClick();require(int(display->getProperties()["page_index"])==int(pages-1) && last->getToggleState(),"direct jump to last parameter page failed");
+        require(page->getButtonText()=="PAGE "+juce::String(pages)+"/"+juce::String(pages),"direct page selection lost PAGE n/n indicator");
+        first->onClick();
+        for(unsigned current=0;current<pages;++current) {
+            const unsigned count=p.usesXL()?6:9;
+            auto* active=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(current+1)).toRawUTF8()));
+            require(active && active->getToggleState() && int(display->getProperties()["page_index"])==int(current),"cyclic and direct page selectors disagree");
+            for(unsigned i=0;i<pages;++i) {
+                auto* button=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(i+1)).toRawUTF8()));
+                require(button->getToggleState()==(i==current),"more than one page selector is active");
+                require(find(*editor,"algorithm")->getRight()<=button->getX(),"algorithm name overlaps page selectors");
+            }
+            for(unsigned slot=0;slot<count;++slot) {
+                const auto id=p.usesXL()?"xl_slot_"+juce::String(slot+1):juce::String(NativeHallProcessor::ids[slot]);
+                auto* slider=dynamic_cast<juce::Slider*>(find(*editor,id.toRawUTF8()));
+                if(!slider || !slider->isVisible() || !slider->isEnabled()) continue;
+                slider->setValue(slider->getMinimum(),juce::sendNotificationSync);
+                slider->setValue(slider->getMaximum(),juce::sendNotificationSync);
+                if(display->getName().contains("--")) {
+                    std::cerr<<"Endpoint "<<p.getProgramName(program)<<" page "<<current+1<<" slot "<<slot+1<<": "<<display->getName()<<'\n';
+                    require(false,"active fader maximum displayed as inactive dashes");
+                }
+                ++checked;
+            }
+            if(current+1<pages) page->onClick();
+        }
+    }
+    p.setCurrentProgram(6);while(int(display->getProperties()["page_index"])!=0) page->onClick();
+    auto* crossover=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_3"));require(crossover && crossover->isEnabled(),"Crossover limit fixture missing");
+    crossover->setValue(0,juce::sendNotificationSync);crossover->setValue(252,juce::sendNotificationSync);
+    require(display->getName().endsWith("19.0 kHz"),"last finite XL Crossover value was lost");
+    for(int value:{253,254,255}) {
+        crossover->setValue(value,juce::sendNotificationSync);
+        require(display->getName().endsWith("INF kHz") && p.state.getRawParameterValue("xl_02")->load()==value,
+            "XL infinite frequency display changed control value or remained dashes");
+    }
+    p.setCurrentProgram(11);while(int(display->getProperties()["page_index"])!=0) page->onClick();
+    auto* decay=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_1"));require(decay && decay->isEnabled(),"decay limit fixture missing");
+    decay->setValue(0,juce::sendNotificationSync);decay->setValue(decay->getMaximum(),juce::sendNotificationSync);
+    require(display->getName().endsWith("INF s"),"XL infinite decay was displayed as an unavailable parameter");
+    require(checked>200,"insufficient active fader endpoint coverage");
+    std::cout<<"Fader limits: "<<checked<<" active endpoints across all 224/XL pages, finite-to-INF frequency boundary and infinite decay pass\n";
 }
 struct PresetTestFiles {
     juce::File folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
-        .getNonexistentChildFile("cineol-preset-check",{},false);
+        .getChildFile("cineol-preset-check-"+juce::Uuid().toString());
+    PresetTestFiles() {require(folder.createDirectory().wasOk(),"could not create isolated preset fixtures");}
     ~PresetTestFiles() {folder.deleteRecursively();}
 };
 static void check_presets() {
     PresetTestFiles files;NativeHallProcessor p;
     const auto first=files.folder.getChildFile("Warm Concert Hall.cineol224");
     const auto second=files.folder.getChildFile("Short Hall.cineol224");
+    set(p,"analog",0.8f);
     require(p.savePreset(first).wasOk() && p.presetName()=="Warm Concert Hall" && !p.presetModified(),"preset save/name failed");
-    set(p,"bass",5);set(p,"depth",40);set(p,"mix",0.5f);set(p,"low_latency",1);
+    set(p,"bass",5);set(p,"depth",40);set(p,"mix",0.5f);set(p,"low_latency",1);set(p,"analog",0.15f);
     require(p.presetModified(),"edited preset was not marked modified");
     require(p.savePreset(second).wasOk(),"second preset save failed");
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
     auto* bass=dynamic_cast<juce::Slider*>(find(*editor,"bass"));
+    auto* dirt=dynamic_cast<juce::Slider*>(find(*editor,"dirt"));
     auto* preset=dynamic_cast<juce::Button*>(find(*editor,"preset"));
-    require(bass && preset,"preset UI missing");
+    require(bass && dirt && preset,"preset UI missing");
     struct Counter final : juce::AudioProcessorParameter::Listener {
         int changes=0;
         void parameterValueChanged(int,float) override {++changes;}
         void parameterGestureChanged(int,bool) override {}
-    } counter;
+    } counter,dirt_counter;
     auto* parameter=p.state.getParameter("bass");parameter->addListener(&counter);
+    auto* dirt_parameter=p.state.getParameter("analog");dirt_parameter->addListener(&dirt_counter);
     const double start=double(bass->getProperties()["motor_position"]);
+    const double dirt_start=double(dirt->getProperties()["motor_position"]);
     require(p.loadPreset(first).wasOk() && p.getCurrentProgram()==2,"preset load failed");
     const double target=bass->valueToProportionOfLength(17);
     require(bass->getValue()==17 && counter.changes==1 && bool(bass->getProperties()["motor_moving"]) &&
         std::abs(double(bass->getProperties()["motor_position"])-start)<0.0001,"preset did not apply immediately with visual-only motion");
+    require(std::abs(dirt->getValue()-0.2)<0.0001 && dirt_counter.changes==1 && bool(dirt->getProperties()["motor_moving"]) &&
+        std::abs(double(dirt->getProperties()["motor_position"])-dirt_start)<0.0001,"Dirt preset recall did not animate from its previous position");
     auto tick=[](int ms) {
         const auto end=juce::Time::getMillisecondCounterHiRes()+ms;
         while(juce::Time::getMillisecondCounterHiRes()<end) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
     };
     tick(100);const double middle=double(bass->getProperties()["motor_position"]);
+    const double dirt_middle=double(dirt->getProperties()["motor_position"]);
     require(middle>start && middle<target && counter.changes==1 && bass->getValue()==17,"fader animation changed audio/automation or skipped motion");
+    require(dirt_middle<dirt_start && dirt_middle>0.2 && dirt_counter.changes==1 &&
+        std::abs(p.state.getRawParameterValue("analog")->load()-0.8f)<0.0001,"Dirt animation changed the parameter or skipped motion");
     // A second recall starts at the currently drawn cap, not either endpoint.
     require(p.loadPreset(second).wasOk(),"rapid preset recall failed");
     require(std::abs(double(bass->getProperties()["motor_position"])-middle)<0.03,"rapid recall jumped its visual starting point");
+    // The old trajectory advances while the second file is parsed. Allow a
+    // small fraction of this larger travel, but reject a jump to either end.
+    require(std::abs(double(dirt->getProperties()["motor_position"])-dirt_middle)<0.08,"rapid Dirt recall jumped its visual starting point");
     tick(400);
     require(!bool(bass->getProperties()["motor_moving"]) &&
         std::abs(double(bass->getProperties()["motor_position"])-start)<0.0001 && counter.changes==2,
         "animation did not settle or generated extra parameter events");
+    require(!bool(dirt->getProperties()["motor_moving"]) &&
+        std::abs(double(dirt->getProperties()["motor_position"])-dirt_start)<0.0001 && dirt_counter.changes==2,
+        "Dirt animation did not settle or generated extra parameter events");
     require(p.loadPreset(first).wasOk(),"repeat recall failed");
     bass->setValue(22,juce::sendNotificationSync);
+    dirt->setValue(0.45,juce::sendNotificationSync);
     require(!bool(bass->getProperties()["motor_moving"]) && p.presetModified() &&
         std::abs(double(bass->getProperties()["motor_position"])-bass->valueToProportionOfLength(22))<0.0001,
         "manual edit did not interrupt visual motion");
+    require(!bool(dirt->getProperties()["motor_moving"]) &&
+        std::abs(double(dirt->getProperties()["motor_position"])-0.45)<0.0001 &&
+        std::abs(p.state.getRawParameterValue("analog")->load()-0.55f)<0.0001,"manual Dirt edit did not interrupt recall animation");
     parameter->removeListener(&counter);
+    dirt_parameter->removeListener(&dirt_counter);
     require(p.state.getRawParameterValue("low_latency")->load()==1,"preset changed instance Low latency");
     require(p.loadPreset(first).wasOk() && !p.presetModified(),"preset baseline restoration failed");
     juce::MemoryBlock session;p.getStateInformation(session);NativeHallProcessor restored;
     restored.setStateInformation(session.getData(),int(session.getSize()));
     require(restored.presetName()=="Warm Concert Hall" && !restored.presetModified(),"DAW state lost preset identity/baseline");
+    auto firmware_xml=juce::XmlDocument::parse(first);
+    require(firmware_xml && firmware_xml->getStringAttribute("firmware")=="224-v4.4" &&
+        firmware_xml->getIntAttribute("version")==4,"preset firmware identity missing");
+    const auto foreign=files.folder.getChildFile("Foreign.cineol224");
+    for(const auto& identity:juce::StringArray{"224xl-v8.21","unknown"}) {
+        firmware_xml->setAttribute("firmware",identity);firmware_xml->writeTo(foreign);
+        require(p.loadPreset(foreign).failed() && !p.presetModified(),"unavailable firmware preset changed current sound");
+    }
     // No partial mutation on broken, incomplete, nonnumeric or out-of-range files.
     auto original=juce::XmlDocument::parse(first);require(original!=nullptr,"saved preset XML missing");
     const auto broken=files.folder.getChildFile("Broken.cineol224");
@@ -195,10 +306,11 @@ static void check_preset_bank() {
     PresetTestFiles files;NativeHallProcessor p;
     const auto bank=files.folder.getChildFile("User Presets.cineolbank");
     const auto legacy=files.folder.getChildFile("Legacy Hall.cineol224");
+    set(p,"analog",0.8f);
     require(p.savePreset(legacy).wasOk(),"legacy bank fixture failed");
     juce::StringArray names;
     require(p.presetNames(names,bank).wasOk() && names.contains("Legacy Hall"),"legacy preset was not adopted");
-    set(p,"bass",5);set(p,"mix",0.5f);set(p,"low_latency",1);
+    set(p,"bass",5);set(p,"mix",0.5f);set(p,"low_latency",1);set(p,"analog",0.15f);
     const auto unicode=juce::String::fromUTF8("Зал / тёплый");
     require(p.saveBankPreset(unicode,false,bank).wasOk() && p.presetName()==unicode && !p.presetModified(),"named bank save failed");
     require(bank.existsAsFile() && legacy.existsAsFile() &&
@@ -215,8 +327,12 @@ static void check_preset_bank() {
         "bank did not persist between instances or changed instance latency");
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
     auto* bass=dynamic_cast<juce::Slider*>(find(*editor,"bass"));
+    auto* dirt=dynamic_cast<juce::Slider*>(find(*editor,"dirt"));
     require(p.loadBankPreset("Legacy Hall",bank).wasOk() && bass && bass->getValue()==17 &&
         bool(bass->getProperties()["motor_moving"]),"bank recall did not animate the fader");
+    require(dirt && std::abs(dirt->getValue()-0.2)<0.0001 && bool(dirt->getProperties()["motor_moving"]) &&
+        std::abs(double(dirt->getProperties()["motor_position"])-0.85)<0.0001,
+        "bank recall did not restore and animate fractional Dirt");
     require(p.loadBankPreset("missing",bank).failed() && p.presetName()=="Legacy Hall" && !p.presetModified(),"missing bank entry changed the instance");
     p.setCurrentProgram(1);require(p.saveBankPreset("Vocal Room",false,bank).wasOk(),"algorithm preset save failed");
     juce::Array<NativeHallProcessor::PresetInfo> entries;
@@ -236,19 +352,32 @@ static void check_preset_bank() {
         auto* dialog=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
         require(dialog && dialog->getTextEditor("preset_name"),"save opened a file chooser instead of a name dialog");
         dialog->getTextEditor("preset_name")->setText("UI Hall");dialog->exitModalState(1);
-        juce::Timer::callAfterDelay(60,[&] {
+        juce::MessageManager::callAsync([&] {
             require(p.presetName()=="UI Hall" && !p.presetModified() &&
                 p.presetBankEntries(entries).wasOk() && entries.size()==1 && entries[0].algorithm==2,
                 "name-only UI save failed or used the wrong algorithm");
             require(p.loadBankPreset("Legacy Hall",bank).wasOk(),"UI test baseline restoration failed");
-            save->onClick();editor.reset();
-            juce::Timer::callAfterDelay(60,[] {
-                require(!juce::Component::getCurrentlyModalComponent(),"closing the editor left a preset dialog open");
-                juce::MessageManager::getInstance()->stopDispatchLoop();
+            save->onClick();
+            auto* again=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
+            require(again && again->getTextEditor("preset_name"),"second save dialog missing");
+            again->getTextEditor("preset_name")->setText("UI Hall");again->exitModalState(1);
+            juce::MessageManager::callAsync([&] {
+                auto* replace=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
+                require(replace && replace->getName()=="Replace preset?","replacement confirmation missing");
+                require(&replace->getLookAndFeel()==&save->getLookAndFeel(),"replacement dialog lost the editor theme");
+                replace->exitModalState(0);
+                juce::MessageManager::callAsync([&] {
+                    require(p.presetName()=="Legacy Hall" && !p.presetModified(),"cancelling replacement changed the preset");
+                    save->onClick();editor.reset();
+                    juce::MessageManager::callAsync([] {
+                        require(!juce::Component::getCurrentlyModalComponent(),"closing the editor left a preset dialog open");
+                        juce::MessageManager::getInstance()->stopDispatchLoop();
+                    });
+                });
             });
         });
         juce::MessageManager::getInstance()->runDispatchLoop();
-        std::cout<<"Preset dialog: name-only bank save and safe editor close pass\n";
+        std::cout<<"Preset dialog: name-only bank save, themed replacement/cancel and safe editor close pass\n";
     }
     const auto before=bank.loadFileAsString();
     require(bank.replaceWithText("<broken/>"),"bank corruption fixture failed");
@@ -260,7 +389,76 @@ static void check_preset_bank() {
     require(xml->writeTo(bank),"invalid bank parameter fixture failed");
     const auto invalidName=xml->getFirstChildElement()->getStringAttribute("name");
     require(p.loadBankPreset(invalidName,bank).failed() && !p.presetModified(),"invalid bank parameter changed the instance");
+    // Listing an unavailable firmware must not make the shared library
+    // unreadable. Availability is checked only when applying that preset.
+    const auto mixed_bank=files.folder.getChildFile("Mixed").getChildFile("User Presets.cineolbank");
+    require(p.saveBankPreset("Current",false,mixed_bank).wasOk(),"mixed bank preparation failed");
+    auto mixed=juce::XmlDocument::parse(mixed_bank);auto foreign=std::make_unique<juce::XmlElement>(*mixed->getFirstChildElement());
+    foreign->setAttribute("name","XL fixture");foreign->setAttribute("firmware","224xl-v8.1a");
+    mixed->addChildElement(foreign.release());mixed->writeTo(mixed_bank);
+    require(p.presetBankEntries(entries,mixed_bank).wasOk() && entries.size()==2,
+        "unavailable firmware made the shared library unreadable");
+    require(p.loadBankPreset("XL fixture",mixed_bank).failed() && p.presetName()=="Current" && !p.presetModified(),
+        "unavailable firmware recall changed current sound");
     std::cout<<"Preset bank: named save/replace, persistent shared listing, legacy adoption, algorithm grouping/recall, Unicode names, visual recall, validation pass\n";
+}
+static void check_preset_browser() {
+    NativeHallProcessor p;const auto bank=NativeHallProcessor::presetBankFile();
+    const bool existed=bank.existsAsFile();const auto previous=bank.loadFileAsString();
+    if(existed) require(bank.deleteFile(),"could not isolate browser fixture bank");
+    p.setCurrentProgram(2);set(p,"analog",0.82f);require(p.saveBankPreset("Browser Hall").wasOk(),"browser Hall fixture failed");
+    p.setCurrentProgram(1);require(p.saveBankPreset("Browser Plate").wasOk(),"browser Plate fixture failed");
+    p.setCurrentProgram(6);set(p,"analog",0.23f);require(p.saveBankPreset("Browser XL").wasOk(),"browser XL fixture failed");
+    require(p.loadBankPreset("Browser Hall").wasOk(),"browser baseline failed");
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* open=dynamic_cast<juce::Button*>(find(*editor,"preset"));require(open && bool(open->onClick),"browser launcher missing");open->onClick();
+    auto* browser=find(*editor,"preset_browser");
+    auto* filters=dynamic_cast<juce::ListBox*>(find(*editor,"preset_algorithm_filter"));
+    auto* presets=dynamic_cast<juce::ListBox*>(find(*editor,"preset_list"));
+    auto* search=dynamic_cast<juce::TextEditor*>(find(*editor,"preset_search"));
+    auto* all=dynamic_cast<juce::Button*>(find(*editor,"preset_all_algorithms"));
+    auto* load=dynamic_cast<juce::Button*>(find(*editor,"load_browser_preset"));
+    auto* close=dynamic_cast<juce::Button*>(find(*editor,"close_preset_browser"));
+    require(browser && browser->isVisible() && filters && presets && search && all && load && close,"preset browser controls missing");
+    auto query=[&](const char* text) {
+        // Drive the same callback as typed text without posting delayed
+        // notifications after earlier modal tests have stopped their loop.
+        search->setText(text,false);search->onTextChange();
+    };
+    require(filters->getListBoxModel()->getNumRows()==28 && presets->getListBoxModel()->getNumRows()==3,"browser did not show one unified preset list");
+    require(presets->getListBoxModel()->getTooltipForRow(0).contains("Large Concert Hall B") &&
+            presets->getListBoxModel()->getTooltipForRow(2).contains("224 XL"),"browser algorithm/model annotation missing");
+    struct Events final : juce::AudioProcessorParameter::Listener {
+        unsigned changes=0;
+        void parameterValueChanged(int,float) override {++changes;}
+        void parameterGestureChanged(int,bool) override {}
+    } events;
+    for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->addListener(&events);
+    filters->getListBoxModel()->returnKeyPressed(2);require(presets->getListBoxModel()->getNumRows()==1,"single algorithm filter failed");
+    filters->getListBoxModel()->returnKeyPressed(1);require(presets->getListBoxModel()->getNumRows()==2,"two algorithm union failed");
+    filters->getListBoxModel()->returnKeyPressed(6);require(presets->getListBoxModel()->getNumRows()==3,"three algorithm union failed");
+    filters->getListBoxModel()->returnKeyPressed(2);require(presets->getListBoxModel()->getNumRows()==2,"algorithm filter removal failed");
+    all->onClick();require(presets->getListBoxModel()->getNumRows()==3,"all algorithms reset failed");
+    query("bRoWsEr xL");require(presets->getListBoxModel()->getNumRows()==1,"case-insensitive preset search failed");
+    query("Concert");require(presets->getListBoxModel()->getNumRows()==2,"algorithm search failed");
+    query("no matching fixture");require(presets->getListBoxModel()->getNumRows()==0 && !load->isEnabled(),"empty search load guard failed");
+    query("224 XL");require(presets->getListBoxModel()->getNumRows()==1,"model search failed");
+    require(events.changes==0 && p.getCurrentProgram()==2 && p.presetName()=="Browser Hall","filtering/search changed sound or automation");
+    for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->removeListener(&events);
+    presets->selectRow(0);require(load->isEnabled(),"browser load did not enable for selected preset");load->onClick();
+    require(p.usesXL() && p.presetName()=="Browser XL" && !p.presetModified() &&
+            std::abs(p.state.getRawParameterValue("analog")->load()-0.23f)<1e-5f,"browser recall did not restore XL and fractional Dirt");
+    query("");presets->selectRow(0);presets->getListBoxModel()->returnKeyPressed(0);
+    require(!p.usesXL() && p.presetName()=="Browser Hall" && !p.presetModified(),"browser keyboard recall back to 224 failed");
+    close->onClick();require(!browser->isVisible(),"browser close failed");
+    open->onClick();require(browser->isVisible() && presets->getListBoxModel()->getNumRows()==3,"browser reopen failed");
+    require(p.saveBankPreset("Added while open").wasOk(),"browser refresh fixture failed");
+    close->onClick();open->onClick();require(presets->getListBoxModel()->getNumRows()==4,"browser did not refresh the shared bank on reopen");
+    require(browser->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)) && !browser->isVisible(),"browser Escape close failed");
+    editor.reset();
+    if(existed) require(bank.replaceWithText(previous),"could not restore browser fixture bank");
+    else require(bank.deleteFile(),"could not remove browser fixture bank");
+    std::cout<<"Preset browser: unified list + algorithm/model, one/two/three-filter union, search without parameter events, 224/XL + Dirt recall, keyboard, refresh and close pass\n";
 }
 static void check_preset_audio() {
     PresetTestFiles files;NativeHallProcessor p,reference;
@@ -304,10 +502,10 @@ static void check_preset_audio() {
     reference.setCurrentProgram(1);for(int i=0;i<30;++i) render(false);
     std::cout<<"Preset audio: same-algorithm tail retained, cross-algorithm switch == manual switch, partial recall keeps previous complete settings pass\n";
 }
-static std::vector<float> run(int rate,int block,bool offline,int program,bool mono=false,bool low=false,float mix=1) {
+static std::vector<float> run(int rate,int block,bool offline,int program,bool mono=false,bool low=false,float mix=1,float dirt=-1) {
     auto p=std::make_unique<NativeHallProcessor>();require(p->ready(),"missing imported bank");
     p->setCurrentProgram(program);
-    set(*p,"low_latency",low?1.0f:0.0f);set(*p,"mix",mix);
+    set(*p,"low_latency",low?1.0f:0.0f);set(*p,"mix",mix);if(dirt>=0) set(*p,"analog",1-dirt);
     p->setPlayConfigDetails(mono?1:2,2,rate,2048);p->setNonRealtime(offline);p->prepareToPlay(rate,2048);
     juce::AudioBuffer<float> b(2,20000);juce::MidiBuffer midi;
     const int frames=rate*2;std::vector<float> out(size_t(frames)*2);
@@ -316,8 +514,8 @@ static std::vector<float> run(int rate,int block,bool offline,int program,bool m
         // Change controls at a shared sample position independent of block size.
         if(pos<rate && pos+n>rate) n=rate-pos;
         if(pos==rate) {
-            set(*p,"bass",20);set(*p,"mid",16);set(*p,"diffusion",30);set(*p,"analog",0);
-            set(*p,"algorithm",float((program+1)%p->getNumPrograms()));
+            set(*p,"bass",20);set(*p,"mid",16);set(*p,"diffusion",30);set(*p,"analog",dirt>=0?1-dirt:0);
+            set(*p,"algorithm",float((program<6?(program+1)%6:6+(program-6+1)%int(cineol::xl::graphs.size()))));
         }
         b.setSize(2,n,false,false,true);
         for(int i=0;i<n;++i) {
@@ -335,13 +533,13 @@ static std::vector<float> run(int rate,int block,bool offline,int program,bool m
     auto restored=std::make_unique<NativeHallProcessor>();restored->setStateInformation(state.getData(),int(state.getSize()));
     require(restored->state.getRawParameterValue("bass")->load()==20 &&
             restored->state.getRawParameterValue("diffusion")->load()==30 &&
-            restored->getCurrentProgram()==(program+1)%p->getNumPrograms(),"parameter/algorithm state round trip");
+            restored->getCurrentProgram()==(program<6?(program+1)%6:6+(program-6+1)%int(cineol::xl::graphs.size())),"parameter/algorithm state round trip");
     require(restored->state.getRawParameterValue("low_latency")->load()==(low?1.0f:0.0f),"Low latency state round trip");
     return out;
 }
 static void check_state_and_ranges() {
     auto p=std::make_unique<NativeHallProcessor>();
-    require(p->getNumPrograms()==6 && p->getCurrentProgram()==2,"program count/default");
+    require(p->getNumPrograms()==int(NativeHallProcessor::program_count) && p->getCurrentProgram()==2,"program count/default");
     for(unsigned i=0;i<15;++i)
         require(p->state.getParameter(NativeHallProcessor::ids[i])->getParameterIndex()==int(i),"legacy parameter order changed");
     require(p->state.getParameter("low_latency")->getParameterIndex()==15 &&
@@ -358,7 +556,7 @@ static void check_state_and_ranges() {
             require(delay->getValueForText(juce::String(minimum+offset)+" ms")==value,"pre-delay text entry");
         }
     }
-    p->setCurrentProgram(-1);p->setCurrentProgram(6);require(p->getCurrentProgram()==5,"invalid host program accepted");
+    p->setCurrentProgram(-1);p->setCurrentProgram(int(NativeHallProcessor::program_count));require(p->getCurrentProgram()==5,"invalid host program accepted");
     set(*p,"bass",20);set(*p,"predelay",88);
     auto legacy=p->state.copyState();legacy.removeChild(legacy.getChildWithProperty("id","algorithm"),nullptr);
     legacy.removeChild(legacy.getChildWithProperty("id","low_latency"),nullptr);
@@ -370,7 +568,7 @@ static void check_state_and_ranges() {
             p->state.getRawParameterValue("predelay")->load()==88,"v0.2 state migration");
     require(delay->getText(delay->getValue(),0)=="88","legacy pre-delay changed");
     require(p->state.getRawParameterValue("low_latency")->load()==0,"old session retained enabled Low latency");
-    std::cout<<"6 host programs, parameter indices, pre-delay ranges/text entry, v0.2 migration pass\n";
+    std::cout<<NativeHallProcessor::program_count<<" host programs, parameter indices, pre-delay ranges/text entry, v0.2 migration pass\n";
 }
 static void check_low_latency() {
     auto wait_for_latency=[](NativeHallProcessor& processor,int expected) {
@@ -460,6 +658,152 @@ static void check_daisy_engine(const char* path) {
     }
     std::cout<<"36 directed switches + all pre-delay ranges/modes: plugin == Daisy Engine48 exactly at 48k\n";
 }
+static void check_dirt() {
+    for(int program:{2,6,11}) {
+        const auto clean=run(48000,128,false,program,false,false,1,0);
+        const auto dirty=run(48000,128,false,program,false,false,1,1);
+        const auto half=run(48000,128,false,program,false,false,1,0.5f);
+        require(half==run(48000,511,true,program,false,false,1,0.5f),"continuous Dirt depends on render blocks");
+        double from_clean=0,from_dirty=0;for(unsigned i=0;i<half.size();++i) {
+            from_clean+=std::abs(double(half[i])-clean[i]);from_dirty+=std::abs(double(half[i])-dirty[i]);
+            require(std::isfinite(half[i]) && std::abs(half[i])<4,"continuous Dirt output is invalid");
+        }
+        require(from_clean>0.01 && from_dirty>0.01,"Dirt still behaves like a switch");
+    }
+    PresetTestFiles files;NativeHallProcessor p;set(p,"analog",0.63f);
+    const auto file=files.folder.getChildFile("A Very Long Concert Hall Preset Name With Gentle Digital Dirt.cineol224");
+    require(p.savePreset(file).wasOk(),"fractional Dirt preset save failed");set(p,"analog",1);
+    require(p.loadPreset(file).wasOk() && std::abs(p.state.getRawParameterValue("analog")->load()-0.63f)<1e-5f,"fractional Dirt preset recall failed");
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());auto* name=find(*editor,"preset");
+    editor->createComponentSnapshot(editor->getLocalBounds());
+    require(bool(name->getProperties()["marquee_active"]) && double(name->getProperties()["marquee_offset"])==0,"long preset did not start with readable pause");
+    const auto deadline=juce::Time::getMillisecondCounterHiRes()+2200;
+    while(juce::Time::getMillisecondCounterHiRes()<deadline) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
+    editor->createComponentSnapshot(editor->getLocalBounds());
+    require(double(name->getProperties()["marquee_offset"])>0 && !p.presetModified(),"preset marquee did not scroll or changed sound");
+    const auto bank=files.folder.getChildFile("Dirt Across Engines.cineolbank");
+    p.setCurrentProgram(2);set(p,"analog",0.8f);
+    require(p.saveBankPreset("Clean 224",false,bank).wasOk(),"224 Dirt bank fixture failed");
+    p.setCurrentProgram(6);set(p,"analog",0.15f);
+    require(p.saveBankPreset("Dirty XL",false,bank).wasOk(),"XL Dirt bank fixture failed");
+    auto* dirt=dynamic_cast<juce::Slider*>(find(*editor,"dirt"));
+    require(p.loadBankPreset("Clean 224",bank).wasOk() && !p.usesXL() && dirt &&
+        std::abs(dirt->getValue()-0.2)<0.0001 && bool(dirt->getProperties()["motor_moving"]) &&
+        std::abs(double(dirt->getProperties()["motor_position"])-0.85)<0.0001,
+        "cross-engine bank recall did not restore and animate Dirt");
+    const auto settle=juce::Time::getMillisecondCounterHiRes()+400;
+    while(juce::Time::getMillisecondCounterHiRes()<settle) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
+    require(p.loadBankPreset("Dirty XL",bank).wasOk() && p.usesXL() &&
+        std::abs(dirt->getValue()-0.85)<0.0001 && bool(dirt->getProperties()["motor_moving"]) &&
+        std::abs(double(dirt->getProperties()["motor_position"])-0.2)<0.0001,
+        "224-to-XL bank recall did not restore and animate Dirt");
+    std::cout<<"Dirt: continuous native sound at intermediate amounts, bounded + block invariant, fractional presets, marquee pause/scroll pass\n";
+}
+static void check_xl() {
+    PresetTestFiles files;auto p=std::make_unique<NativeHallProcessor>();
+    const auto bank=files.folder.getChildFile("Cross Engine.cineolbank");
+    require(p->saveBankPreset("Original",false,bank).wasOk(),"original fixture failed");
+    p->setCurrentProgram(6);set(*p,"xl_chorus",9);set(*p,"xl_diffusion",42);
+    require(p->ready() && p->usesXL() && p->firmwareId()=="224xl-v8.21","XL engine unavailable");
+    require(p->saveBankPreset("XL",false,bank).wasOk(),"XL fixture failed");
+    juce::Array<NativeHallProcessor::PresetInfo> entries;
+    require(p->presetBankEntries(entries,bank).wasOk() && entries.size()==2,"cross engine preset listing failed");
+    auto reference=std::make_unique<NativeHallProcessor>();
+    // Split programs need one output from each independent engine. A/C would
+    // select two outputs of the left engine and silently discard the right input.
+    for(int program=23;program<28;++program) {
+        auto split=std::make_unique<NativeHallProcessor>();split->setCurrentProgram(program);
+        require(split->state.getRawParameterValue("output_l")->load()==0 &&
+            split->state.getRawParameterValue("output_r")->load()==1,"split factory routing does not cover both engines");
+        split->prepareToPlay(48000,128);juce::AudioBuffer<float> signal(2,128);juce::MidiBuffer events;
+        double right_energy=0;
+        for(unsigned block=0;block<400;++block) {
+            signal.clear();for(int i=0;i<128;++i) signal.setSample(1,i,0.12f*std::sin(float(block*128+i)*0.117f));
+            audio=true;split->processBlock(signal,events);audio=false;
+            for(int i=0;i<128;++i) right_energy+=double(signal.getSample(1,i))*signal.getSample(1,i);
+        }
+        require(right_energy>0.01,"split factory routing loses the right input");
+    }
+    auto echo=std::make_unique<NativeHallProcessor>();echo->setCurrentProgram(20);
+    require(echo->state.getRawParameterValue("output_l")->load()==2 && echo->state.getRawParameterValue("output_r")->load()==0,
+        "Chorus/Echo factory routing reverses left and right");
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p->createEditor());
+    auto* algorithms=dynamic_cast<juce::Button*>(find(*editor,"algorithm"));
+    auto* badge=dynamic_cast<juce::Button*>(find(*editor,"firmware"));
+    require(algorithms && bool(algorithms->onClick) && algorithms->getParentComponent()==find(*editor,"display") && badge && badge->getButtonText()=="224 XL","unified XL UI missing");
+    require(find(*editor,"xl_slot_1")->isVisible() && !find(*editor,"bass")->isVisible(),"XL fader binding failed");
+    auto* page=dynamic_cast<juce::Button*>(find(*editor,"parameter_page"));
+    require(page && page->isEnabled() && p->parameterPages()==5,"XL pages unavailable");
+    const float saved_lf=p->state.getRawParameterValue("xl_00")->load();
+    page->onClick();
+    require(int(find(*editor,"display")->getProperties()["page_index"])==1 &&
+        find(*editor,"xl_slot_3")->getProperties()["parameter_id"]=="xl_chorus","XL page control rebinding failed");
+    auto* chorus=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_3"));
+    chorus->setValue(72,juce::sendNotificationSync);
+    require(p->state.getRawParameterValue("xl_chorus")->load()==9 && p->state.getRawParameterValue("xl_00")->load()==saved_lf,"XL fader wrote the wrong page parameter");
+    page->onClick();page->onClick();page->onClick();
+    auto* size=dynamic_cast<juce::Slider*>(find(*editor,"xl_slot_1"));
+    require(size->getProperties()["parameter_id"]=="xl_43","XL Size binding targets marker rather than logical Size");
+    require(!find(*editor,"xl_slot_2")->isEnabled(),"XL inactive slot is enabled");
+    page->onClick();
+    require(p->loadBankPreset("XL",bank).wasOk(),"XL page fixture reset failed");
+    for(int rate:{44100,48000,96000}) {
+        p->setCurrentProgram(2);reference->setCurrentProgram(2);
+        p->setPlayConfigDetails(2,2,rate,128);reference->setPlayConfigDetails(2,2,rate,128);
+        p->prepareToPlay(rate,128);reference->prepareToPlay(rate,128);
+        juce::AudioBuffer<float> actual(2,128),expected(2,128);juce::MidiBuffer midi;
+        for(int program=0;program<int(NativeHallProcessor::program_count);++program) {
+            p->setCurrentProgram(program);reference->setCurrentProgram(program);
+            if(program==6) {
+                require(p->loadBankPreset("Original",bank).wasOk() && !p->usesXL(),"XL to 224 recall failed");
+                require(p->loadBankPreset("XL",bank).wasOk() && p->usesXL() && !p->presetModified(),"224 to XL recall failed");
+                set(*reference,"xl_chorus",9);set(*reference,"xl_diffusion",42);
+            }
+            double tail=0;
+            for(unsigned block=0;block<200;++block) {
+                for(unsigned i=0;i<128;++i) {
+                    const float value=block<80?0.08f*std::sin(float(block*128+i)*0.117f):0;
+                    for(int c=0;c<2;++c) {actual.setSample(c,int(i),value);expected.setSample(c,int(i),value);}
+                }
+                audio=true;p->processBlock(actual,midi);reference->processBlock(expected,midi);audio=false;
+                for(int c=0;c<2;++c) for(int i=0;i<128;++i) {
+                    require(std::isfinite(actual.getSample(c,i)) && actual.getSample(c,i)==expected.getSample(c,i),"cross-engine recall differs from manual selection");
+                    if(block>100) tail+=double(actual.getSample(c,i))*actual.getSample(c,i);
+                }
+            }
+            const bool finite_effect=NativeHallProcessor::isXL(program) &&
+                (cineol::xl::graphs[program-native_hall::program_count].bank==4 ||
+                 cineol::xl::Graph(program-native_hall::program_count)==cineol::xl::Graph::inverse_room);
+            if(!finite_effect) require(tail>1e-8,"native algorithm has no reverb tail");
+            require(p->getLatencySamples()==reference->getLatencySamples(),"engine switch changed latency");
+        }
+    }
+    juce::MemoryBlock session;p->getStateInformation(session);auto restored=std::make_unique<NativeHallProcessor>();
+    restored->setStateInformation(session.getData(),int(session.getSize()));
+    require(restored->getCurrentProgram()==int(NativeHallProcessor::program_count)-1 && restored->usesXL() &&
+        restored->state.getRawParameterValue("xl_diffusion")->load()==p->state.getRawParameterValue("xl_diffusion")->load(),"XL session round trip failed");
+    std::cout<<"Unified selection + cross-engine presets/session/tails: "<<NativeHallProcessor::program_count<<" algorithms, 44.1/48/96k pass\n";
+    for(int program=6;program<int(NativeHallProcessor::program_count);++program) for(int rate:{44100,48000,96000}) {
+        auto a=run(rate,128,false,program),b=run(rate,511,true,program);
+        require(a==b && a==run(rate,20000,false,program),"XL output depends on block size/offline mode");
+        require(a==run(rate,128,false,program,false,true),"XL low-latency wet changed DSP");
+        run(rate,333,false,program,true);
+        std::cout<<"XL "<<program-5<<", "<<rate<<" Hz: native audio, block invariance, wet-only + mono pass\n";
+    }
+    for(int program=6;program<int(NativeHallProcessor::program_count);++program) {
+        p->setCurrentProgram(program);set(*p,"mix",0);set(*p,"low_latency",0);p->prepareToPlay(48000,128);
+        juce::AudioBuffer<float> dry(2,128);juce::MidiBuffer events;
+        for(unsigned n=0;n<100;++n) {dry.clear();audio=true;p->processBlock(dry,events);audio=false;}
+        dry.clear();dry.setSample(0,0,0.25f);dry.setSample(1,0,-0.125f);
+        audio=true;p->processBlock(dry,events);audio=false;
+        for(int i=0;i<128;++i) require(dry.getSample(0,i)==(i==70?0.25f:0) && dry.getSample(1,i)==(i==70?-0.125f:0),"XL common physical dry alignment failed");
+    }
+    p->setCurrentProgram(10);set(*p,"mix",0);set(*p,"low_latency",1);p->prepareToPlay(48000,128);
+    juce::AudioBuffer<float> block(2,128);juce::MidiBuffer midi;block.clear();block.setSample(0,0,0.25f);
+    audio=true;p->processBlock(block,midi);audio=false;
+    require(block.getSample(0,0)==0.25f,"XL low latency dry not immediate");
+    for(int i=1;i<128;++i) require(block.getSample(0,i)==0,"XL dry path modified input");
+}
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
     // Offline fixtures belong only to an isolated test cache, never to the
@@ -468,13 +812,18 @@ int main(int argc,char** argv) {
         juce::File folder;
         ~TestCache() {if(folder.isDirectory()) folder.deleteRecursively();}
     } test_cache;
-    if(argc==3 && std::string(argv[1])=="--bank") {
+    if((argc==3 && std::string(argv[1])=="--bank") || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check"))) {
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getNonexistentChildFile("cineol-plugin-check",{},false);
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");
         setenv("CINEOL224_CACHE_DIR",test_cache.folder.getFullPathName().toRawUTF8(),1);
         require(juce::File(juce::String::fromUTF8(argv[2])).copyFileTo(CineolRomBank::cacheFile()),"could not seed test bank");
+        if(argc==4) require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed XL bank");
     }
+    if(argc==4 && std::string(argv[1])=="--preset-check") {
+        check_presets();check_preset_bank();check_preset_browser();check_preset_audio();return 0;
+    }
+    if(argc==4 && std::string(argv[1])=="--limits-check") {check_fader_limits();return 0;}
     const bool previewBundle=juce::File::getSpecialLocation(juce::File::currentExecutableFile)
         .getFileNameWithoutExtension()=="CineolEditorPreview";
     if((argc==2 && std::string(argv[1])=="--ui") || (argc==1 && previewBundle)) {
@@ -489,28 +838,73 @@ int main(int argc,char** argv) {
         } window(p);
         juce::MessageManager::getInstance()->runDispatchLoop();return 0;
     }
+    if(argc==5 && std::string(argv[1])=="--editor" && std::string(argv[4])=="presets") {
+        const auto original=CineolRomBank::cacheFile(),xl=CineolRomBank::xlCacheFile();
+        test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("cineol-browser-preview",{},false);
+        require(test_cache.folder.createDirectory().wasOk(),"browser preview cache failed");
+        setenv("CINEOL224_CACHE_DIR",test_cache.folder.getFullPathName().toRawUTF8(),1);
+        require(original.copyFileTo(CineolRomBank::cacheFile()) && xl.copyFileTo(CineolRomBank::xlCacheFile()),"browser preview banks failed");
+    }
     if((argc==3 || argc==4 || argc==5 || argc==6) && std::string(argv[1])=="--editor") {
         NativeHallProcessor p;
         PresetTestFiles demo;
+        if(argc==5 && std::string(argv[4])=="presets") {
+            for(const auto& fixture:std::array<std::pair<int,const char*>,6>{{{2,"Warm Hall"},{1,"Soft Vocal Plate"},{6,"Airy Concert"},{7,"Bright Space"},{2,"Wide Hall"},{6,"Long Concert"}}}) {
+                p.setCurrentProgram(fixture.first);require(p.saveBankPreset(fixture.second).wasOk(),"browser preview preset failed");
+            }
+        }
         if(argc>=4) p.setCurrentProgram(std::atoi(argv[3]));
         if(argc==5 && std::string(argv[4])=="preset")
             require(p.savePreset(demo.folder.getChildFile("Warm Concert Hall.cineol224")).wasOk(),"preview preset failed");
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
-        if(argc==6) set(p,argv[4],std::strtof(argv[5],nullptr));
+        juce::Component* snapshot=editor.get();
+        if(argc==6) {
+            set(p,argv[4],std::strtof(argv[5],nullptr));
+            const auto end=juce::Time::getMillisecondCounterHiRes()+400;
+            while(juce::Time::getMillisecondCounterHiRes()<end) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
+        }
+        if(argc==5 && (std::string(argv[4])=="detail" || std::string(argv[4])=="last")) {
+            const auto id=std::string(argv[4])=="last" ? "parameter_page_"+std::to_string(p.parameterPages()) : "parameter_page";
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,id.c_str()));
+            require(button!=nullptr,"Page button missing");button->onClick();
+            const auto end=juce::Time::getMillisecondCounterHiRes()+400;
+            while(juce::Time::getMillisecondCounterHiRes()<end) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
+        }
         if(argc==5 && std::string(argv[4])=="settings") {
             auto* button=dynamic_cast<juce::Button*>(find(*editor,"settings"));
             require(button!=nullptr,"Settings button missing");button->setToggleState(true,juce::sendNotificationSync);
+        }
+        if(argc==5 && std::string(argv[4])=="save") {
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,"save_preset"));
+            require(button!=nullptr,"Save button missing");button->onClick();
+            snapshot=juce::Component::getCurrentlyModalComponent();
+            require(dynamic_cast<juce::AlertWindow*>(snapshot)!=nullptr,"Save dialog missing");
+        }
+        if(argc==5 && std::string(argv[4])=="presets") {
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,"preset"));
+            require(button && bool(button->onClick),"Preset browser button missing");button->onClick();
+            require(find(*editor,"preset_browser") && find(*editor,"preset_browser")->isVisible(),"Preset browser missing");
+        }
+        if(argc==5 && (std::string(argv[4])=="algorithms" || std::string(argv[4])=="outputs")) {
+            const auto mode=std::string(argv[4]);
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,mode=="outputs"?"output_l":"algorithm"));
+            require(button!=nullptr,"Menu button missing");button->onClick();
+            auto& desktop=juce::Desktop::getInstance();
+            for(int i=0;i<desktop.getNumComponents();++i)
+                if(desktop.getComponent(i)->getName()=="menu") snapshot=desktop.getComponent(i);
+            require(snapshot!=editor.get(),"Popup menu missing");
         }
         juce::File file(juce::String::fromUTF8(argv[2]));
         file.getParentDirectory().createDirectory();
         juce::FileOutputStream output(file);juce::PNGImageFormat png;
         require(output.openedOk() && output.setPosition(0) && output.truncate().wasOk() && png.writeImageToStream(
-            editor->createComponentSnapshot(editor->getLocalBounds()),output),"editor screenshot failed");
+            snapshot->createComponentSnapshot(snapshot->getLocalBounds()),output),"editor screenshot failed");
         return 0;
     }
     check_state_and_ranges();check_editor();check_presets();check_preset_bank();check_preset_audio();
-    if(argc==3 && std::string(argv[1])=="--bank") check_daisy_engine(argv[2]);
+    if(std::string(argc>1?argv[1]:"")=="--bank" || std::string(argc>1?argv[1]:"")=="--banks") check_daisy_engine(argv[2]);
     check_low_latency();
+    if(argc==4 && std::string(argv[1])=="--banks") {check_preset_browser();check_fader_limits();check_xl();check_dirt();}
     for(int program=0;program<6;++program) for(int rate:{44100,48000,96000}) {
         auto a=run(rate,128,false,program), b=run(rate,511,true,program),c=run(rate,20000,false,program);
         require(a==b && b==c,"algorithm switching/block-size or offline/realtime output differs");

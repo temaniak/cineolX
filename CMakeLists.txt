@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(CineolX224 VERSION 0.6.0 LANGUAGES C CXX)
+project(CineolX224 VERSION 0.9.4 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
@@ -41,7 +41,8 @@ if(APPLE)
     list(PREPEND _formats AU)
 endif()
 juce_add_binary_data(cineol_ui_data HEADER_NAME CineolUIData.h NAMESPACE CineolUIData
-    SOURCES native-hall/plugin/assets/panel.png native-hall/plugin/assets/fadercap.png)
+    SOURCES native-hall/plugin/assets/panel.png native-hall/plugin/assets/fadercap.png
+        native-hall/plugin/assets/panel-monolithic.png native-hall/plugin/assets/menu-metal.png)
 juce_add_plugin(NativeHall224 VERSION ${PROJECT_VERSION} PRODUCT_NAME "Cineol-X 224" COMPANY_NAME "Reflexion224"
     BUNDLE_ID "net.joelanders.nativehall224" PLUGIN_MANUFACTURER_CODE Rflx PLUGIN_CODE Nh24
     FORMATS ${_formats} IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE
@@ -50,7 +51,7 @@ juce_add_plugin(NativeHall224 VERSION ${PROJECT_VERSION} PRODUCT_NAME "Cineol-X 
     MICROPHONE_PERMISSION_TEXT "Cineol-X 224 processes your audio input." COPY_PLUGIN_AFTER_BUILD FALSE)
 target_sources(NativeHall224 PRIVATE native-hall/plugin/Processor.cpp
     native-hall/plugin/Editor.cpp native-hall/plugin/RomBank.cpp native-hall/plugin/Presets.cpp)
-target_link_libraries(NativeHall224 PRIVATE native_hall_core native_224_import cineol_ui_data
+target_link_libraries(NativeHall224 PRIVATE native_hall_core native_224_import native_xl_import cineol_ui_data
     juce::juce_audio_utils juce::juce_recommended_config_flags)
 target_compile_definitions(NativeHall224 PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_STANDALONE_PLUGIN_AUTO_OPEN_AUDIO_INPUT=1)

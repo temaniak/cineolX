@@ -1,9 +1,9 @@
 # Cineol-X 224
 
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
-the six programs of the **original Lexicon 224, firmware v4.4**. The desktop
-plugin is version **0.5.1**, with the current metal-panel artwork and 21-mark
-fader scales.
+the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
+preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.4**, with the metal-panel artwork, 21-mark fader scales
+and six page-bound faders beside permanent Dirt, Input and Mix faders.
 
 Primary repository: [temaniak/cineolX](https://github.com/temaniak/cineolX).
 
@@ -28,23 +28,110 @@ are shipped in this repository or embedded in the desktop plugin.
 | 04 | Acoustic Chamber |
 | 05 | Percussion Plate A |
 | 06 | Small Concert Hall A |
+| 07 | Concert Hall (224 XL) |
+| 08 | Bright Hall (224 XL) |
+| 09 | Dark Hall (224 XL) |
+| 10 | Plate (224 XL) |
+| 11 | Room (224 XL) |
+| 12 | Rich Chamber (224 XL) |
+| 13 | Small Room (224 XL) |
+| 14 | Chamber (224 XL) |
+| 15 | Dark Chamber (224 XL) |
+| 16 | Inverse Room (224 XL) |
+| 17 | Small Plate (224 XL) |
+| 18 | CD Plate A (224 XL) |
+| 19 | CD Plate B (224 XL) |
+| 20 | Rich Plate (224 XL) |
+| 21 | Chorus & Echo (224 XL) |
+| 22 | Resonant Chords (224 XL) |
+| 23 | Multiband Delay (224 XL) |
+| 24 | Hall / Hall (224 XL) |
+| 25 | Plate / Plate (224 XL) |
+| 26 | Plate / Hall (224 XL) |
+| 27 | Plate / Chorus (224 XL) |
+| 28 | Rich Split (224 XL) |
 
 The main parameters are Bass Decay, Mid Decay, Crossover, Treble Decay, Depth,
 Pre-delay, Diffusion, Input Gain, Dry/Wet and Program. The plugin also exposes
-Mod Enhancement, Decay Optimization, the analog-filter mode and independent
-left/right choices from outputs A–D. The default output pair is A/C.
+Mod Enhancement, Decay Optimization, continuous Dirt and independent
+left/right choices from outputs A–D. Original 224 and regular XL reverbs use
+A/C by default; split algorithms use A/B to include both engines, and Chorus &
+Echo uses C/A to preserve the input orientation. Manual algorithm selection
+recalls the XL factory controls and the appropriate output pair. Original 224
+controls, Input, Mix and Dirt are retained.
 
 Bass/Mid labels use the original discrete time scale; they are not a promise of
 measured T60. Diffusion has no effect in Acoustic Chamber. Small and Large Hall
 B share a topology; their factory settings differ. Changing programs clears
 the previous reverb tail immediately. Pre-delay changes can produce a transient.
 
+The expanded red display has six labels aligned with the six variable faders.
+Click **Main 1/2** / **Detail 2/2** on the display to switch pages. Main contains
+Bass, Mid, Crossover, Treble, Depth and Pre-delay; Detail places Diffusion in
+slot five. Unused slots are disabled and their caps park at the bottom, with
+`--` on the display. Parking never writes a parameter minimum. Page changes
+animate the caps over 320 ms but preserve every control and the reverb tail.
+Preset recall also animates Dirt, Input and Mix; Dirt retains its inverted
+`analog` parameter mapping without writing parameter events during visual motion.
+All caps and rails retain the same geometry on every page. Inactive caps are
+dark grey rather than translucent. Values appear only on the red display;
+the longer rails occupy the space previously used by the numeric text boxes.
+The three permanent faders on the right are Dirt, Input and Mix. Their display
+cells use the same text size as the other parameter names; no labels or values
+are repeated on the metal panel. The wider panel has no footer controls. Its lower metal band is half the original artwork height; the long faders and four corner screws retain their geometry.
+The metal faceplate uses one continuous bitmap without stitched texture bands
+or screw overlays. The red display has one shared divider and three right-side
+columns aligned with Dirt, Input and Mix.
+
+Internal menus, settings and preset dialogs use a separate, evenly worn metal
+texture with a fixed grain scale, rather than stretched sections of the faceplate.
+They share dark frames and red header/input surfaces. See the
+[preset dialog](docs/images/cineol-x-224-preset-dialog.png). The system file
+picker retains its platform appearance.
+
+Click the algorithm name on the red display to open the single algorithm list.
+It selects the native engine automatically; the corner
+of the display indicates **224** or **224 XL**. There is no separate firmware
+selector. Clicking the engine indicator opens ROM import. XL exposes its actual
+parameter pages (two to seven pages per program) through the same six faders:
+LF/MID decay, filters, depth/attack, pre-delay, Chorus, Diffusion, Definition,
+levels, delays, pan, feedback and Size where used. Size updates the decay-time
+labels and available variable pre-delay range. Inactive controls are parked,
+dark and marked `--`. XL's unbounded upper frequency/decay display values are
+shown as `INF` with their units, so an active fader at its limit does not look
+unavailable. Dynamic decay, its stop controls, the stop delay and
+Decay Optimization remain pending and disabled. Mode Enhancement is available
+only for algorithms with modulation taps. This is a native control preview,
+not a claim of complete hardware equivalence.
+
+Numbered selectors beside the algorithm name jump directly to a parameter page;
+the selected page is bright and other numbers are dim. The **Page n/n** control
+also cycles through pages. The right header uses **Left / Right / Model** above
+**Page / Mod Enh / Decay Opt**, aligned with the three permanent fader columns.
+The settings gear uses colour feedback without an enclosing frame.
+
+Preset format 4 records the firmware identity and every parameter,
+including controls on hidden pages. The shared browser lists presets together
+with their algorithm and model. An unavailable-firmware preset remains listable;
+recalling it reports an error and preserves the current settings.
+
 The red display includes a **Preset** selector and a disk-shaped **Save preset**
-button. **Save preset** asks only for a name and adds the current settings to
-one managed user preset bank. The red display groups presets in a submenu for
-each algorithm. Select a preset to recall its algorithm and settings;
-saving an existing name offers to replace it. No file or folder chooser is
-required. A preset stores its algorithm, the nine fader values, processing
+button. Preset and algorithm names occupy the left side of the display; the
+large numeric program indicator has been removed to give these names more room.
+Long preset names scroll at a fixed text size, with a two-second pause at each
+end. The upper-right display area contains output A–D selection, Mode Enhancement,
+Decay Optimization, engine identity and page navigation.
+**Save preset** asks only for a name and adds the current settings to
+one managed user preset bank. Click the preset name to open the themed browser:
+all presets appear in one alphabetical list, with their algorithm/model beside
+each name. Search by preset, algorithm or model, or click algorithm checkboxes
+to filter by one or several algorithms. Checked algorithms form a union;
+**All algorithms** clears the filter. Double-click a preset, press Enter in the
+list, or use **Load preset** to recall its algorithm and settings. Filtering
+and searching do not alter audio or parameters. The browser refreshes the
+shared bank each time it opens. See the [browser preview](docs/images/cineol-x-224-preset-browser.png), with isolated demonstration presets.
+Saving an existing name offers to replace it. No file or folder chooser is
+required. A preset stores its firmware, algorithm, all fader values, processing
 switches and output pair. **Low latency** remains an instance setting. The
 bank is stored in `Presets/User Presets.cineolbank` beside the imported ROM
 bank. Previously saved `.cineol224` presets in this default folder are adopted
@@ -52,7 +139,7 @@ when the user bank is first saved; the original files are preserved. The preset
 name and its modified marker (`*`) survive DAW state restoration even if the
 user bank is unavailable.
 
-Loading a preset applies the settings as one complete audio control update.
+Loading a preset applies the engine, algorithm and settings as one complete audio control update.
 The fader caps then animate to their recalled positions over 320 ms, as a
 visual homage to the 960L. This motion does not interpolate the DSP parameters
 or generate extra automation events. Manual edits interrupt the animation.
@@ -61,9 +148,14 @@ changing the selected program clears it. Moving between Small and Large Hall
 B still counts as a program change, even though they share a topology.
 Pre-delay changes retain the existing transient limitation.
 
-The plugin's **Digital Dirt** switch disables the analog-filter path when
-enabled. Its existing automation parameter remains `analog` / **Analog Filters**
-with the original polarity, so saved sessions keep their meaning. Plugin IDs
+The permanent **Dirt** fader continuously blends the existing filtered and
+digital paths. At 0% it retains the former clean endpoint; at 100% it retains
+the former Digital Dirt endpoint. The squared response gives the lower half
+gentler control: 50% Dirt requests a 25% dirty blend. The existing smoothing
+avoids abrupt filter-path changes, without running a second reverb. The
+`analog` parameter keeps its index and clean polarity, but is now continuous
+and named **Clean Amount**; old boolean values still map to the two endpoints.
+Fractional Dirt is stored in presets and DAW state. Plugin IDs
 are retained: AU `aufx/Nh24/Rflx`, bundle ID `net.joelanders.nativehall224`.
 
 The gear in the top-right corner opens **Settings**, with room for future fine
@@ -77,30 +169,35 @@ independent of this setting.
 
 Low latency is saved per instance and defaults to **off**, including when
 loading older sessions. Existing parameter IDs and indices are unchanged.
-The setting is not automatable. Host latency updates happen outside the audio
+The algorithm choice now has 28 entries; its normalized automation scale
+has expanded. The Low latency setting is not automatable. Host latency updates happen outside the audio
 callback, even with the editor closed. Switching may produce a brief transient
 or require a transport restart in hosts that defer compensation changes.
 Click the gear again or press Escape to close Settings.
 
 ## ROM requirements and first use
 
-Only the five **original 224 v4.4 ROM1–ROM5** chips are accepted. Each file must
-contain 2,048 bytes and match the expected SHA-256 digest. Names do not matter.
-224X, 224XL, other 224 versions, modified files and incomplete sets are rejected.
-The `X` in the product name does not mean support for the 224X hardware.
+The plugin accepts complete sets of **original 224 v4.4 ROM1–ROM5** or
+**224 XL v8.21**. Files must match their expected SHA-256 digests; names do not
+matter. XL uses eleven chips of 2,048 or 4,096 bytes. 224X v8.1, XL v8.1A,
+modified files and incomplete sets are rejected. Daisy still accepts only the
+original 224 v4.4 ROMs.
 
-The desktop plugin can be compiled without ROMs. On first use, open its editor,
-choose **Choose ROMs...**, and select a folder, a ZIP, or the five files. Import
-runs on a background thread, shows progress and can be cancelled. Audio passes
-through dry until preparation finishes. The ROM control firmware is executed
-locally to extract coefficients, delay addresses, control tables and modulation
-data for all six programs. This does not compile new plugin code or extract an
-arbitrary new algorithm: the four supported native topologies are already built.
+The desktop plugin can be compiled without ROMs. On first use, choose
+**Choose ROMs...** and select a folder, ZIP or complete set of files. To add
+XL to an existing 224 setup, click the engine indicator on the display.
+Import runs on a cancellable background thread. Only programs with a ready
+bank are enabled in the algorithm list. Audio passes through dry while the
+selected bank is unavailable. ROM control firmware runs only during local
+preparation, extracting coefficients, delay addresses and control/modulation
+metadata for native networks already compiled into the plugin. It does not
+interpret ROMs during audio processing or dynamically add arbitrary algorithms.
 
 On macOS the resulting cache is stored at:
 
 ```text
 ~/Library/Application Support/Cineol-X 224/programs-v44-import-v1.bank224
+~/Library/Application Support/Cineol-X 224/programs-v821-native-v3.bankxl
 ```
 
 Later launches use that cache without asking for the original files. A corrupt
@@ -108,6 +205,9 @@ or incompatible cache returns to the import screen. The cache is not included
 in DAW state. To repeat setup, close all instances and remove this cache file.
 `CINEOL224_CACHE_DIR` selects a different cache directory for isolated tests.
 Runtime ROM import does not upload files or require a network connection.
+The 22-program XL bank uses format 3, including logical controls, page bindings
+and offline display scales. Earlier XL caches are preserved separately and
+require a fresh local import; the original 224 cache is unchanged.
 
 Daisy requires the ROMs **at every firmware build**, including incremental
 builds and the build-before-flash command. Cached banks and old images cannot
@@ -348,6 +448,58 @@ analog filters run on the 48 kHz grid, controller clocks use measured nominal
 rates, modulation phases can differ, and the original pre-delay adjustment ramp
 is not implemented. This is not a claim of complete hardware equivalence.
 
+## Native desktop expansion
+
+The desktop-only 224XL v8.21 preview includes all 22 native C++ graphs and their
+static control compilers. It uses 65,536 delay words, X/XL input/output circuit
+profiles and exact rational resampling for each graph's row count. The 100-row
+Plate clock is 34,133.3333 Hz; 105, 107, 108 and 109-row programs use their own
+slower clocks. Native Chorus interpolation, signed tap pairs, Diffusion,
+Definition, LF/MID decay, filters, depth, levels, delays, pan, feedback and Size
+are prepared/compiled without an 8080 or ROM interpreter in audio.
+
+Selecting an algorithm switches the engine automatically. Prepared banks are
+shared and immutable; DSP state belongs to each instance. A switch clears the
+tail using fixed storage and a short wet fade-in. XL paths align to 57 internal
+host samples, followed by 13 samples to share the original 224 delay of 70.
+Page changes preserve controls and the tail; preset recall publishes every
+page and global setting as one complete audio update.
+
+![Cineol-X 224 XL preview](docs/images/cineol-x-224-xl.png)
+
+Dynamic decay/gating, Decay Optimization and the associated stop controls remain
+pending. These controls are disabled rather than presented as working switches.
+Daisy continues to use the original-224 engine.
+
+With your own complete ROM set, build and run the independent checks:
+
+```sh
+cmake --build build/plugin --target cineol_xl_concert_check cineol_xl_graphs_check cineol_xl_controls_check cineol_xl_display_check
+build/plugin/native-hall/cineol_xl_concert_check '/path/to/224XL-v8.21-ROMs'
+build/plugin/native-hall/cineol_xl_graphs_check '/path/to/224XL-v8.21-ROMs'
+build/plugin/native-hall/cineol_xl_extract '/path/to/224XL-v8.21-ROMs' '/private/path/programs.bankxl'
+build/plugin/native-hall/cineol_xl_controls_check '/path/to/224XL-v8.21-ROMs' '/private/path/programs.bankxl'
+build/plugin/native-hall/cineol_xl_display_check '/path/to/224XL-v8.21-ROMs' '/private/path/programs.bankxl'
+build/plugin/native_hall_plugin_check_artefacts/Release/native_hall_plugin_check --banks '/private/path/programs.bank224' '/private/path/programs.bankxl'
+```
+
+The checks recognize chips by SHA-256 and boot the ROM only for offline fixture
+preparation. Each graph is compared against the independent row machine for
+72,000 full-scale stereo frames: all four outputs, arithmetic state, delay memory
+and saturation counts, including position-counter wrap. They also verify
+signal/tail behavior, sampled circuit filters, dry alignment, exact resampling
+counts and allocation-free audio. The complete static compiler is compared from
+factory settings over 1,928 composed fader fixtures, including every non-modulated
+coefficient/memory row; 52 Size fixtures verify the memory layout separately.
+The display/bounds check covers all 22 programs and Size changes. All 32 Chorus positions and thousands of
+modulation transitions per graph match the firmware's controller state and tap
+updates. Another 256 Diffusion/Definition combinations per graph verify the
+allpass coefficient compiler from prepared control bytes. Native modulation uses
+measured nominal call rates; firmware CPU timing
+can change with controls and signal. These tests do not establish complete
+hardware equivalence or validate the remaining dynamic controllers.
+See [the implementation plan](docs/NATIVE_EXPANSION.md).
+
 ## Repository layout and private data
 
 ```text
@@ -355,6 +507,7 @@ native-hall/core/          portable C++17 DSP
 native-hall/import/        shared original-224 ROM importer
 native-hall/plugin/        JUCE processor, editor and current artwork
 native-hall/daisy/         generic I/O contract, configuration and ARM project
+native-hall/desktop/       experimental native XL graphs, controls and audio path
 native-hall/tools/         local ROM preparation and reference comparison
 native-hall/tests/         DSP, processor and import checks
 deps/reflexion/            pinned upstream Git submodule

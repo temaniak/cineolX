@@ -5,11 +5,19 @@
 namespace {
 constexpr const char* preset_tag="Cineol224Preset";
 constexpr const char* selection_tag="CINEOL_PRESET";
-juce::Result validatePreset(NativeHallProcessor& processor,const juce::ValueTree& preset,std::array<float,15>& normalized) {
-    if(preset.getNumChildren()!=int(std::size(NativeHallProcessor::ids)))
+juce::Result validatePreset(NativeHallProcessor& processor,const juce::ValueTree& preset,std::array<float,NativeHallProcessor::parameter_count>& normalized,bool require_available=true) {
+    const int version=int(preset.getProperty("version",0));
+    if(version!=1 && version!=2 && version!=3 && version!=4) return juce::Result::fail("This preset format is not supported.");
+    const auto identity=preset.getProperty("firmware",version==1?"224-v4.4":"").toString();
+    const auto* firmware=cineol::find_firmware(identity.toStdString());
+    if(!firmware) return juce::Result::fail("The preset has an unknown firmware identity.");
+    if(require_available && !firmware->selectable) return juce::Result::fail("This preset requires "+juce::String(firmware->name.data())+", which is not supported by this build.");
+    if(preset.getNumChildren()!=(version<3?15:version==3?17:int(NativeHallProcessor::parameter_count)))
         return juce::Result::fail("The preset does not contain a complete set of parameters.");
     for(unsigned i=0;i<normalized.size();++i) {
         auto value=preset.getChildWithProperty("id",NativeHallProcessor::ids[i]);auto* parameter=processor.state.getParameter(NativeHallProcessor::ids[i]);
+        if(version<4 && i>=17) {normalized[i]=parameter->convertTo0to1(-1.0f);continue;}
+        if(version<3 && i>=15) {normalized[i]=parameter->convertTo0to1(16.0f);continue;}
         const auto raw=value.getProperty("value");
         if(!value.hasType("PARAM") || !value.hasProperty("value"))
             return juce::Result::fail("The preset has a missing or invalid parameter.");
@@ -22,12 +30,21 @@ juce::Result validatePreset(NativeHallProcessor& processor,const juce::ValueTree
             return juce::Result::fail("The preset has a parameter outside its supported range.");
         normalized[i]=parameter->convertTo0to1(range.snapToLegalValue(float(number)));
     }
+    const int raw_program=int(processor.state.getParameter("algorithm")->convertFrom0to1(normalized[14]));
+    const bool xl=identity=="224xl-v8.21";
+    const int program=raw_program+(version<3 && xl?int(native_hall::program_count):0);
+    if(firmware->selectable && (program<0 || program>=int(NativeHallProcessor::program_count) || NativeHallProcessor::isXL(program)!=xl))
+        return juce::Result::fail("The preset algorithm does not match its firmware identity.");
+    if(require_available && !processor.programAvailable(program))
+        return juce::Result::fail("Import the ROMs required by this preset first.");
+    normalized[14]=processor.state.getParameter("algorithm")->convertTo0to1(float(program));
     return juce::Result::ok();
 }
 
 juce::ValueTree capture(NativeHallProcessor& processor,const juce::String& name) {
     juce::ValueTree preset(preset_tag);
-    preset.setProperty("version",1,nullptr);preset.setProperty("name",name,nullptr);
+    preset.setProperty("version",4,nullptr);preset.setProperty("name",name,nullptr);
+    preset.setProperty("firmware",processor.firmwareId(),nullptr);
     for(const auto* id:NativeHallProcessor::ids) {
         const auto* parameter=processor.state.getParameter(id);
         juce::ValueTree value("PARAM");value.setProperty("id",id,nullptr);
@@ -40,6 +57,7 @@ void remember(NativeHallProcessor& processor,const juce::ValueTree& preset,const
     auto& state=processor.state.state;
     state.removeChild(state.getChildWithName(selection_tag),nullptr);
     juce::ValueTree selection(selection_tag);selection.setProperty("name",name,nullptr);
+    selection.setProperty("firmware",preset.getProperty("firmware","224-v4.4"),nullptr);
     for(const auto& value:preset) selection.appendChild(value.createCopy(),nullptr);
     state.appendChild(selection,nullptr);
 }
@@ -56,6 +74,7 @@ bool NativeHallProcessor::presetModified() {
     const juce::ScopedLock lock(preset_write_lock_);
     auto selection=state.state.getChildWithName(selection_tag);
     if(!selection.isValid()) return false;
+    if(selection.getProperty("firmware","224-v4.4")!=firmwareId()) return true;
     for(const auto* id:ids) {
         auto saved=selection.getChildWithProperty("id",id);
         auto* parameter=state.getParameter(id);
@@ -80,15 +99,16 @@ juce::Result NativeHallProcessor::loadPreset(const juce::File& file) {
     if(!file.existsAsFile() || file.getSize()>128*1024)
         return juce::Result::fail("This preset is missing or too large.");
     auto xml=juce::XmlDocument::parse(file);
-    if(!xml || !xml->hasTagName(preset_tag) || xml->getIntAttribute("version")!=1)
-        return juce::Result::fail("Choose a Cineol-X 224 preset (.cineol224) with format version 1.");
+    if(!xml || !xml->hasTagName(preset_tag) || (xml->getIntAttribute("version")!=1 && xml->getIntAttribute("version")!=2 && xml->getIntAttribute("version")!=3 && xml->getIntAttribute("version")!=4))
+        return juce::Result::fail("Choose a supported Cineol preset (.cineol224).");
     return applyPreset(juce::ValueTree::fromXml(*xml),file.getFileNameWithoutExtension());
 }
 juce::Result NativeHallProcessor::applyPreset(const juce::ValueTree& preset,const juce::String& name) {
-    std::array<float,15> normalized{};
+    std::array<float,NativeHallProcessor::parameter_count> normalized{};
     const auto valid=validatePreset(*this,preset,normalized);if(valid.failed()) return valid;
     const juce::ScopedLock lock(preset_write_lock_);
     parameter_transaction_.fetch_add(1,std::memory_order_acq_rel);
+    state.state.setProperty("firmware_id",preset.getProperty("firmware","224-v4.4"),nullptr);
     preset_recall_revision_.fetch_add(1,std::memory_order_release);
     for(unsigned i=0;i<normalized.size();++i) {
         auto* parameter=state.getParameter(ids[i]);
@@ -113,10 +133,10 @@ juce::Result readBank(NativeHallProcessor& processor,const juce::File& file,juce
         juce::StringArray names;
         for(auto entry:bank) {
             auto name=entry.getProperty("name").toString();
-            if(!entry.hasType(preset_tag) || int(entry.getProperty("version"))!=1 || name.trim().isEmpty() || names.contains(name,true))
+            if(!entry.hasType(preset_tag) || (int(entry.getProperty("version"))!=1 && int(entry.getProperty("version"))!=2 && int(entry.getProperty("version"))!=3 && int(entry.getProperty("version"))!=4) || name.trim().isEmpty() || names.contains(name,true))
                 return juce::Result::fail("The preset bank contains an invalid or duplicate entry.");
-            std::array<float,15> normalized{};
-            auto valid=validatePreset(processor,entry,normalized);if(valid.failed()) return valid;
+            std::array<float,NativeHallProcessor::parameter_count> normalized{};
+            auto valid=validatePreset(processor,entry,normalized,false);if(valid.failed()) return valid;
             names.add(name);
         }
     } else {
@@ -126,9 +146,9 @@ juce::Result readBank(NativeHallProcessor& processor,const juce::File& file,juce
         for(const auto& legacy:files) {
             if(legacy.getSize()>128*1024) continue;
             auto xml=juce::XmlDocument::parse(legacy);
-            if(!xml || !xml->hasTagName(preset_tag) || xml->getIntAttribute("version")!=1) continue;
+            if(!xml || !xml->hasTagName(preset_tag) || (xml->getIntAttribute("version")!=1 && xml->getIntAttribute("version")!=2 && xml->getIntAttribute("version")!=3 && xml->getIntAttribute("version")!=4)) continue;
             auto entry=juce::ValueTree::fromXml(*xml);
-            std::array<float,15> normalized{};if(validatePreset(processor,entry,normalized).failed()) continue;
+            std::array<float,NativeHallProcessor::parameter_count> normalized{};if(validatePreset(processor,entry,normalized,false).failed()) continue;
             const auto name=legacy.getFileNameWithoutExtension();bool duplicate=false;
             for(auto existing:bank) if(existing.getProperty("name").toString().equalsIgnoreCase(name)) duplicate=true;
             if(duplicate) continue;
@@ -161,10 +181,11 @@ juce::Result NativeHallProcessor::presetBankEntries(juce::Array<PresetInfo>& ent
         std::istringstream input(algorithm.getProperty("value").toString().trim().toStdString());
         input.imbue(std::locale::classic());double program=-1;input>>program;
         if(!algorithm.hasType("PARAM") || !input || !input.eof() || !std::isfinite(program) ||
-            program<0 || program>=native_hall::program_count || program!=std::floor(program)) {
+            program<0 || program>=NativeHallProcessor::program_count || program!=std::floor(program)) {
             entries.clear();return juce::Result::fail("A preset in the bank has an invalid algorithm.");
         }
-        entries.add({entry.getProperty("name").toString(),int(program)});
+        if(int(entry.getProperty("version"))<3 && entry.getProperty("firmware","224-v4.4").toString()=="224xl-v8.21") program+=native_hall::program_count;
+        entries.add({entry.getProperty("name").toString(),int(program),entry.getProperty("firmware","224-v4.4").toString()});
     }
     struct ByName {int compareElements(const PresetInfo& a,const PresetInfo& b) const {return a.name.compareIgnoreCase(b.name);}} order;
     entries.sort(order);return juce::Result::ok();

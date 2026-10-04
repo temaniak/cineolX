@@ -1,5 +1,6 @@
 #pragma once
 #include "../import/bank_import.hpp"
+#include "../import/xl_import.hpp"
 #include <juce_audio_utils/juce_audio_utils.h>
 
 // Shared by all instances in one plugin binary. The bank is published once
@@ -10,16 +11,21 @@ public:
     ~CineolRomBank() override;
     bool ready() const noexcept {return ready_.load(std::memory_order_acquire);}
     const native_hall::ProgramBank& bank() const noexcept {return bank_;}
+    bool xlReady() const noexcept {return xl_ready_.load(std::memory_order_acquire);}
+    const cineol::xl::Bank& xlBank() const noexcept {return xl_bank_;}
     bool importing() const noexcept {return importing_.load(std::memory_order_acquire);}
     double progress() const noexcept {return progress_.load(std::memory_order_relaxed);}
     juce::String status() const;
     bool startImport(const juce::Array<juce::File>&);
     void cancelImport() {signalThreadShouldExit();}
     static juce::File cacheFile();
+    static juce::File xlCacheFile() {return cacheFile().getParentDirectory().getChildFile("programs-v821-native-v3.bankxl");}
 private:
     void run() override;
     void setStatus(const juce::String&);
     native_hall::ProgramBank bank_{};
+    cineol::xl::Bank xl_bank_{};
+    std::atomic<bool> xl_ready_{false};
     std::atomic<bool> ready_{false},importing_{false};
     std::atomic<double> progress_{0};
     mutable juce::CriticalSection status_lock_;
