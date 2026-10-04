@@ -266,6 +266,34 @@ static Task<void> prepare_programs(Engine& engine,Machine& machine,LarcOperator&
     }
     progress=1;stage="Saving prepared XL bank";co_await report_progress(progress,stage,callbacks);
 }
+PreparationRuntimeStats check_preparation_runtime(const native_hall::import::Callbacks& callbacks) {
+    auto engine=std::make_unique<Engine>(0);
+    Machine machine(*engine);LarcOperator op(machine);auto result=std::make_unique<Bank>();
+    auto display_memory=std::make_unique<std::array<uint8_t,65536>>();
+    PagesReading pages;
+    auto probe=[&](const char* stage,auto make) {
+        if(callbacks.progress) callbacks.progress(0,stage);
+        {
+            PoolScope scope(machine.pool());auto task=make();
+            // Clang may elide these short-lived frames into this function.
+            check(bool(task.handle()) && !task.handle().done(),"XL runtime probe did not create a suspended task.");
+        }
+        check(machine.pool().in_use()==0,"XL runtime probe leaked a coroutine frame.");
+    };
+    probe("prepare_programs",[&]{return prepare_programs(*engine,machine,op,*result,callbacks,*display_memory);});
+    probe("prepare_displays",[&]{return prepare_displays(*engine,machine,op,result->programs[0],*display_memory);});
+    probe("selectProgram",[&]{return op.selectProgram(1,1);});
+    probe("readPages",[&]{return op.readPages(pages);});
+    probe("moveSlider",[&]{return op.moveSlider(1,0,0);});
+    probe("setToggle",[&]{return op.setToggle(0,false);});
+    probe("gotoPage",[&]{return op.gotoPage(1);});
+    if(callbacks.progress) callbacks.progress(0,"cancel before firmware execution");
+    native_hall::import::Callbacks cancel;cancel.progress=[](double,const char*){return false;};
+    const auto done=machine.run_task([&]{return prepare_programs(*engine,machine,op,*result,cancel,*display_memory);});
+    check(done.failed && std::string(done.error.text)=="Import cancelled.","XL runtime cancellation failed.");
+    check(machine.frame()==0 && machine.pool().in_use()==0,"XL runtime cancellation rendered firmware or leaked frames.");
+    return {machine.pool().max_request(),machine.pool().high_water()};
+}
 std::unique_ptr<Bank> prepare_bank(const RomSet& roms,const native_hall::import::Callbacks& callbacks) {
     check(std::string(firmware.name)=="224XL v8.21","XL firmware catalog changed");
     auto engine=std::make_unique<Engine>(0);

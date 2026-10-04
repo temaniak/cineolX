@@ -1,5 +1,6 @@
 #include "../plugin/Processor.hpp"
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <new>
 #ifdef _WIN32
@@ -30,6 +31,27 @@ void operator delete(void* p,std::align_val_t) noexcept {
 }
 void operator delete(void* p,size_t,std::align_val_t a) noexcept {::operator delete(p,a);}
 static void require(bool ok,const char* text) {if(!ok) {std::cerr<<text<<'\n';std::exit(1);}}
+static void preparation_runtime() {
+    // Match the plugin's background JUCE thread, including Windows stack size.
+    struct Probe final:juce::Thread {
+        Probe():Thread("XL import runtime check") {}
+        std::exception_ptr error;
+        void run() override {
+            try {
+                native_hall::import::Callbacks callbacks;
+                callbacks.progress=[](double,const char* stage) {
+                    std::cout<<"XL runtime: "<<stage<<std::endl;return true;
+                };
+                const auto stats=cineol::xl::import::check_preparation_runtime(callbacks);
+                std::cout<<"XL runtime: largest frame="<<stats.largest_frame
+                    <<", peak frames="<<stats.peak_frames<<"; pass"<<std::endl;
+            } catch(...) {error=std::current_exception();}
+        }
+    } probe;
+    require(probe.startThread(juce::Thread::Priority::low),"could not start XL runtime check");
+    require(probe.waitForThreadToExit(10000),"XL runtime check timed out");
+    if(probe.error) std::rethrow_exception(probe.error);
+}
 static juce::Component* find(juce::Component& root,const char* id) {
     if(root.getComponentID()==id) return &root;
     for(auto* child:root.getChildren()) if(auto* found=find(*child,id)) return found;
@@ -166,8 +188,10 @@ static void invalid_imports() {
 }
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
-    require(argc>=2,"usage: rom_import_check --empty|--cached|--reject SOURCE|--cancel SOURCE|--import SOURCE BANK");
+    require(argc>=2,"usage: rom_import_check --runtime-check|--empty|--cached|--reject SOURCE|--cancel SOURCE|--import SOURCE BANK");
     const std::string mode=argv[1];
+    if(mode=="--empty" || mode=="--runtime-check") preparation_runtime();
+    if(mode=="--runtime-check") return 0;
     if(mode=="--invalid-check") {
         invalid_imports();require(allocations==0 && releases==0,"invalid-import audio allocated/released memory");
         std::cout<<"invalid ROM/ZIP/folder/retry and cached-224 setup: pass; audio new=0, delete=0\n";return 0;
