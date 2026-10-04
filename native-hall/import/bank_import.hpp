@@ -18,6 +18,7 @@ struct Callbacks {
     std::function<bool(double,const char*)> progress;
     std::ostream* log=nullptr;
     std::string capture_prefix; // CLI diagnostics only, never used by the plugin.
+    bool full_emulation=false; // XL reference preparation; ignored by 224.
 };
 std::unique_ptr<ProgramBank> prepare_bank(const RomSet&,const Callbacks& = {});
 }

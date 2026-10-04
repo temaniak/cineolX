@@ -1,5 +1,4 @@
 diff --git a/emulator/scheduler.hpp b/emulator/scheduler.hpp
-index e8a5f5e..6496ad4 100644
 --- a/emulator/scheduler.hpp
 +++ b/emulator/scheduler.hpp
 @@ -17,8 +17,13 @@
@@ -17,7 +16,7 @@ index e8a5f5e..6496ad4 100644
  #include <vector>
  
  namespace lexicon224x::cpu {
-@@ -26,7 +31,38 @@ namespace lexicon224x::cpu {
+@@ -26,7 +31,38 @@
  enum class RowPhase { Begin, ExecutePrevious, Fetch, ResetDecode, Converter };
  
  class Scheduler {
@@ -56,7 +55,7 @@ index e8a5f5e..6496ad4 100644
      RowTiming timing = timing_224x;     // the model's row timing (timing.hpp); set before the first step
  
      Tick now() const {
-@@ -35,11 +71,15 @@ public:
+@@ -35,11 +71,15 @@
  
      // Schedule `action` at `when` (not in the past). A late action runs after
      // the row phases and the other actions at the same time.
@@ -74,7 +73,31 @@ index e8a5f5e..6496ad4 100644
          std::push_heap(events.begin(), events.end(), fires_after);
      }
  
-@@ -149,7 +189,7 @@ private:
+@@ -54,8 +94,13 @@
+     // run_phase(RowPhase, row_number), CPU states to run_cpu().
+     template <class RunPhase, class RunCpu>
+     bool step_one(Tick deadline, RunPhase &&run_phase, RunCpu &&run_cpu) {
++        if (!phase_clock_ready) {
++            const Tick offsets[] = {0, timing.execute_offset, timing.fetch_offset, timing.reset_decode_offset, timing.converter_offset, timing.row};
++            for (unsigned i = 0; i < phase_count; ++i) phase_step[i] = offsets[i + 1] - offsets[i];
++            next_phase_time = timing.first_marker;phase_clock_ready = true;
++        }
+         RowPhase kind = phase_kinds[phase];
+-        Tick phase_time = timing.marker(row_index) + offset_of(kind);
++        Tick phase_time = next_phase_time;
+         uint64_t acting_row = row_index;
+         if (kind == RowPhase::ExecutePrevious) {
+             acting_row = row_index - 1;
+@@ -102,7 +147,7 @@
+         // phase goes first, as above.) Any effect a phase schedules sends the
+         // choice back through the general rule.
+         while (events.empty()) {
+-            Tick next = timing.marker(row_index) + offset_of(phase_kinds[phase]);
++            Tick next = next_phase_time;
+             if (next > deadline || cpu_time < next) {
+                 break;
+             }
+@@ -149,7 +194,7 @@
          uint64_t serial;        // creation order
          Tick created;
          bool late;
@@ -83,3 +106,75 @@ index e8a5f5e..6496ad4 100644
      };
  
      // Heap order: earlier time first, then late ones last, then creation order.
+@@ -171,7 +216,8 @@
+         if (kind == RowPhase::ExecutePrevious) {
+             acting_row = row_index - 1;
+         }
+-        time = timing.marker(row_index) + offset_of(kind);
++        time = next_phase_time;
++        next_phase_time += phase_step[phase];
+         phase++;
+         if (phase == phase_count) {
+             phase = 0;
+@@ -188,6 +234,10 @@
+         return timing.marker(row_number - 1);
+     }
+ 
++    // Timing is configured before the first step. Cache fixed phase intervals
++    // rather than decoding the phase and multiplying the row on every event.
++    bool phase_clock_ready = false;
++    Tick next_phase_time = 0, phase_step[phase_count]{};
+     Tick time = 0;
+     Tick cpu_time = ~Tick(0);   // the CPU's next state (none until set)
+     uint64_t row_index = 0;     // the row whose window the next phase is in
+diff --git a/juce-plugin/source/engine.hpp b/juce-plugin/source/engine.hpp
+--- a/juce-plugin/source/engine.hpp
++++ b/juce-plugin/source/engine.hpp
+@@ -38,9 +38,23 @@
+     // Render `frames` 48 kHz frames: outputs A-D (DAC bit order), one pointer
+     // per channel. Throws if the machine stops.
+     void render(const float *left, const float *right, float *const out[4], int frames) {
++        if (silent_preparation_) {
++            // This engine belongs to the offline silent importer. Analog input
++            // is identically zero; output filters cannot feed the firmware.
++            for (int f = 0; f < frames; ++f)
++                if (left[f] != 0.0f || right[f] != 0.0f)
++                    throw std::logic_error("silent preparation received audio input");
++            const auto now = host_->now();
++            if (now > frame_end_ + 48 * lexicon224x::analog::AnalogIO::frame) frame_end_ = now;
++            frame_end_ += uint64_t(frames) * lexicon224x::analog::AnalogIO::frame;
++            host_->run_until(frame_end_ / cpu_period);
++            for (int c = 0; c < 4; ++c) std::fill_n(out[c], frames, 0.0f);
++            return;
++        }
+         float four[4];
+         for (int f = 0; f < frames; f++) {
+             Tick end = io_->before_frame(left[f], right[f]);
++            frame_end_ = end;
+             host_->run_until(end / cpu_period);
+             gains_used_ |= 1u << host_->dsp->gain_left | 16u << host_->dsp->gain_right;
+             io_->after_frame(four);
+@@ -52,6 +66,14 @@
+ 
+     void set_analog(bool on) {
+         io_->set_bypass(!on);
++    }
++
++    void prepare_silence() {
++        host_->audio_observer = {};
++        // Match convert(0) on the initialized gain-ranging analog input.
++        host_->set_audio(0, 3, 0, 3);
++        host_->set_level_detectors(0, 0);host_->set_level_detectors(1, 0);
++        silent_preparation_ = true;
+     }
+ 
+     void button(unsigned bank, unsigned mask) {
+@@ -120,6 +142,8 @@
+     std::unique_ptr<Host> host_;
+     std::unique_ptr<lexicon224x::analog::AnalogIO> io_;
+     unsigned gains_used_ = 0;
++    bool silent_preparation_ = false;
++    Tick frame_end_ = 0;
+ };
+ 
+ }  // namespace lexplug

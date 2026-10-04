@@ -309,3 +309,77 @@ published and no private firmware, banks or reports have been staged.
 The remaining host-level confirmation is the user's first XL import in Ableton
 with the local test VST3. The archive contains only the plugin bundle, build
 identity and test instructions; it contains no ROMs or prepared banks.
+
+## Offline import performance continuation (2026-10-04, macOS)
+
+The user confirmed that first import is slow for both supported firmware sets.
+The Windows crash fix above was reviewed and retained. The user requested no
+full plugin build while investigating import performance. This continuation
+builds only offline console tools with `CINEOL_BUILD_PLUGIN=OFF`; it does not
+build or publish AU, VST3, Standalone or replacement release assets.
+
+Sampling the original XL extraction shows CPU time in the cycle-accurate host,
+row scheduler, digital DSP and analog conversion, rather than disk loading.
+The retained changes are:
+
+- Cache the scheduler's fixed phase intervals after timing is configured. Keep
+  CPU states, row phases, bus events and their tie order unchanged. This applies
+  to both importers through the build-only Reflexion export patch.
+- After XL's unchanged firmware startup, prepare with zero ADC input and skip
+  analog input/output filters and per-sample output collection. The digital DSP,
+  converters, diagnostics, CPU and protected WCS bus still run. Reject nonzero
+  input in this offline mode. The normal Engine path remains the default.
+- Retain `cineol_xl_extract ... --full-emulation` for comparison with the normal
+  analog rendering path. Both paths use the improved scheduler.
+- Add `cineol_scheduler_check` and `cineol_xl_import_runtime_check` as console
+  tools that need neither JUCE nor private firmware.
+
+Observed local Release measurements (one run per variant, wall time):
+
+| Firmware | Before | Retained optimization | Result |
+| --- | ---: | ---: | --- |
+| 224XL v8.21, all 22 programs | 183 s | 140 s | Entire bank byte-identical to the previous trusted bank |
+| 224 v4.4, all 6 programs | 104 s | 98 s | Entire bank byte-identical to the previous trusted bank |
+
+These are illustrative macOS timings, not Windows guarantees or a controlled
+benchmark. The 224 baseline uses the existing earlier Release console tool;
+the XL baseline uses the console tool built when reviewing the Windows fix.
+Some optimized runs overlapped other console work. All timing and generated
+bank artifacts stay under ignored `build/`.
+
+The scheduler regression matched 1,849,218 individual callbacks against the
+clean pinned scheduler across both models, several deadline sizes, tied events
+and nested events. The XL runtime check passed the actual coroutine-frame and
+early-cancellation probes, synthetic DSP-port reads and protected WCS writes,
+normal/silent CPU and memory comparisons, and nonzero-input rejection. The
+largest local coroutine request remains 12,264 bytes with one peak live frame.
+This new revision still needs MSVC runtime checks and Windows measurements;
+the 4,208-byte Windows result above belongs to the prior crash-fix revision.
+
+All existing 224 composition, modulation and decay extraction checks passed.
+Both complete optimized banks match their older trusted banks byte-for-byte.
+No native audio DSP, control law, preset format, cache format, parameter ID or
+plugin identifier was changed. The improved bank preparation is invoked only
+outside audio processing. Already prepared banks continue to use the cache.
+
+An experiment replacing 224's fixed compiler wait with accepted-control cache
+polling passed coefficient checks but changed measured modulation rates in the
+bank. It was rejected and is absent from the tracked implementation. Likewise,
+digital DSP/diagnostic skipping was rejected because XL firmware reads those
+ports. Further large reductions must preserve that firmware behavior.
+
+To verify on Windows without building plugin formats:
+
+```powershell
+cmake -S . -B build/import-speed/windows -DCINEOL_BUILD_PLUGIN=OFF -DNATIVE_HALL_BUILD_TOOLS=ON -DNATIVE_HALL_ROM_DIR=C:/cineol-unused-rom-directory
+cmake --build build/import-speed/windows --config Release --parallel 4 --target cineol_scheduler_check cineol_xl_import_runtime_check cineol_xl_extract native_224_extract
+& './build/import-speed/windows/native-hall/Release/cineol_scheduler_check.exe'
+& './build/import-speed/windows/native-hall/Release/cineol_xl_import_runtime_check.exe'
+Measure-Command { & './build/import-speed/windows/native-hall/Release/native_224_extract.exe' 'C:\PATH\TO\PRIVATE\224-v4.4' './build/import-speed/224-fast.bank224' }
+Measure-Command { & './build/import-speed/windows/native-hall/Release/cineol_xl_extract.exe' 'C:\PATH\TO\PRIVATE\224XL-v8.21' './build/import-speed/xl-fast.bankxl' }
+```
+
+Compare each output with a previous trusted bank. Optionally extract XL again
+with `--full-emulation` and compare SHA-256 hashes of both files. Keep all ROMs,
+banks, captures and local paths private. Do not publish updated release assets
+from this continuation without the remaining Windows checks and a later build.

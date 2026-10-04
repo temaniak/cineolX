@@ -4,7 +4,9 @@
 #include <iostream>
 
 int main(int argc,char** argv) {
-    if(argc!=3) {std::cerr<<"usage: cineol_xl_extract ROM_DIRECTORY BANK_FILE\n";return 1;}
+    if(argc!=3 && !(argc==4 && std::string(argv[3])=="--full-emulation")) {
+        std::cerr<<"usage: cineol_xl_extract ROM_DIRECTORY BANK_FILE [--full-emulation]\n";return 1;
+    }
     try {
         cineol::xl::import::RomSet roms;
         for(const auto& file:std::filesystem::directory_iterator(argv[1])) {
@@ -15,6 +17,8 @@ int main(int argc,char** argv) {
             if(chip>=0) roms[unsigned(chip)]=std::move(bytes);
         }
         native_hall::import::Callbacks callbacks;const char* previous=nullptr;
+        callbacks.full_emulation=argc==4;
+        callbacks.log=&std::cout;
         callbacks.progress=[&](double,const char* stage) {if(stage!=previous) {std::cout<<stage<<std::endl;previous=stage;}return true;};
         auto bank=cineol::xl::import::prepare_bank(roms,callbacks);
         cineol::xl::BankHeader header;header.checksum=native_hall::profile_checksum(bank.get(),sizeof(*bank));

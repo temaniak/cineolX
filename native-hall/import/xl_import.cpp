@@ -270,9 +270,10 @@ static Task<void> prepare_program_dynamics(Engine& engine,Machine& machine,LarcO
     if(!(data.valid(Graph(index)))) co_await fail("Invalid prepared XL program: %s.",info.name);
 }
 static Task<void> prepare_programs(Engine& engine,Machine& machine,LarcOperator& op,Bank& result,
-    const native_hall::import::Callbacks& callbacks,std::array<uint8_t,65536>& display_memory,PagesReading& pages) {
+    const native_hall::import::Callbacks& callbacks,std::array<uint8_t,65536>& display_memory,PagesReading& pages,bool silent_preparation=true) {
     double progress=0;const char* stage="Starting 224XL v8.21";
     for(unsigned n=0;n<160;++n) {co_await report_progress(progress,stage,callbacks);co_await machine.sleep(0.1);}
+    if(silent_preparation) engine.prepare_silence();
     for(unsigned index=0;index<graphs.size();++index) {
         progress=double(index)/graphs.size();stage=graphs[index].name;co_await report_progress(progress,stage,callbacks);
         co_await prepare_program_controls(engine,machine,op,result,callbacks,display_memory,pages,index);
@@ -308,6 +309,25 @@ PreparationRuntimeStats check_preparation_runtime(const native_hall::import::Cal
     const auto done=machine.run_task([&]{return prepare_programs(*engine,machine,op,*result,cancel,*display_memory,*pages);});
     check(done.failed && std::string(done.error.text)=="Import cancelled.","XL runtime cancellation failed.");
     check(machine.frame()==0 && machine.pool().in_use()==0,"XL runtime cancellation rendered firmware or leaked frames.");
+    if(callbacks.progress) callbacks.progress(0,"silent preparation CPU/bus equivalence");
+    for(unsigned port=3;port<=9;++port) {
+        auto normal=std::make_unique<Engine>(0),silent=std::make_unique<Engine>(0);
+        // Synthetic IN/STA/MVI/STA/HLT: read a DSP port and write a WCS byte.
+        // Exercise monitors, transfers, headroom and protected bus timing.
+        const uint8_t code[]={0xdb,uint8_t(port),0x32,0x00,0x3c,0x3e,0x5a,0x32,0x00,0x40,0x76};
+        normal->load(code,sizeof code,0);silent->load(code,sizeof code,0);silent->prepare_silence();
+        std::array<float,511> zero{};std::array<std::array<float,511>,4> output{};
+        float* out[]={output[0].data(),output[1].data(),output[2].data(),output[3].data()};
+        for(int frames:{1,7,128,511}) {
+            normal->render(zero.data(),zero.data(),out,frames);silent->render(zero.data(),zero.data(),out,frames);
+            check(normal->host().cycles==silent->host().cycles && normal->host().memory==silent->host().memory &&
+                normal->host().wcs_writes()==silent->host().wcs_writes(),"XL silent preparation changed CPU/bus state.");
+            for(unsigned row=0;row<128;++row) check(normal->host().dsp->wcs[row]==silent->host().dsp->wcs[row],"XL silent preparation changed WCS.");
+        }
+        zero[0]=1;bool rejected=false;
+        try {silent->render(zero.data(),zero.data(),out,1);} catch(const std::logic_error&) {rejected=true;}
+        check(rejected,"XL silent preparation accepted non-silent input.");
+    }
     return {machine.pool().max_request(),machine.pool().high_water()};
 }
 std::unique_ptr<Bank> prepare_bank(const RomSet& roms,const native_hall::import::Callbacks& callbacks) {
@@ -325,7 +345,7 @@ std::unique_ptr<Bank> prepare_bank(const RomSet& roms,const native_hall::import:
     // MSVC spills PagesReading into the coroutine frame even in Release.
     // Allocate import-only scratch before starting any task, outside audio.
     auto pages=std::make_unique<PagesReading>();
-    const auto done=machine.run_task([&]{return prepare_programs(*engine,machine,op,*result,callbacks,*display_memory,*pages);});
+    const auto done=machine.run_task([&]{return prepare_programs(*engine,machine,op,*result,callbacks,*display_memory,*pages,!callbacks.full_emulation);});
     check(!done.failed,done.error.text);return result;
 }
 } // namespace cineol::xl::import
