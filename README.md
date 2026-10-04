@@ -2,10 +2,29 @@
 
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
 the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
-preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.5**, with the metal-panel artwork, 21-mark fader scales
+preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.6**, with the metal-panel artwork, 21-mark fader scales
 and six page-bound faders beside permanent Dirt, Input and Mix faders.
 
-## What's new in 0.9.5
+## What's new in 0.9.6
+
+- Native **XL Dynamic Decay/gating**, **LF/MID STOP DECAY**, **REV STOP DLY**
+  and **Decay Optimization** are now active for all 19 XL reverb algorithms.
+  The three non-reverb effects retain their firmware-specific controls.
+- Dynamic Decay and Decay Opt switches, together with stop settings, are saved
+  in sound presets and DAW sessions. The existing Decay Opt button serves both
+  original 224 and XL; no duplicate control or new host parameter ID was added.
+- **Dyn Decay** replaces the duplicate **Page n/n** header button, preserving
+  text alignment and spacing. Numbered buttons provide all page navigation.
+- Quick preset keys use their LEDs to show selection, without hover, focus or
+  selection underlines. The README screenshots show the updated editor.
+- Version-4 XL caches add dynamics state and measured control clocks.
+  **Re-import your complete original 224XL v8.21 ROM set once when upgrading
+  from 0.9.5.** The previous XL cache, original-224 cache and presets are retained.
+- All 19 reverb programs passed 27,117 exact firmware controller transitions;
+  full plugin checks covered all 28 algorithms, 618 active fader endpoints and
+  44.1/48/96 kHz, with no audio callback allocations/releases.
+
+## Earlier changes in 0.9.5
 
 Changes since the previous published release, 0.6.0:
 
@@ -26,13 +45,12 @@ Changes since the previous published release, 0.6.0:
 
 Spillover and quick presets are desktop features. This release's UI and transition
 changes leave Daisy processing unchanged. Plugin identifiers and existing
-parameter IDs remain stable. The published 0.9.5 archive predates the native
-XL dynamics update described below.
+parameter IDs remain stable. Version 0.9.6 adds the XL dynamics update above.
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
-[0.9.5 release](https://github.com/temaniak/cineolX/releases/tag/v0.9.5).
-See the [release notes](docs/releases/v0.9.5.md) for installation, compatibility
+[0.9.6 release](https://github.com/temaniak/cineolX/releases/tag/v0.9.6).
+See the [release notes](docs/releases/v0.9.6.md) for installation, compatibility
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files
@@ -140,7 +158,7 @@ levels, delays, pan, feedback and Size where used. Size updates the decay-time
 labels and available variable pre-delay range. Inactive controls are parked,
 dark and marked `--`. XL's unbounded upper frequency/decay display values are
 shown as `INF` with their units, so an active fader at its limit does not look
-unavailable. The current source build enables **Dynamic Decay**, LF/MID
+unavailable. Version 0.9.6 enables **Dynamic Decay**, LF/MID
 **STOP DECAY**, **REV STOP DLY**, and **Decay Optimization** for XL reverb
 algorithms. Dynamic Decay switches to the stop decay times after the input
 level falls; shorter stop times produce gated tails. REV STOP DLY holds the
@@ -154,7 +172,7 @@ do not establish complete hardware equivalence.
 
 Numbered selectors beside the algorithm name jump directly to a parameter page;
 the selected page is bright and other numbers are dim. These numbered buttons
-are the only page selectors in the current source build. The right header uses
+are the only page selectors in version 0.9.6. The right header uses
 **Left / Right / Model** above **Dyn Decay / Mod Enh / Decay Opt**, aligned with
 the three permanent fader columns. Dynamic Decay replaces the duplicate
 **Page n/n** button, keeping the existing header geometry. Quick preset keys use their LEDs for selection and have
@@ -564,7 +582,7 @@ page and global setting as one complete audio update.
 
 ![Cineol-X 224 XL preview](docs/images/cineol-x-224-xl.png)
 
-The current source build includes native XL dynamic decay/gating, stop controls
+Version 0.9.6 includes native XL dynamic decay/gating, stop controls
 and Decay Optimization. A new version-4 prepared XL bank stores their initial
 state and measured control clocks. **Import your original 224XL v8.21 ROM set
 once again when upgrading from the published 0.9.5 build**; the previous

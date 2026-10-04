@@ -376,7 +376,7 @@ retained in build/install-backups/20261004-143509-focus-fix-v0.9.5.
 Installed Audio Unit validation passed. Plugin identifiers, parameter IDs,
 sound processing, Daisy files and dependency checkouts are unchanged.
 
-## Native XL dynamics update after the published 0.9.5 release
+## Native XL dynamics update (v0.9.6)
 
 The desktop source now implements XL Dynamic Decay/gating, LF/MID STOP DECAY,
 REV STOP DLY and Decay Optimization. The existing Decay Opt switch selects the

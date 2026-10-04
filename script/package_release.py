@@ -100,6 +100,10 @@ def package(platform, build_dir, output_dir):
                     '224X v8.1, 224 XL v8.1A and incomplete or modified sets are rejected.\n'
                     'ROMs and prepared banks are not included. Your files stay local;\n'
                     'later launches use the cache. See README.md for details.\n')
+        install += ('\nUPGRADING FROM 0.9.5\n'
+                    'XL dynamics require a new version-4 prepared cache. Re-import your\n'
+                    'complete original 224XL v8.21 ROM set once after updating. The previous\n'
+                    'XL cache is retained. Original-224 caches and sound presets remain compatible.\n')
         (staging / 'INSTALL.txt').write_text(install, encoding='utf-8')
         if platform == 'macos':
             subprocess.run(['ditto', '-c', '-k', '--keepParent', str(staging), str(archive)], check=True)
@@ -115,7 +119,7 @@ def package(platform, build_dir, output_dir):
         with zipfile.ZipFile(archive) as zipped:
             if zipped.testzip() is not None:
                 raise RuntimeError('ZIP integrity check failed')
-            if any(Path(file).suffix.lower() in {'.rom', '.bank224', '.hall224', '.wcs', '.bin', '.elf', '.hex'} for file in zipped.namelist()):
+            if any(Path(file).suffix.lower() in {'.rom', '.bank224', '.bankxl', '.hall224', '.wcs', '.bin', '.elf', '.hex'} for file in zipped.namelist()):
                 raise RuntimeError('Private/firmware file in release archive')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_suffix('.zip.sha256').write_text(f'{digest}  {archive.name}\n', encoding='utf-8')
