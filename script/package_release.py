@@ -90,8 +90,16 @@ def package(platform, build_dir, output_dir):
                     'a direct dry signal with zero reported plugin latency. Reverb filter\n'
                     'delay and pre-delay remain. This setting defaults to off and is saved\n'
                     'per instance. A transport restart may be needed after switching.\n\n'
-                    'Supply your own original Lexicon 224 v4.4 ROM1-ROM5 on first use.\n'
-                    'ROMs and prepared banks are not included. See README.md for details.\n')
+                    'FIRST LAUNCH - IMPORT YOUR ROMS\n'
+                    'Original 224 programs: Lexicon 224 v4.4 ROM1-ROM5, five 2048-byte files.\n'
+                    'XL preview programs: Lexicon 224 XL v8.21, the complete eleven-chip\n'
+                    'set of 2048- and 4096-byte files. Import both sets for all 28 programs.\n'
+                    'Click Choose ROMs... in the plugin and select a folder, ZIP or the\n'
+                    'complete files. Wait for preparation; only imported engines are enabled.\n'
+                    'To add the other engine later, click the Model / 224 / 224 XL indicator.\n'
+                    '224X v8.1, 224 XL v8.1A and incomplete or modified sets are rejected.\n'
+                    'ROMs and prepared banks are not included. Your files stay local;\n'
+                    'later launches use the cache. See README.md for details.\n')
         (staging / 'INSTALL.txt').write_text(install, encoding='utf-8')
         if platform == 'macos':
             subprocess.run(['ditto', '-c', '-k', '--keepParent', str(staging), str(archive)], check=True)

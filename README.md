@@ -5,6 +5,41 @@ the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
 preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.5**, with the metal-panel artwork, 21-mark fader scales
 and six page-bound faders beside permanent Dirt, Input and Mix faders.
 
+## What's new in 0.9.5
+
+Changes since the previous published release, 0.6.0:
+
+- Desktop preview of all 22 native 224 XL v8.21 algorithms, alongside the six
+  original 224 programs, with automatic engine selection, dedicated parameter
+  pages and algorithm-specific output pairs.
+- Optional **Spillover** for 224/XL algorithm changes, with a 1–10 second tail
+  fade (default 5 seconds), continuous dry audio and bounded two-engine processing.
+- Eight photographic **Quick presets** keys, assigned through the preset browser
+  and saved separately for each plugin instance in DAW sessions.
+- A shared named preset bank with search, multiple algorithm filters, replacement
+  confirmation, firmware-aware recall and legacy preset adoption.
+- Animated fader recall, direct numbered page selection, scrolling preset names,
+  `INF` labels for unbounded XL values and a full-size metal faceplate.
+- Editor-owned popup menus and preset dialogs prevent a hidden instance's
+  unfinished dialog from blocking another instance's controls. Leaving the
+  editor cancels unfinished dialogs and allows Save to reopen immediately.
+
+Spillover and quick presets are desktop features. This release's UI and transition
+changes leave Daisy processing unchanged. Plugin identifiers and existing
+parameter IDs remain stable. The XL preview's pending dynamic-decay controls
+are disabled; it does not claim complete hardware equivalence.
+
+Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
+(VST3/Standalone) archives from the
+[0.9.5 release](https://github.com/temaniak/cineolX/releases/tag/v0.9.5).
+See the [release notes](docs/releases/v0.9.5.md) for installation, compatibility
+and validation details. ROMs and prepared banks are not included.
+
+**Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files
+for the six original-224 programs. The optional 22-program **224 XL** preview
+requires a separate complete **224 XL v8.21** ROM set. Use **Choose ROMs...**
+in the plugin; see [ROM requirements and first use](#rom-requirements-and-first-use).
+
 Primary repository: [temaniak/cineolX](https://github.com/temaniak/cineolX).
 
 ChatGPT was actively used during the creation of this project, assisting with
@@ -67,7 +102,7 @@ clears the previous reverb tail immediately. The desktop-only Spillover option
 preserves it with a timed fade. Pre-delay changes can produce a transient.
 
 The expanded red display has six labels aligned with the six variable faders.
-Click **Main 1/2** / **Detail 2/2** on the display to switch pages. Main contains
+Click **Page 1/2** / **Page 2/2**, or a numbered page selector, to switch pages. Main contains
 Bass, Mid, Crossover, Treble, Depth and Pre-delay; Detail places Diffusion in
 slot five. Unused slots are disabled and their caps park at the bottom, with
 `--` on the display. Parking never writes a parameter minimum. Page changes
@@ -90,6 +125,10 @@ texture with a fixed grain scale, rather than stretched sections of the faceplat
 They share dark frames and red header/input surfaces. See the
 [preset dialog](docs/images/cineol-x-224-preset-dialog.png). The system file
 picker retains its platform appearance.
+
+Popup menus and preset dialogs belong to their plugin editor. Leaving or hiding
+the editor cancels unfinished dialogs, and a preset dialog in one instance does
+not block controls in another instance.
 
 Click the algorithm name on the red display to open the single algorithm list.
 It selects the native engine automatically; the corner
@@ -210,15 +249,29 @@ Click the gear again or press Escape to close Settings.
 
 ## ROM requirements and first use
 
-The plugin accepts complete sets of **original 224 v4.4 ROM1–ROM5** or
-**224 XL v8.21**. Files must match their expected SHA-256 digests; names do not
-matter. XL uses eleven chips of 2,048 or 4,096 bytes. 224X v8.1, XL v8.1A,
-modified files and incomplete sets are rejected. Daisy still accepts only the
-original 224 v4.4 ROMs.
+The downloaded plugin does not include ROMs or prepared banks. Before using
+reverb for the first time, import your own complete supported ROM set:
 
-The desktop plugin can be compiled without ROMs. On first use, choose
-**Choose ROMs...** and select a folder, ZIP or complete set of files. To add
-XL to an existing 224 setup, click the engine indicator on the display.
+| Engine | Required firmware | Required files | Programs unlocked |
+| --- | --- | --- | --- |
+| Original Lexicon 224 | **v4.4** | **ROM1–ROM5**, five files of 2,048 bytes each | Six original-224 programs |
+| Lexicon 224 XL desktop preview | **v8.21** | Complete eleven-chip set, with 2,048- and 4,096-byte files | 22 XL programs |
+
+Import both sets to enable all 28 programs. Original-224 ROMs do not unlock XL,
+and XL ROMs do not unlock original-224 programs. Files must match the expected
+SHA-256 digests; filenames do not matter. **224X v8.1**, **224 XL v8.1A**, other
+versions, modified files and incomplete sets are rejected. Daisy accepts only
+the original 224 v4.4 ROMs.
+
+The desktop plugin can be compiled without ROMs. To import them:
+
+1. Open the installed plugin in your DAW or launch the standalone application.
+2. On the first-use panel, click **Choose ROMs...** and select a folder, ZIP or
+   complete set of ROM files for one supported firmware version.
+3. Wait for local import to finish, then select an enabled algorithm.
+4. To import the other engine later, click **Model / 224 / 224 XL** on the red
+   display to reopen ROM setup and select its separate complete set.
+
 Import runs on a cancellable background thread. Only programs with a ready
 bank are enabled in the algorithm list. Audio passes through dry while the
 selected bank is unavailable. ROM control firmware runs only during local

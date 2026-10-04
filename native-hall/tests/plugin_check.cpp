@@ -37,6 +37,11 @@ static juce::Component* find(juce::Component& root,const char* id) {
     for(auto* child:root.getChildren()) if(auto* found=find(*child,id)) return found;
     return nullptr;
 }
+static juce::Component* findNamed(juce::Component& root,const juce::String& name) {
+    if(root.getName()==name) return &root;
+    for(auto* child:root.getChildren()) if(auto* found=findNamed(*child,name)) return found;
+    return nullptr;
+}
 static void check_editor() {
     NativeHallProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
@@ -322,7 +327,7 @@ static void check_preset_bank() {
     juce::StringArray names;
     require(p.presetNames(names,bank).wasOk() && names.contains("Legacy Hall"),"legacy preset was not adopted");
     set(p,"bass",5);set(p,"mix",0.5f);set(p,"low_latency",1);set(p,"analog",0.15f);
-    const auto unicode=juce::String::fromUTF8("Зал / тёплый");
+    const auto unicode=juce::String::fromUTF8("\u0417\u0430\u043b / \u0442\u0451\u043f\u043b\u044b\u0439");
     require(p.saveBankPreset(unicode,false,bank).wasOk() && p.presetName()==unicode && !p.presetModified(),"named bank save failed");
     require(bank.existsAsFile() && legacy.existsAsFile() &&
         files.folder.findChildFiles(juce::File::findFiles,false,"*.cineol224").size()==1,"bank save created per-preset files or deleted a legacy file");
@@ -362,7 +367,7 @@ static void check_preset_bank() {
         save->onClick();
         auto* dialog=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
         require(dialog && dialog->getTextEditor("preset_name"),"save opened a file chooser instead of a name dialog");
-        dialog->getTextEditor("preset_name")->setText("UI Hall");dialog->exitModalState(1);
+        dialog->getTextEditor("preset_name")->setText("UI Hall");dialog->getButton("Save")->onClick();
         juce::MessageManager::callAsync([&] {
             require(p.presetName()=="UI Hall" && !p.presetModified() &&
                 p.presetBankEntries(entries).wasOk() && entries.size()==1 && entries[0].algorithm==2,
@@ -371,12 +376,12 @@ static void check_preset_bank() {
             save->onClick();
             auto* again=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
             require(again && again->getTextEditor("preset_name"),"second save dialog missing");
-            again->getTextEditor("preset_name")->setText("UI Hall");again->exitModalState(1);
+            again->getTextEditor("preset_name")->setText("UI Hall");again->getButton("Save")->onClick();
             juce::MessageManager::callAsync([&] {
                 auto* replace=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
                 require(replace && replace->getName()=="Replace preset?","replacement confirmation missing");
                 require(&replace->getLookAndFeel()==&save->getLookAndFeel(),"replacement dialog lost the editor theme");
-                replace->exitModalState(0);
+                replace->getButton("Cancel")->onClick();
                 juce::MessageManager::callAsync([&] {
                     require(p.presetName()=="Legacy Hall" && !p.presetModified(),"cancelling replacement changed the preset");
                     save->onClick();editor.reset();
@@ -412,6 +417,67 @@ static void check_preset_bank() {
     require(p.loadBankPreset("XL fixture",mixed_bank).failed() && p.presetName()=="Current" && !p.presetModified(),
         "unavailable firmware recall changed current sound");
     std::cout<<"Preset bank: named save/replace, persistent shared listing, legacy adoption, algorithm grouping/recall, Unicode names, visual recall, validation pass\n";
+}
+static void check_editor_window_focus() {
+    require(juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()!=nullptr,"Focus check requires the macOS desktop");
+    NativeHallProcessor first,second;
+    class HostWindow final : public juce::DocumentWindow {
+    public:
+        explicit HostWindow(NativeHallProcessor& processor):DocumentWindow("Cineol focus regression",juce::Colours::black,allButtons) {
+            setUsingNativeTitleBar(true);setContentOwned(processor.createEditor(),true);centreWithSize(getWidth(),getHeight());setVisible(true);
+        }
+        void closeButtonPressed() override {}
+    } first_host(first),second_host(second);
+    auto* first_editor=first_host.getContentComponent();auto* second_editor=second_host.getContentComponent();
+    auto* save=dynamic_cast<juce::Button*>(find(*first_editor,"save_preset"));
+    auto* other_bass=dynamic_cast<juce::Slider*>(find(*second_editor,"bass"));
+    require(save && other_bass,"focus fixture controls missing");
+    first_host.toFront(true);save->onClick();
+    auto* dialog=dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
+    require(dialog!=nullptr,"focus fixture dialog missing");
+    require(first_editor->isParentOf(dialog) && !dialog->isOnDesktop(),"preset dialog is not owned by its editor");
+    dialog->getTextEditor("preset_name")->setText("Cancelled on window hide");
+    require(!other_bass->isCurrentlyBlockedByAnotherModalComponent(),"Visible preset dialog blocks another plugin instance");
+    first_host.setVisible(false);
+    require(!other_bass->isCurrentlyBlockedByAnotherModalComponent(),"A hidden plugin's preset dialog blocks another editor's faders");
+    juce::Timer::callAfterDelay(100,[&] {
+        require(!juce::Component::getCurrentlyModalComponent(),"Hiding the editor left an active preset dialog");
+        require(!NativeHallProcessor::presetBankFile().loadFileAsString().contains("Cancelled on window hide"),"window-hide cancellation saved an unfinished preset");
+        first_host.setVisible(true);first_host.toFront(true);save->onClick();
+        require(juce::Component::getCurrentlyModalComponent()!=nullptr,"cancelled dialog prevented reopening Save");
+        second_host.toFront(true);other_bass->grabKeyboardFocus();
+        juce::Timer::callAfterDelay(100,[&] {
+            require(!juce::Component::getCurrentlyModalComponent(),"Changing plugin windows left an active preset dialog");
+            auto* output=dynamic_cast<juce::Button*>(find(*second_editor,"output_l"));
+            require(output!=nullptr,"focus fixture output missing");output->onClick();
+            auto* menu=findNamed(*second_editor,"menu");
+            require(menu && second_editor->isParentOf(menu) && !menu->isOnDesktop(),"popup is a detached native window");
+            first_host.clearContentComponent();
+            require(menu->isVisible() && menu->isCurrentlyModal(),"closing one editor dismissed another instance's menu");
+            menu->keyPressed(juce::KeyPress(juce::KeyPress::downKey));menu->keyPressed(juce::KeyPress(juce::KeyPress::returnKey));
+            juce::Timer::callAfterDelay(100,[&] {
+                require(!juce::Component::getCurrentlyModalComponent() && !other_bass->isCurrentlyBlockedByAnotherModalComponent(),
+                    "selecting a menu item left the faders blocked");
+                require(second.saveBankPreset("Focus Hall").wasOk(),"focus preset fixture failed");
+                second.setCurrentProgram(6);
+                require(second.loadBankPreset("Focus Hall").wasOk(),"focus fixture preset recall failed");
+                const double before=other_bass->getValue();
+                const auto layout=other_bass->getLookAndFeel().getSliderLayout(*other_bass).sliderBounds;
+                const juce::Point<float> start(float(layout.getCentreX()),float(layout.getY()+layout.getHeight()*(1-other_bass->valueToProportionOfLength(before))));
+                const auto now=juce::Time::getCurrentTime();
+                const auto source=juce::Desktop::getInstance().getMainMouseSource();
+                const juce::MouseEvent down(source,start,juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier),1,0,0,0,0,
+                    other_bass,other_bass,now,start,now,1,false);
+                other_bass->mouseDown(down);other_bass->mouseDrag(down.withNewPosition(start.translated(0,-50)));
+                other_bass->mouseUp(down.withNewPosition(start.translated(0,-50)));
+                require(other_bass->getValue()!=before && second.state.getRawParameterValue("bass")->load()==float(other_bass->getValue()),
+                    "fader drag after focus changes/preset recall did not reach the processor");
+                juce::MessageManager::getInstance()->stopDispatchLoop();
+            });
+        });
+    });
+    juce::MessageManager::getInstance()->runDispatchLoop();
+    std::cout<<"Editor focus: scoped dialogs, hide/refocus cancellation, safe reopen, parented menus, instance isolation and real fader drag after preset recall pass\n";
 }
 static void check_quick_presets() {
     PresetTestFiles files;NativeHallProcessor p;
@@ -505,8 +571,7 @@ static void check_preset_browser() {
     presets->selectRow(0);require(assign->isEnabled(),"assignment did not enable for selected row");
     if(juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()!=nullptr &&
         !juce::MessageManager::getInstance()->hasStopMessageBeenSent()) {
-        assign->onClick();juce::Component* menu=nullptr;auto& desktop=juce::Desktop::getInstance();
-        for(int i=0;i<desktop.getNumComponents();++i) if(desktop.getComponent(i)->getName()=="menu") menu=desktop.getComponent(i);
+        assign->onClick();auto* menu=findNamed(*editor,"menu");
         require(menu && &menu->getLookAndFeel()==&assign->getLookAndFeel(),"assignment menu missing or lost its theme");
         query("Browser Plate"); // The menu must keep the row selected when it was opened.
         for(unsigned i=0;i<8;++i) menu->keyPressed(juce::KeyPress(juce::KeyPress::downKey));
@@ -1058,7 +1123,7 @@ int main(int argc,char** argv) {
         juce::File folder;
         ~TestCache() {if(folder.isDirectory()) folder.deleteRecursively();}
     } test_cache;
-    if((argc==3 && std::string(argv[1])=="--bank") || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check" || std::string(argv[1])=="--spillover-check" || std::string(argv[1])=="--quick-check"))) {
+    if((argc==3 && std::string(argv[1])=="--bank") || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check" || std::string(argv[1])=="--spillover-check" || std::string(argv[1])=="--quick-check" || std::string(argv[1])=="--focus-check"))) {
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getNonexistentChildFile("cineol-plugin-check",{},false);
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");
@@ -1066,6 +1131,7 @@ int main(int argc,char** argv) {
         require(juce::File(juce::String::fromUTF8(argv[2])).copyFileTo(CineolRomBank::cacheFile()),"could not seed test bank");
         if(argc==4) require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed XL bank");
     }
+    if(argc==4 && std::string(argv[1])=="--focus-check") {check_editor_window_focus();return 0;}
     if(argc==4 && std::string(argv[1])=="--quick-check") {check_quick_presets();check_preset_browser();return 0;}
     if(argc==4 && std::string(argv[1])=="--spillover-check") {
         check_state_and_ranges();check_editor();check_spillover();return 0;
@@ -1145,9 +1211,7 @@ int main(int argc,char** argv) {
             const auto mode=std::string(argv[4]);
             auto* button=dynamic_cast<juce::Button*>(find(*editor,mode=="outputs"?"output_l":mode=="assign"?"assign_quick_preset":"algorithm"));
             require(button!=nullptr,"Menu button missing");button->onClick();
-            auto& desktop=juce::Desktop::getInstance();
-            for(int i=0;i<desktop.getNumComponents();++i)
-                if(desktop.getComponent(i)->getName()=="menu") snapshot=desktop.getComponent(i);
+            if(auto* menu=findNamed(*editor,"menu")) snapshot=menu;
             require(snapshot!=editor.get(),"Popup menu missing");
         }
         juce::File file(juce::String::fromUTF8(argv[2]));

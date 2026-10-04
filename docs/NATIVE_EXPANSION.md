@@ -351,3 +351,27 @@ standalone on 2026-10-04. The installer verified signatures and executable
 hashes, retaining the previous bundles in
 build/install-backups/20261004-123543-quick-presets-v0.9.5. Installed Audio Unit
 validation passed. Dependency checkouts and Daisy/core files remain unchanged.
+
+## Desktop editor focus fix (v0.9.5)
+
+Popup menus now attach to the owning panel instead of creating detached native
+windows. Preset dialogs are children of their AudioProcessorEditor and only
+block controls within that instance. Hiding, detaching or leaving an editor
+cancels its transient UI. Closing an editor dismisses only its own menus.
+Dialog results clear editor state synchronously; deferred modal cleanup only
+deletes the window, so host message delays cannot leave Save disabled.
+
+On 2026-10-04 the dedicated macOS focus regression passed with two editor
+windows: hidden-dialog cancellation without saving, focus-change cancellation,
+immediate Save reopening, parented output menus, instance isolation and fader
+drag delivery after preset recall. Preset save/replace/cancel, browser and
+quick-key tests also passed. Full processor regression covered all 28 programs,
+fader endpoints and spillover at 44.1/48/96 kHz with zero callback allocations
+or releases. These tests simulate host windows; direct verification in Logic
+Pro was unavailable because the Mac was locked.
+
+Signed universal arm64/x86_64 AU, VST3 and standalone bundles were reinstalled
+and their executable hashes matched the build. Previous installations are
+retained in build/install-backups/20261004-143509-focus-fix-v0.9.5.
+Installed Audio Unit validation passed. Plugin identifiers, parameter IDs,
+sound processing, Daisy files and dependency checkouts are unchanged.

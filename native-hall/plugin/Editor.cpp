@@ -13,6 +13,20 @@ const juce::Colour ink(0xff171612),led(0xffff4035),led_text(0xffff7560);
 juce::Font font(float height,bool bold=false) {
     return juce::Font(juce::FontOptions("Arial",height,bold?juce::Font::bold:juce::Font::plain));
 }
+juce::Component* menuParent(juce::Component* target) {
+    for(auto* component=target;component;component=component->getParentComponent())
+        if(component->getComponentID()=="cineol_panel") return component;
+    return target?target->findParentComponentOfClass<juce::AudioProcessorEditor>():nullptr;
+}
+void dismissEditorMenus(juce::Component& editor) {
+    // Never dismiss another plugin instance's menus. Parented menus are
+    // identifiable even when the host hides or reparents the editor.
+    for(int i=juce::Component::getNumCurrentlyModalComponents();--i>=0;)
+        if(auto* modal=juce::Component::getCurrentlyModalComponent(i))
+            if(modal->getName()=="menu" && editor.isParentOf(modal)) {
+                modal->setVisible(false);modal->exitModalState(0);
+            }
+}
 // Only the graphics thread loads/decodes these embedded assets.
 juce::Image loadImage(const char* name) {
     int size=0;auto* data=CineolUIData::getNamedResource(name,size);
@@ -89,6 +103,10 @@ private:
 };
 class InstrumentLook : public juce::LookAndFeel_V4 {
 public:
+    juce::Component* getParentComponentForMenuOptions(const juce::PopupMenu::Options& options) override {
+        if(auto* parent=menuParent(options.getTargetComponent())) return parent;
+        return options.getParentComponent();
+    }
     InstrumentLook():cap_(trimTransparentPadding(loadImage("fadercap_png"))),material_(loadImage("menumetal_png")) {
         inactive_cap_=cap_.createCopy();
         juce::Image::BitmapData pixels(inactive_cap_,juce::Image::BitmapData::readWrite);
@@ -524,6 +542,36 @@ private:
     bool active_=false;
 };
 
+class PresetDialog final : public juce::AlertWindow {
+public:
+    PresetDialog(const juce::String& title,const juce::String& message,juce::Component& owner)
+        :AlertWindow(title,message,juce::MessageBoxIconType::NoIcon,&owner),owner_(&owner) {}
+    void addButton(const juce::String& name,int result,const juce::KeyPress& key) {
+        AlertWindow::addButton(name,result,key);
+        getButton(getNumButtons()-1)->onClick=[safe=juce::Component::SafePointer<PresetDialog>(this),result] {
+            if(safe) safe->finish(result);
+        };
+    }
+    void finish(int result) {
+        auto callback=std::move(onResult);
+        setVisible(false);exitModalState(0);
+        // Finish editor state synchronously. A host may defer JUCE's modal
+        // completion message after hiding a window; it only owns deletion now.
+        if(callback) callback(result);
+    }
+    bool keyPressed(const juce::KeyPress& key) override {
+        if(key==juce::KeyPress::escapeKey) {finish(0);return true;}
+        return AlertWindow::keyPressed(key);
+    }
+    bool canModalEventBeSentToComponent(const juce::Component* component) override {
+        // A hidden editor must never leave a process-wide input lock behind.
+        return !owner_ || !isShowing() || (component!=owner_ && !owner_->isParentOf(component));
+    }
+    std::function<void(int)> onResult;
+private:
+    juce::Component::SafePointer<juce::Component> owner_;
+};
+
 class PresetBrowser final : public juce::Component {
 public:
     explicit PresetBrowser(NativeHallProcessor& processor)
@@ -785,9 +833,9 @@ private:
 };
 }
 
-struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
+struct CineolEditor::Panel final : public juce::Component,private juce::Timer,private juce::FocusChangeListener {
     explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panelquickpresets_png")),bezel_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor),preset_browser_(processor) {
-        setLookAndFeel(&look_);setSize(panel_width,panel_height);addAndMakeVisible(display_);
+        setComponentID("cineol_panel");setLookAndFeel(&look_);setSize(panel_width,panel_height);addAndMakeVisible(display_);
         display_.setBounds(variable_fader_x,100,1512,240);
         display_.algorithm.onClick=[this]{showAlgorithms();};
         page_=processor_.editorPage();
@@ -895,11 +943,11 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer {
             settings_panel_.setVisible(settings_button_.getToggleState());
             if(settings_panel_.isVisible()) {settings_panel_.toFront(false);settings_panel_.grabKeyboardFocus();}
         };
-        refreshProgram();startTimerHz(30);
+        refreshProgram();juce::Desktop::getInstance().addFocusChangeListener(this);startTimerHz(30);
     }
     ~Panel() override {
-        stopTimer();juce::PopupMenu::dismissAllActiveMenus();
-        if(preset_dialog_) {preset_dialog_->setLookAndFeel(nullptr);preset_dialog_->exitModalState(0);}
+        stopTimer();juce::Desktop::getInstance().removeFocusChangeListener(this);cancelTransientUi();
+        for(auto dialog:owned_dialogs_) dialog.deleteAndZero();
         setLookAndFeel(nullptr);
     }
     void paint(juce::Graphics& g) override {
@@ -963,20 +1011,24 @@ private:
                           const juce::String& cancel,std::function<void(int)> callback) {
         if(preset_dialog_open_) return;
         preset_dialog_open_=true;refreshProgram();
-        auto* dialog=new juce::AlertWindow(title,message,juce::MessageBoxIconType::NoIcon,this);
+        auto* owner=findParentComponentOfClass<juce::AudioProcessorEditor>();
+        jassert(owner!=nullptr);if(!owner) {preset_dialog_open_=false;return;}
+        auto* dialog=new PresetDialog(title,message,*owner);
         dialog->setLookAndFeel(&look_);
         dialog->addButton(accept,1,juce::KeyPress(juce::KeyPress::returnKey));
         if(cancel.isNotEmpty()) dialog->addButton(cancel,0,juce::KeyPress(juce::KeyPress::escapeKey));
         preset_dialog_=dialog;
-        dialog->addToDesktop(dialog->getLookAndFeel().getAlertBoxWindowFlags());
-        dialog->enterModalState(true,juce::ModalCallbackFunction::create(
+        owned_dialogs_.emplace_back(dialog);
+        owner->addAndMakeVisible(dialog);dialog->centreWithSize(dialog->getWidth(),dialog->getHeight());
+        dialog->onResult=
             [safe=juce::Component::SafePointer<Panel>(this),callback=std::move(callback),window=juce::Component::SafePointer<juce::AlertWindow>(dialog)](int answer) {
                 if(window) window->setLookAndFeel(nullptr);
-                if(!safe) return;
+                if(!safe || safe->preset_dialog_!=window.getComponent()) return;
                 safe->preset_dialog_open_=false;safe->preset_dialog_=nullptr;
                 if(callback) callback(answer);
                 safe->refreshProgram();
-            }),true);
+            };
+        dialog->enterModalState(true,nullptr,true);
     }
     void storePreset(const juce::String& name) {
         juce::StringArray names;auto result=processor_.presetNames(names);
@@ -992,9 +1044,11 @@ private:
     void namePreset() {
         if(preset_dialog_open_) return;
         preset_dialog_open_=true;refreshProgram();
-        auto* dialog=new juce::AlertWindow("Save preset",
+        auto* owner=findParentComponentOfClass<juce::AudioProcessorEditor>();
+        jassert(owner!=nullptr);if(!owner) {preset_dialog_open_=false;return;}
+        auto* dialog=new PresetDialog("Save preset",
             "Algorithm: "+processor_.getProgramName(processor_.getCurrentProgram())+"\nName this preset to add it to the bank.",
-            juce::MessageBoxIconType::NoIcon,this);
+            *owner);
         dialog->setLookAndFeel(&look_);
         const auto current=processor_.presetName();
         dialog->addTextEditor("preset_name",current=="Unsaved settings"?juce::String{}:current,"Preset name");
@@ -1002,16 +1056,18 @@ private:
         dialog->addButton("Save",1,juce::KeyPress(juce::KeyPress::returnKey));
         dialog->addButton("Cancel",0,juce::KeyPress(juce::KeyPress::escapeKey));
         preset_dialog_=dialog;
-        dialog->addToDesktop(dialog->getLookAndFeel().getAlertBoxWindowFlags());
-        dialog->enterModalState(true,juce::ModalCallbackFunction::create(
+        owned_dialogs_.emplace_back(dialog);
+        owner->addAndMakeVisible(dialog);dialog->centreWithSize(dialog->getWidth(),dialog->getHeight());
+        dialog->onResult=
             [safe=juce::Component::SafePointer<Panel>(this),window=juce::Component::SafePointer<juce::AlertWindow>(dialog)](int answer) {
                 const auto name=window?window->getTextEditorContents("preset_name"):juce::String{};
                 if(window) window->setLookAndFeel(nullptr);
-                if(!safe) return;
+                if(!safe || safe->preset_dialog_!=window.getComponent()) return;
                 safe->preset_dialog_open_=false;safe->preset_dialog_=nullptr;
                 if(answer && window) safe->storePreset(name);
                 else safe->refreshProgram();
-            }),true);
+            };
+        dialog->enterModalState(true,nullptr,true);
         dialog->getTextEditor("preset_name")->grabKeyboardFocus();
         dialog->getTextEditor("preset_name")->selectAll();
     }
@@ -1151,7 +1207,21 @@ private:
         const bool available=processor_.programAvailable(0) || processor_.programAvailable(6);
         for(unsigned slot=0;slot<quick_keys_.size();++slot) quick_keys_[slot].update(slot,names[slot],active==int(slot),available && !preset_dialog_open_);
     }
-    void timerCallback() override {refreshProgram();}
+    void cancelTransientUi() {
+        if(auto* owner=findParentComponentOfClass<juce::AudioProcessorEditor>()) dismissEditorMenus(*owner);
+        if(preset_dialog_) preset_dialog_->finish(0);
+    }
+    void globalFocusChanged(juce::Component* focused) override {
+        auto* owner=findParentComponentOfClass<juce::AudioProcessorEditor>();
+        if(owner && owner->getPeer() && focused!=owner && !owner->isParentOf(focused)) cancelTransientUi();
+    }
+    void parentHierarchyChanged() override {cancelTransientUi();}
+    void timerCallback() override {
+        const bool showing=isShowing();const bool focused=getPeer() && getPeer()->isFocused();
+        if((was_showing_ && !showing) || (was_focused_ && !focused)) cancelTransientUi();
+        was_showing_=showing;was_focused_=focused;refreshProgram();
+        owned_dialogs_.erase(std::remove_if(owned_dialogs_.begin(),owned_dialogs_.end(),[](auto dialog){return dialog==nullptr;}),owned_dialogs_.end());
+    }
     NativeHallProcessor& processor_;
     juce::Image background_,bezel_;
     InstrumentLook look_;
@@ -1180,8 +1250,10 @@ private:
     std::array<std::unique_ptr<juce::ParameterAttachment>,2> output_attachments_;
     std::array<std::unique_ptr<ButtonAttachment>,2> button_attachments_;
     std::unique_ptr<juce::ParameterAttachment> dirt_attachment_;
-    juce::Component::SafePointer<juce::AlertWindow> preset_dialog_;
+    juce::Component::SafePointer<PresetDialog> preset_dialog_;
+    std::vector<juce::Component::SafePointer<PresetDialog>> owned_dialogs_;
     bool preset_dialog_open_=false;
+    bool was_showing_=false,was_focused_=false;
     unsigned focused_=5;
     int displayed_program_=-1;
 };
