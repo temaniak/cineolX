@@ -1,10 +1,13 @@
 #include "RomBank.hpp"
+#include <juce-plugin/source/roms/firmware_sets_data.hpp>
+#include <juce-plugin/source/roms/sha256.hpp>
+#include <bit>
 #include <stdexcept>
 
 namespace {
 constexpr int64_t bank_file_size=sizeof(native_hall::BankHeader)+sizeof(native_hall::ProgramBank);
 constexpr const char* missing_roms=
-    "Select a complete 224 v4.4 (ROM1-ROM5) or 224XL v8.21 set. Other revisions are not supported yet.";
+    "Select all 5 original 224 v4.4 ROMs (ROM1-ROM5) or all 11 224XL v8.21 ROMs. Other revisions are not supported.";
 }
 juce::File CineolRomBank::cacheFile() {
     // An explicit override keeps tests and portable development installations
@@ -49,6 +52,7 @@ bool CineolRomBank::startImport(const juce::Array<juce::File>& files) {
 void CineolRomBank::run() {
     try {
         native_hall::import::RomSet roms{};cineol::xl::import::RomSet xl_roms{};unsigned mask=0,xl_mask=0;
+        juce::StringArray unsupported;
         auto cancelled=[&] {if(threadShouldExit()) throw std::runtime_error("Import cancelled.");};
         auto accept=[&](const juce::MemoryBlock& bytes) {
             const int chip=native_hall::import::rom_chip(static_cast<const uint8_t*>(bytes.getData()),bytes.getSize());
@@ -60,12 +64,18 @@ void CineolRomBank::run() {
                 const auto* data=static_cast<const uint8_t*>(bytes.getData());
                 xl_roms[unsigned(xl_chip)].assign(data,data+bytes.getSize());xl_mask|=1u<<xl_chip;
             }
+            if(chip<0 && xl_chip<0) {
+                const auto hash=lexplug::roms::Sha256::of(static_cast<const uint8_t*>(bytes.getData()),bytes.getSize());
+                for(const auto& set:lexplug::roms::data::known_sets)
+                    for(int i=0;i<set.chip_count;++i)
+                        if(hash==set.chips[i].sha256) unsupported.addIfNotAlreadyThere(set.name);
+            }
         };
         auto read=[&](const juce::File& file) {
             cancelled();
             if(file.hasFileExtension("zip")) {
                 juce::ZipFile zip(file);
-                if(zip.getNumEntries()>10000) throw std::runtime_error("This ZIP contains too many files. Select the five 224 v4.4 ROM files directly.");
+                if(zip.getNumEntries()>10000) throw std::runtime_error("This ZIP contains too many files. Select the complete ROM set directly.");
                 for(int i=0;i<zip.getNumEntries();++i) {
                     cancelled();
                     const auto* entry=zip.getEntry(i);
@@ -87,7 +97,16 @@ void CineolRomBank::run() {
         }
         cancelled();
         const bool original=mask==31 && !ready(),xl=xl_mask==2047 && !xlReady();
-        if(!original && !xl) throw std::runtime_error(missing_roms);
+        if(!original && !xl) {
+            juce::String message;
+            if(mask && !ready()) message+="224 v4.4: found "+juce::String(std::popcount(mask))+"/5 chips. ";
+            if(xl_mask && !xlReady()) message+="224XL v8.21: found "+juce::String(std::popcount(xl_mask))+"/11 chips. ";
+            if(unsupported.size()) message+="Unsupported firmware: "+unsupported.joinIntoString(", ")+". ";
+            if(mask==31 && ready()) message+="224 v4.4 is already loaded. ";
+            if(xl_mask==2047 && xlReady()) message+="224XL v8.21 is already loaded. ";
+            if(message.isEmpty()) message="No supported ROM chips found. ";
+            throw std::runtime_error((message+missing_roms).toStdString());
+        }
         native_hall::import::Callbacks callbacks;const char* last_stage=nullptr;
         callbacks.progress=[&](double value,const char* stage) {
             progress_.store(value,std::memory_order_relaxed);

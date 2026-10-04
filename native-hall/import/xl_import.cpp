@@ -57,7 +57,8 @@ struct ShapeCheck {
 static Task<void> report_progress(double progress,const char* stage,const native_hall::import::Callbacks& callbacks) {
     if(callbacks.progress && !callbacks.progress(progress,stage)) co_await fail("Import cancelled.");
 }
-static Task<void> prepare_displays(Engine& engine,Machine& machine,LarcOperator& op,ProgramData& data) {
+static Task<void> prepare_displays(Engine& engine,Machine& machine,LarcOperator& op,ProgramData& data,
+    std::array<uint8_t,65536>& display_memory) {
     auto& host=engine.host();
     auto word=[&](unsigned a){return unsigned(host.memory[a])|unsigned(host.memory[a+1])<<8;};
     for(unsigned p=0;p<data.page_count;++p) {
@@ -78,7 +79,7 @@ static Task<void> prepare_displays(Engine& engine,Machine& machine,LarcOperator&
             page.maximum[slot]=uint8_t(limit);
             bool failed=false;
             try {
-                for(unsigned raw=0;raw<256;++raw) page.values[slot][raw]=display_value(host.memory,slot,cell,raw);
+                for(unsigned raw=0;raw<256;++raw) page.values[slot][raw]=display_value(host.memory,slot,cell,raw,display_memory);
             } catch(const std::exception&) {failed=true;}
             if(failed) co_await fail("XL display scale preparation failed.");
         }
@@ -87,7 +88,7 @@ static Task<void> prepare_displays(Engine& engine,Machine& machine,LarcOperator&
     co_await op.gotoPage(1);
 }
 static Task<void> prepare_programs(Engine& engine,Machine& machine,LarcOperator& op,Bank& result,
-    const native_hall::import::Callbacks& callbacks) {
+    const native_hall::import::Callbacks& callbacks,std::array<uint8_t,65536>& display_memory) {
     double progress=0;const char* stage="Starting 224XL v8.21";
     auto& host=engine.host();
     auto word=[&](unsigned a){return unsigned(host.memory[a])|unsigned(host.memory[a+1])<<8;};
@@ -189,7 +190,7 @@ static Task<void> prepare_programs(Engine& engine,Machine& machine,LarcOperator&
             target.scale_cap=host.memory[feedback_targets+t*3+2];
             for(unsigned pair=0;pair<3;++pair) target.negative[pair]=lexicon224x::decode(host.dsp->wcs[target.row+pair]).negative;
         }
-        co_await prepare_displays(engine,machine,op,data);
+        co_await prepare_displays(engine,machine,op,data,display_memory);
         data.diffusion.half_scale=true;
         unsigned diffusion_record=0;
         if(data.diffusion_page) {
@@ -273,7 +274,11 @@ std::unique_ptr<Bank> prepare_bank(const RomSet& roms,const native_hall::import:
         engine->load(roms[chip].data(),roms[chip].size(),firmware.chips[chip].base);
     }
     Machine machine(*engine);LarcOperator op(machine);auto result=std::make_unique<Bank>();
-    const auto done=machine.run_task([&]{return prepare_programs(*engine,machine,op,*result,callbacks);});
+    // Keep the formatter's 64 KiB scratch image outside coroutine frames.
+    // Compiler inlining must not overflow the operator's fixed 16 KiB blocks
+    // (whose failure handler aborts the host process).
+    auto display_memory=std::make_unique<std::array<uint8_t,65536>>();
+    const auto done=machine.run_task([&]{return prepare_programs(*engine,machine,op,*result,callbacks,*display_memory);});
     check(!done.failed,done.error.text);return result;
 }
 } // namespace cineol::xl::import

@@ -7,6 +7,10 @@ and six page-bound faders beside permanent Dirt, Input and Mix faders.
 
 ## What's new in 0.9.6
 
+- **Fixed rebuild:** ROM setup remains visible when adding XL to an imported
+  original 224. Windows has separate file/ZIP and folder pickers. Import errors
+  identify unsupported firmware and incomplete chip sets. XL display preparation
+  keeps its 64 KiB scratch memory outside fixed-size coroutine frames.
 - Native **XL Dynamic Decay/gating**, **LF/MID STOP DECAY**, **REV STOP DLY**
   and **Decay Optimization** are now active for all 19 XL reverb algorithms.
   The three non-reverb effects retain their firmware-specific controls.
@@ -283,7 +287,7 @@ reverb for the first time, import your own complete supported ROM set:
 | Engine | Required firmware | Required files | Programs unlocked |
 | --- | --- | --- | --- |
 | Original Lexicon 224 | **v4.4** | **ROM1–ROM5**, five files of 2,048 bytes each | Six original-224 programs |
-| Lexicon 224 XL desktop preview | **v8.21** | Complete eleven-chip set, with 2,048- and 4,096-byte files | 22 XL programs |
+| Lexicon 224 XL desktop preview | **v8.21** | **SBC1–SBC3** (2,048 bytes each) and **NVS1–NVS8** (4,096 bytes each), eleven files total | 22 XL programs |
 
 Import both sets to enable all 28 programs. Original-224 ROMs do not unlock XL,
 and XL ROMs do not unlock original-224 programs. Files must match the expected
@@ -294,11 +298,17 @@ the original 224 v4.4 ROMs.
 The desktop plugin can be compiled without ROMs. To import them:
 
 1. Open the installed plugin in your DAW or launch the standalone application.
-2. On the first-use panel, click **Choose ROMs...** and select a folder, ZIP or
-   complete set of ROM files for one supported firmware version.
+2. On the first-use panel, click **Choose ROMs...** to select a ZIP or all ROM
+   files together, or **Choose folder...** to select their folder.
 3. Wait for local import to finish, then select an enabled algorithm.
 4. To import the other engine later, click **Model / 224 / 224 XL** on the red
    display to reopen ROM setup and select its separate complete set.
+
+ROM setup stays visible during import and after a failed attempt, including
+when the other engine is already loaded. Partial sets report how many unique
+supported chips were found; known incompatible firmware versions are named.
+Use **Close** to return to an already loaded engine after an unsuccessful import.
+Windows uses separate native file and folder pickers.
 
 Import runs on a cancellable background thread. Only programs with a ready
 bank are enabled in the algorithm list. Audio passes through dry while the

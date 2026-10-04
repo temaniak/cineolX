@@ -5,12 +5,14 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 
 namespace cineol::xl::import {
 inline std::array<char,16> display_value(const std::array<uint8_t,65536>& source,
-                                       unsigned slot,unsigned cell,unsigned raw) {
-    auto memory=source;
+                                       unsigned slot,unsigned cell,unsigned raw,
+                                       std::array<uint8_t,65536>& memory) {
+    memory=source;
     memory[0x3ca3+cell]=uint8_t(raw);
     i8080_t cpu;uint64_t pins=i8080_init(&cpu);
     cpu.pc=0x8887;cpu.sp=0x3f00;cpu.b=uint8_t(slot);
@@ -32,5 +34,10 @@ inline std::array<char,16> display_value(const std::array<uint8_t,65536>& source
     if(cpu.a>=std::size(units)) throw std::runtime_error("Unknown XL display unit.");
     std::snprintf(result.data()+n,result.size()-n,"%s",units[cpu.a]);
     return result;
+}
+inline std::array<char,16> display_value(const std::array<uint8_t,65536>& source,
+                                       unsigned slot,unsigned cell,unsigned raw) {
+    auto memory=std::make_unique<std::array<uint8_t,65536>>();
+    return display_value(source,slot,cell,raw,*memory);
 }
 }

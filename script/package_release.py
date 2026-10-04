@@ -94,8 +94,9 @@ def package(platform, build_dir, output_dir):
                     'Original 224 programs: Lexicon 224 v4.4 ROM1-ROM5, five 2048-byte files.\n'
                     'XL preview programs: Lexicon 224 XL v8.21, the complete eleven-chip\n'
                     'set of 2048- and 4096-byte files. Import both sets for all 28 programs.\n'
-                    'Click Choose ROMs... in the plugin and select a folder, ZIP or the\n'
-                    'complete files. Wait for preparation; only imported engines are enabled.\n'
+                    'Click Choose ROMs... for ZIPs or all ROM files together, or Choose\n'
+                    'folder... for a directory. Wait for preparation; only imported engines\n'
+                    'are enabled. Import errors stay visible when adding the other engine.\n'
                     'To add the other engine later, click the Model / 224 / 224 XL indicator.\n'
                     '224X v8.1, 224 XL v8.1A and incomplete or modified sets are rejected.\n'
                     'ROMs and prepared banks are not included. Your files stay local;\n'
@@ -104,6 +105,11 @@ def package(platform, build_dir, output_dir):
                     'XL dynamics require a new version-4 prepared cache. Re-import your\n'
                     'complete original 224XL v8.21 ROM set once after updating. The previous\n'
                     'XL cache is retained. Original-224 caches and sound presets remain compatible.\n')
+        install += ('\n0.9.6 FIXED REBUILD\n'
+                    'This archive contains the corrected ROM import UI and XL formatter\n'
+                    'memory handling. Replace the earlier 0.9.6 plugin, restart the DAW\n'
+                    'and retry the complete v8.21 import if it previously failed.\n'
+                    'Plugin version, identifiers, presets and bank formats remain compatible.\n')
         (staging / 'INSTALL.txt').write_text(install, encoding='utf-8')
         if platform == 'macos':
             subprocess.run(['ditto', '-c', '-k', '--keepParent', str(staging), str(archive)], check=True)

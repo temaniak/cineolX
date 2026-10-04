@@ -101,10 +101,77 @@ static void wait(NativeHallProcessor& processor) {
     }
     std::cout<<processor.romStatus()<<'\n';
 }
+static void invalid_imports() {
+    auto refresh_ui=[] {juce::Thread::sleep(120);juce::Timer::callPendingTimersSynchronously();};
+    const auto cache=CineolRomBank::cacheFile();
+    require(!cache.existsAsFile() && !CineolRomBank::xlCacheFile().existsAsFile(),"invalid-import check requires an empty isolated cache");
+    const auto folder=cache.getParentDirectory().getChildFile("invalid-rom-fixtures");
+    require(folder.createDirectory().wasOk(),"could not create ROM fixtures");
+    juce::MemoryBlock unknown(2048,true);
+    const auto chip=folder.getChildFile(juce::String::charToString(0x0420)+"OM-unknown.bin");
+    require(chip.replaceWithData(unknown.getData(),unknown.getSize()),"could not write unknown ROM");
+    const auto wrong_size=folder.getChildFile("truncated.bin"),broken_zip=folder.getChildFile("broken.zip"),zip=folder.getChildFile("unknown.zip");
+    require(wrong_size.replaceWithText("truncated") && broken_zip.replaceWithText("invalid ZIP"),"could not write malformed fixtures");
+    {
+        juce::ZipFile::Builder builder;
+        builder.addEntry(std::make_unique<juce::MemoryInputStream>(unknown,true),6,"ROM1.bin",juce::Time::getCurrentTime());
+        builder.addEntry(std::make_unique<juce::MemoryInputStream>(unknown,true),6,"nested/duplicate.bin",juce::Time::getCurrentTime());
+        juce::FileOutputStream stream(zip);require(stream.openedOk() && builder.writeToStream(stream,nullptr),"could not write ZIP fixture");
+    }
+    for(bool cached:{false,true}) {
+        if(cached) {
+            // Synthetic coefficients exercise cached-224/add-XL UI without
+            // firmware or private bank data on public Windows/macOS runners.
+            auto bank=std::make_unique<native_hall::ProgramBank>();
+            for(unsigned i=0;i<native_hall::program_count;++i) {
+                auto& p=bank->programs[i];p.identity=native_hall::program_identities[i];p.network=native_hall::program_networks[i];
+                p.level_rate_tenths.fill(100);p.modulation_rate_tenths.fill(1000);
+                require(p.valid(i),"invalid synthetic profile");
+            }
+            native_hall::BankHeader header;header.checksum=native_hall::profile_checksum(bank.get(),sizeof(*bank));
+            juce::FileOutputStream stream(cache);
+            require(stream.openedOk() && stream.write(&header,sizeof header) && stream.write(bank.get(),sizeof(*bank)),"could not seed synthetic cache");
+        }
+        juce::MemoryBlock before;if(cached) require(cache.loadFileAsData(before),"missing synthetic cache");
+        auto processor=std::make_unique<NativeHallProcessor>();
+        std::unique_ptr<juce::AudioProcessorEditor> editor(processor->createEditor());
+        auto* setup=find(*editor,"rom_setup");
+        auto* model=dynamic_cast<juce::Button*>(find(*editor,"firmware"));
+        auto* close=dynamic_cast<juce::Button*>(find(*editor,"close_rom_setup"));
+        auto* status=dynamic_cast<juce::Label*>(find(*editor,"rom_status"));
+        require(setup && model && close && status && find(*editor,"choose_rom_folder"),"ROM setup controls missing");
+        require(setup->isVisible()!=cached,"incorrect initial setup visibility");
+        model->onClick();refresh_ui();
+        require(setup->isVisible(),"reopening ROM setup did not survive panel refresh");
+        for(const auto& source:juce::Array<juce::File>{chip,wrong_size,broken_zip,zip,folder,folder.getChildFile("missing.bin")}) {
+            bool started=false;
+            for(int retry=0;retry<100 && !started;++retry) {
+                started=processor->importRoms({source});if(!started) juce::Thread::sleep(10);
+            }
+            require(started,"repeated invalid import did not start");wait(*processor);
+            refresh_ui();
+            require(processor->programAvailable(0)==cached && !processor->programAvailable(6),"invalid input changed available banks");
+            for(int retry=0;retry<10 && status->getText()!=processor->romStatus();++retry) refresh_ui();
+            if(!setup->isVisible() || status->getText()!=processor->romStatus() || !status->getText().contains("11 224XL v8.21"))
+                std::cerr<<"ROM setup visible="<<setup->isVisible()<<" label="<<status->getText()<<" status="<<processor->romStatus()<<'\n';
+            require(setup->isVisible() && status->getText()==processor->romStatus() && status->getText().contains("11 224XL v8.21"),"ROM rejection status hidden or unclear");
+            require(!CineolRomBank::xlCacheFile().existsAsFile(),"invalid input saved XL bank");
+            if(cached) {juce::MemoryBlock after;require(cache.loadFileAsData(after) && before==after,"invalid XL import changed cached 224");}
+            else {require(!cache.existsAsFile(),"invalid input saved 224 bank");dry(*processor);}
+        }
+        require(close->isEnabled()==cached,"setup close availability incorrect");
+        if(cached) {close->onClick();refresh_ui();require(!setup->isVisible(),"ROM setup did not close");}
+    }
+    require(cache.deleteFile() && folder.deleteRecursively(),"could not remove synthetic fixtures");
+}
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
     require(argc>=2,"usage: rom_import_check --empty|--cached|--reject SOURCE|--cancel SOURCE|--import SOURCE BANK");
     const std::string mode=argv[1];
+    if(mode=="--invalid-check") {
+        invalid_imports();require(allocations==0 && releases==0,"invalid-import audio allocated/released memory");
+        std::cout<<"invalid ROM/ZIP/folder/retry and cached-224 setup: pass; audio new=0, delete=0\n";return 0;
+    }
     {
         NativeHallProcessor processor;
         if(mode=="--cached" || mode=="--cached-xl") {
@@ -196,6 +263,9 @@ int main(int argc,char** argv) {
             }
         }
     }
+    // The existing public build workflow already runs --empty on both hosts.
+    // Exercise import rejection after its processors have been destroyed.
+    if(mode=="--empty" && !CineolRomBank::cacheFile().existsAsFile() && !CineolRomBank::xlCacheFile().existsAsFile()) invalid_imports();
     require(allocations==0 && releases==0,"audio callback allocated/released memory");
     std::cout<<mode<<": pass; audio new=0, delete=0\n";
 }

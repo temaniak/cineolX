@@ -764,7 +764,7 @@ public:
         setComponentID("rom_setup");setName("Import Lexicon 224 or 224 XL ROMs");
         title_.setText("Load your Lexicon ROMs",juce::dontSendNotification);
         title_.setFont(font(38,true));title_.setJustificationType(juce::Justification::centred);
-        instructions_.setText("224 v4.4: ROM1-ROM5 · 224 XL v8.21: complete set\nSelect a folder, ZIP, or ROM files.\nYour files stay on this computer.",juce::dontSendNotification);
+        instructions_.setText("224 v4.4: 5 files / 224 XL v8.21: 11 files\nSelect a folder, ZIP, or all ROM files together.\nOther firmware versions are not supported.",juce::dontSendNotification);
         instructions_.setFont(font(25));instructions_.setJustificationType(juce::Justification::centred);
         status_.setComponentID("rom_status");status_.setFont(font(22));
         status_.setJustificationType(juce::Justification::centred);
@@ -776,10 +776,18 @@ public:
         choose_.setColour(juce::TextButton::textColourOffId,juce::Colours::white);
         choose_.setTooltip("Supported ROM sets: original 224 v4.4 and 224 XL v8.21.");
         choose_.onClick=[this]{chooseRoms();};addAndMakeVisible(choose_);
+        folder_.setComponentID("choose_rom_folder");folder_.setButtonText("Choose folder...");
+        folder_.setColour(juce::TextButton::buttonColourId,ink);
+        folder_.setColour(juce::TextButton::textColourOffId,juce::Colours::white);
+        folder_.onClick=[this]{chooseRoms(true);};addAndMakeVisible(folder_);
         cancel_.setComponentID("cancel_rom_import");cancel_.setButtonText("Cancel import");
         cancel_.setColour(juce::TextButton::buttonColourId,ink);
         cancel_.setColour(juce::TextButton::textColourOffId,juce::Colours::white);
         cancel_.onClick=[this]{processor_.cancelRomImport();};addAndMakeVisible(cancel_);
+        close_.setComponentID("close_rom_setup");close_.setButtonText("Close");
+        close_.setColour(juce::TextButton::buttonColourId,ink);
+        close_.setColour(juce::TextButton::textColourOffId,juce::Colours::white);
+        close_.onClick=[this]{requested_=false;setVisible(shouldBeVisible());};addAndMakeVisible(close_);
         addAndMakeVisible(progress_bar_);update();startTimerHz(10);
     }
     ~RomSetup() override {stopTimer();setLookAndFeel(nullptr);}
@@ -791,9 +799,13 @@ public:
     void resized() override {
         title_.setBounds(285,315,900,60);instructions_.setBounds(285,390,900,115);
         status_.setBounds(290,520,890,95);progress_bar_.setBounds(365,625,740,25);
-        choose_.setBounds(515,680,440,62);cancel_.setBounds(515,680,440,62);
+        choose_.setBounds(320,680,330,62);folder_.setBounds(675,680,330,62);
+        cancel_.setBounds(410,680,440,62);close_.setBounds(1030,680,160,62);
     }
-    void openChooser() {if(!chooser_open_ && !processor_.importingRoms()) chooseRoms();}
+    bool shouldBeVisible() const {return requested_ || processor_.importingRoms() || (!processor_.programAvailable(0) && !processor_.programAvailable(6));}
+    void open() {
+        requested_=true;setVisible(true);toFront(false);update();
+    }
 private:
     struct SetupLook final : InstrumentLook {
         void drawButtonText(juce::Graphics& g,juce::TextButton& button,bool,bool) override {
@@ -802,12 +814,16 @@ private:
             g.drawText(button.getButtonText(),button.getLocalBounds(),juce::Justification::centred);
         }
     } look_;
-    void chooseRoms() {
+    void chooseRoms(bool folder=false) {
+        requested_=true;
         chooser_open_=true;
         chooser_=std::make_unique<juce::FileChooser>("Choose Lexicon 224 v4.4 or 224 XL v8.21 ROMs",juce::File{},"*");
         choose_.setEnabled(false);
-        chooser_->launchAsync(juce::FileBrowserComponent::openMode|juce::FileBrowserComponent::canSelectFiles|
-            juce::FileBrowserComponent::canSelectDirectories|juce::FileBrowserComponent::canSelectMultipleItems,
+        // Windows native dialogs select either files or folders. Combining
+        // both flags silently turns the picker into a folders-only dialog.
+        const int selection=folder?juce::FileBrowserComponent::canSelectDirectories:
+            juce::FileBrowserComponent::canSelectFiles|juce::FileBrowserComponent::canSelectMultipleItems;
+        chooser_->launchAsync(juce::FileBrowserComponent::openMode|selection,
             [safe=juce::Component::SafePointer<RomSetup>(this)](const juce::FileChooser& chooser) {
                 if(!safe) return;
                 safe->chooser_open_=false;
@@ -818,18 +834,27 @@ private:
     }
     void update() {
         const bool busy=processor_.importingRoms();progress_=processor_.importProgress();
-        status_.setText(processor_.romStatus(),juce::dontSendNotification);
+        const bool original_ready=processor_.programAvailable(0),xl_ready=processor_.programAvailable(6);
+        const auto status=processor_.romStatus();
+        if(!busy) {
+            if(status.endsWith("ready.") && ((original_ready && !original_ready_) || (xl_ready && !xl_ready_))) requested_=false;
+            original_ready_=original_ready;xl_ready_=xl_ready;
+        }
+        status_.setText(status,juce::dontSendNotification);
         choose_.setVisible(!busy);choose_.setEnabled(!busy && !chooser_open_);
+        folder_.setVisible(!busy);folder_.setEnabled(!busy && !chooser_open_);
         cancel_.setVisible(busy);progress_bar_.setVisible(busy);
+        close_.setEnabled((original_ready || xl_ready) && !busy && !chooser_open_);
     }
     void timerCallback() override {update();}
     NativeHallProcessor& processor_;
     juce::Label title_,instructions_,status_;
-    juce::TextButton choose_,cancel_;
+    juce::TextButton choose_,folder_,cancel_,close_;
     double progress_=0;
     juce::ProgressBar progress_bar_;
     std::unique_ptr<juce::FileChooser> chooser_;
     bool chooser_open_=false;
+    bool requested_=false,original_ready_=false,xl_ready_=false;
 };
 }
 
@@ -840,7 +865,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
         display_.algorithm.onClick=[this]{showAlgorithms();};
         page_=processor_.editorPage();
         for(unsigned i=0;i<display_.page_buttons.size();++i) display_.page_buttons[i].onClick=[this,i]{changePage(int(i));};
-        display_.firmware.onClick=[this]{rom_setup_.openChooser();};
+        display_.firmware.onClick=[this]{rom_setup_.open();};
         display_.preset.onClick=[this]{showPresets();};
         display_.save.onClick=[this]{namePreset();};
         for(unsigned i=0;i<sliders_.size();++i) {
@@ -1183,7 +1208,7 @@ private:
         std::array<double,6> positions{};
         if(engine_changed) for(unsigned slot=0;slot<6;++slot) positions[slot]=slotFader(slot).visualProportion();
         displayed_xl_=xl;
-        rom_setup_.setVisible(!processor_.programAvailable(0) && !processor_.programAvailable(6));
+        rom_setup_.setVisible(rom_setup_.shouldBeVisible());
         display_.firmware.setTooltip(ready?"Engine used by the selected algorithm. Click to import ROMs.":processor_.romStatus()+" Click to import ROMs.");
         for(unsigned i=0;i<sliders_.size();++i) {
             auto& slider=sliders_[i];slider.setVisible(i>=7 || (!xl && (page_==0?i<6:i==6)));
