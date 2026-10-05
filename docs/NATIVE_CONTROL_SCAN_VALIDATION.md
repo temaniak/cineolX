@@ -14,9 +14,11 @@ reads, nine stable panel comparisons, level/history/peak release work,
 diffusion coefficient updates and WCS access waits. Its full sequence matches
 the independently executed firmware after one initial alignment per case.
 
-This is a completed timing correction for stable controls, with a retained
-audio approximation. It does not reproduce firmware boot/program compilation
-or apply individual WCS bytes within the fixed audio graph. Normal-startup
+At `0417cf1`, this was a completed timing correction for stable controls with
+retained grouped audio updates. The subsequent
+[individual-write correction](NATIVE_WCS_WRITE_VALIDATION.md) resolves that
+audio approximation. Firmware boot/program compilation remains outside this
+scan checkpoint. Normal-startup
 sound comparisons remain separate from aligned diagnostics; overall sonic
 acceptance is still open.
 
@@ -175,14 +177,16 @@ Run CPU benchmarks separately from builds, renders and other tests. Plugin
 tests seed an isolated temporary cache; run their `--bank` and
 `--spillover-224-check` invocations sequentially. Never seed the user's cache.
 
-Remaining sound work is initial/program-load phase and within-call coefficient
-application. The current audio graph applies coefficient groups at completed
+This checkpoint retained initial/program-load phase and within-call coefficient
+application as open work. Its audio graph applied coefficient groups at completed
 calls on its 100-row pass boundary. The clock models WCS waits, but the graph
 does not reproduce displaced fetches or operand-clock holds. A subsequent
 [WCS audio boundary isolation](WCS_AUDIO_BOUNDARY_VALIDATION.md) found these
 write-side effects audio-invariant in all six stable stock graphs, with
 53,382 grants and 160,146 held edges. Coefficient payload timing remains a
-separate question. Compiler/predelay
+separate question, subsequently corrected in the
+[individual-write report](NATIVE_WCS_WRITE_VALIDATION.md). Initial/program-load
+phase remains open. Compiler/predelay
 transition timing and remote/cartridge mode changes are outside this stable-
 control model. Keep phase ensembles and normal startup distinct from diagnostics;
 do not tune feedback or EQ to compensate for one valid frozen tap phase.

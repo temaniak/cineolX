@@ -34,6 +34,7 @@ read this record. Current checkpoint history:
 | `2677d7c` | Final regression/CPU/Spillover results and current open work |
 | `bdbc724` | Exact local modulation procedure/write timing model and portable oracle |
 | `0417cf1` | Stable-control scheduler integrated and ROM-validated; see the native scan report |
+| `512f7ba` | Independent isolation of WCS arbitration and grouped coefficient audio effects |
 
 Reflexion pin: `f68ea1d069fef4a5663201693bfdfa1c579ffd69`.
 JUCE pin: `8.0.14`. Inspect `dependencies.json` and build paths before changes.
@@ -68,10 +69,10 @@ See the reports for exact fixtures, exclusions and limitations.
 
 | Stage | Status | Required result/report |
 | --- | --- | --- |
-| 1. Modulation phase and scheduling | Stable-control scheduler integrated and verified; startup/compiler phase and within-call audio updates remain open | [Native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md): 260,102 free-running events exact, local timing oracles and desktop adapter passed. [Modulation checkpoint](MODULATION_VALIDATION.md): direct switches retain three global counters. |
+| 1. Modulation phase and scheduling | Stable-control scheduler and individual-write visibility corrected and verified; startup/compiler phase remains open | [Individual-write report](NATIVE_WCS_WRITE_VALIDATION.md): 202,866 free-running write payloads/fetches exact; fixed graph matches 216,000 row-machine writes. [Native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md): 260,102 free-running events exact. [Modulation checkpoint](MODULATION_VALIDATION.md): direct switches retain three global counters. |
 | 2. Remaining tails/frequency differences | Cause-isolation checkpoint complete; residuals retained | [Residual report](RESIDUAL_SOUND_VALIDATION.md): 18 all-six/mode runs plus four Chamber level/seed probes. Frozen phase and quiet floors matter; no compensating EQ. |
 | 3. Dry/Wet and Input Gain | Verified | [Gain/timing report](GAIN_TIMING_VALIDATION.md): six-program dry/mix, 24 gain cases; behavior retained. |
-| 4. Final regression/acceptance | Regression passed; full sonic acceptance open | [Regression checkpoint](FINAL_SOUND_VALIDATION.md): Windows builds, CPU +1.68% versus baseline, original-only Spillover verified separately. |
+| 4. Final regression/acceptance | Regression passed; full sonic acceptance open | [Current individual-write report](NATIVE_WCS_WRITE_VALIDATION.md): macOS builds, nine CTests, processor/Spillover checks, CPU +3.23% versus `0ebb668`. [Earlier regression](FINAL_SOUND_VALIDATION.md): historical Windows results. |
 
 A stage report must state its status honestly: completed correction,
 investigation with a retained approximation, or unresolved blocker. Include
@@ -80,9 +81,11 @@ results, sonic/session effects and the next action. Keep this table current
 and create a Git checkpoint for each stage. Additional work may be needed if
 final verification establishes another meaningful defect.
 
-The current required next step is startup/program-load phase and within-call
-coefficient application. The [WCS audio boundary report](WCS_AUDIO_BOUNDARY_VALIDATION.md)
-isolates write arbitration from coefficient payload timing. No blanket
+The current required next step is startup/program-load phase. Individual-write
+coefficient/address visibility is now corrected; see the
+[individual-write report](NATIVE_WCS_WRITE_VALIDATION.md). The
+[WCS audio boundary report](WCS_AUDIO_BOUNDARY_VALIDATION.md) isolated write
+arbitration from coefficient payload timing. No blanket
 claim of identical modulation-on tails is supported. The normal-startup matrix
 must remain separate from offline aligned diagnostics. The user's Spillover
 setting adds two wet networks temporarily; isolate a single program for sound
@@ -125,8 +128,12 @@ separate left/right held detectors, 360,000 adapter passes, thirty paired sound
 fixtures, CPU and processor/Spillover regression. Future scan events receive no
 actual call-entry clocks or states after their initial alignment.
 
-The normal modulation-on noise matrix improved mean absolute broad-band T20
-error from 4.84% to 4.54%, with uneven results across seeds/programs. Frozen
+The scan checkpoint's normal modulation-on noise matrix improved mean absolute
+broad-band T20 error from 4.84% to 4.54%. The subsequent individual-write
+correction changed 4.54% to 4.43%, with uneven results across seeds/programs.
+Its incremental CPU cost is +0.86% versus `0417cf1`; a separate paired run
+measured +3.23% versus the original `0ebb668` baseline on macOS arm64.
+Read the latest report for the fixed bank, scope and measurement conditions. Frozen
 startup phases and sparse accepted music fits still limit acceptance. No EQ
 or feedback retuning was added. Read the report before making another change.
 

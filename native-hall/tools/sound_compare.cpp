@@ -52,6 +52,7 @@ int main(int argc,char** argv) try {
     // converter clocks or delay memory. This is not shipped plugin behavior.
     DecayState decay;std::memcpy(&decay,host.memory.data()+0x3e32,sizeof decay);
     aligned->hall().restore_decay(decay);aligned->hall().restore_modulation(modulation(host));
+    aligned->hall().restart_control_scan(); // No stale writes from its pre-snapshot procedure.
     Audio input,original,result,aligned_result;constexpr unsigned frames=12*48000;
     for(auto* audio:{&input,&original,&result,&aligned_result})for(auto& channel:*audio)channel.resize(frames);
     if(fixture=="noise") {

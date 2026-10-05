@@ -1212,6 +1212,13 @@ static void benchmark_spillover_224() {
     std::cout<<"Spillover summed median overlap/single ratio="<<overlap_total/single_total<<"; callback new=0, delete=0\n";
 }
 int main(int argc,char** argv) {
+    const std::string option=argc>1?argv[1]:"";
+    const bool original_fixture=argc==3 && (option=="--bank" || option=="--spillover-224-check" || option=="--spillover-224-cpu");
+    const bool dual_fixture=argc==4 && (option=="--banks" || option=="--preset-check" || option=="--limits-check" ||
+        option=="--spillover-check" || option=="--quick-check" || option=="--focus-check");
+    require(argc==1 || original_fixture || dual_fixture || (argc==2 && option=="--ui") ||
+        (argc>=3 && argc<=6 && option=="--editor"),
+        "Invalid test arguments: --bank, --spillover-224-check and --spillover-224-cpu require BANK; dual-bank modes require BANK XL_BANK");
     juce::ScopedJuceInitialiser_GUI init;
     // Offline fixtures belong only to an isolated test cache, never to the
     // shipped plugin or the user's first-run data directory.
@@ -1219,7 +1226,7 @@ int main(int argc,char** argv) {
         juce::File folder;
         ~TestCache() {if(folder.isDirectory()) folder.deleteRecursively();}
     } test_cache;
-    if((argc==3 && (std::string(argv[1])=="--bank" || std::string(argv[1])=="--spillover-224-check" || std::string(argv[1])=="--spillover-224-cpu")) || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check" || std::string(argv[1])=="--spillover-check" || std::string(argv[1])=="--quick-check" || std::string(argv[1])=="--focus-check"))) {
+    if(original_fixture || dual_fixture) {
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getNonexistentChildFile("cineol-plugin-check",{},false);
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");

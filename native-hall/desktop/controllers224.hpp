@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/hall.hpp"
 #include "control_scan224.hpp"
+#include "control_write_queue224.hpp"
 
 namespace native_hall {
 // Original-224 desktop control scan. Firmware reads nine panel channels;
@@ -32,6 +33,7 @@ public:
         next.random_divider=modulation.random_divider;next.hold=modulation.hold;
         restore_modulation(next);
         scan_clock_.reset(program_networks[program_],cycles_);
+        control_writes_.reset();
         held_detectors_.fill(0);previous_input_.fill(0);older_right_=0;
         previous_right_detector_=0;
     }
@@ -57,10 +59,11 @@ public:
                         return phase<3?older_right_:previous_input_[phase<53?0:1];
                     },[&](unsigned channel,uint64_t t){
                         accumulate(t);const auto mask=held_detectors_[channel];held_detectors_[channel]=0;return mask;
-                    },[](ControlScan224::Event,uint64_t,uint16_t){});
+                    },[](ControlScan224::Event,uint64_t,uint16_t){},
+                    [&](uint64_t visible,ControlWrite224 write){control_writes_.push(visible,write);});
                 accumulate(cycles_);
             } else held_detectors_[0]|=uint8_t(detectors&31);
-            process_uncontrolled(left,right,outputs);
+            control_writes_.render(cycles_,*this,[&](){process_uncontrolled(left,right,outputs);});
             older_right_=previous_input_[1];previous_input_={{left,right}};
             previous_right_detector_=uint8_t((detectors>>8)&31);cycles_+=100;
             return;
@@ -82,11 +85,19 @@ public:
         if(controls_.mode_enhancement)advance_modulation();
         if(++scan_==18){scan_=0;poll_decay();}
     }
+    unsigned pending_control_writes() const noexcept {return control_writes_.size();}
+    // Offline snapshot diagnostics must discard predictions from the old
+    // state. This starts a new canonical scan, not the reference CPU phase.
+    void restart_control_scan() noexcept {
+        if(bank_)scan_clock_.reset(program_networks[program_],cycles_);
+        control_writes_.reset();
+    }
 private:
     void initialize() noexcept {
         clock_=0;scan_=0;cycles_=0;held_detectors_.fill(0);
         previous_input_.fill(0);older_right_=0;previous_right_detector_=0;
         scan_clock_.reset(bank_?program_networks[program_]:0);
+        control_writes_.reset();
         auto state=decay_state();
         // Import sweeps can leave period 15 after testing optimization.
         // Normal silent firmware startup has an unset (zero) period.
@@ -96,6 +107,7 @@ private:
     const Profile* profile_=nullptr;
     Controls controls_{};
     ControlScan224 scan_clock_;
+    ControlWriteQueue224 control_writes_;
     std::array<int16_t,2> previous_input_{};
     std::array<uint8_t,2> held_detectors_{};
     uint64_t cycles_=0;

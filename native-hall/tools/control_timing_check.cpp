@@ -12,8 +12,8 @@ int main(int argc,char** argv) try {
     auto& h=reference->host();h.audio_observer={};load_roms(*reference,argv[1]);
     wait(h,9000);button(h,1,4);
     std::ofstream csv(argv[3]);require(bool(csv),"Cannot write timing CSV");
-    csv<<"program,depth,mode,amplitude,checks,instruction_mismatches,bus_mismatches,write_mismatches,min_cycles,max_cycles,wcs_writes,min_write_cycles,max_write_cycles\n";
-    unsigned total=0,total_bad=0,total_bus_bad=0,total_write_bad=0,total_writes=0;
+    csv<<"program,depth,mode,amplitude,checks,instruction_mismatches,bus_mismatches,write_mismatches,min_cycles,max_cycles,wcs_writes,min_write_cycles,max_write_cycles,payload_mismatches\n";
+    unsigned total=0,total_bad=0,total_bus_bad=0,total_write_bad=0,total_writes=0,total_payload_bad=0;
     for(unsigned program=0;program<program_count;++program) {
         button(h,0,program_identities[program]);wait(h,400);
         // Verify the native slot description against the independent graph.
@@ -38,6 +38,7 @@ int main(int argc,char** argv) try {
                 wait(h,100); // Finish control/mode changes before observing a call.
                 unsigned checks=0,bad=0,bus_bad=0,write_bad=0,writes=0,expected=0,bus_expected=0,waits=0;
                 std::array<std::pair<uint64_t,unsigned>,6> predicted_writes{};
+                std::array<ControlWrite224,6> payloads{};unsigned payload_bad=0;
                 unsigned predicted_count=0,observed_count=0;
                 unsigned previous=0,min_cycles=std::numeric_limits<unsigned>::max(),max_cycles=0;
                 unsigned min_write=std::numeric_limits<unsigned>::max(),max_write=0;
@@ -62,10 +63,12 @@ int main(int argc,char** argv) try {
                         expected=modulation_cycles224(*bank,program,state,bool(mode&1),[](unsigned){return 7u;});
                         predicted_count=observed_count=0;
                         bool bounded=true;
-                        bus_expected=modulation_cycles224(*bank,program,state,bool(mode&1),[&](unsigned cycles){
+                        bus_expected=modulation_cycles224(*bank,program,state,bool(mode&1),[&](unsigned cycles,ControlWrite224 payload){
                             const unsigned duration=bus.write(t+cycles);
                             bounded=bounded && duration>=7 && duration<=109 && predicted_count<predicted_writes.size();
-                            if(predicted_count<predicted_writes.size())predicted_writes[predicted_count++]={t+cycles,duration};
+                            if(predicted_count<predicted_writes.size()) {
+                                payloads[predicted_count]=payload;predicted_writes[predicted_count++]={t+cycles,duration};
+                            }
                             return duration;
                         });
                         require(bounded,"Unbounded native WCS timing");
@@ -81,16 +84,22 @@ int main(int argc,char** argv) try {
                     }
                     previous=cpu.pc;last=t;
                 };
-                wait(h,300);h.pc_observer={};h.pc_watches.fill(false);
+                h.wcs_observer=[&](const lexicon224x::cpu::WcsWrite& w) {
+                    if(active && (observed_count>=predicted_count || !matches(h,w,payloads[observed_count]))) {
+                        if(payload_bad++<3)std::cerr<<"payload p="<<program<<" depth="<<depth<<" mode="<<mode
+                            <<" row="<<(127-(w.address-0x4000)/4)<<" lane="<<(w.address&3)<<" index="<<observed_count<<'\n';
+                    }
+                };
+                wait(h,300);h.pc_observer={};h.wcs_observer={};h.pc_watches.fill(false);
                 require(checks>100,"Insufficient complete routine timings");
                 csv<<program<<','<<depth<<','<<mode<<','<<amplitude<<','<<checks<<','<<bad<<','<<bus_bad<<','<<write_bad<<','<<min_cycles<<','<<max_cycles<<','<<writes<<','
-                   <<(writes?min_write:0)<<','<<max_write<<'\n';csv.flush();
+                   <<(writes?min_write:0)<<','<<max_write<<','<<payload_bad<<'\n';csv.flush();
                 if(bad || bus_bad || write_bad)std::cerr<<program_names[program]<<" depth="<<depth<<" mode="<<mode<<" amplitude="<<amplitude<<": instructions="<<bad<<" bus="<<bus_bad<<" writes="<<write_bad<<'\n';
-                total+=checks;total_bad+=bad;total_bus_bad+=bus_bad;total_write_bad+=write_bad;total_writes+=writes;
+                total+=checks;total_bad+=bad;total_bus_bad+=bus_bad;total_write_bad+=write_bad;total_writes+=writes;total_payload_bad+=payload_bad;
             }
         }
         std::cout<<program_names[program]<<": timing matrix recorded\n";
     }
-    std::cout<<total<<" complete calls, "<<total_writes<<" writes, instruction mismatches="<<total_bad<<", bus mismatches="<<total_bus_bad<<", write mismatches="<<total_write_bad<<'\n';
-    require(!total_bad && !total_bus_bad && !total_write_bad,"Native control timing differs from ROM");
+    std::cout<<total<<" complete calls, "<<total_writes<<" writes, instruction mismatches="<<total_bad<<", bus mismatches="<<total_bus_bad<<", write mismatches="<<total_write_bad<<", payload mismatches="<<total_payload_bad<<'\n';
+    require(!total_bad && !total_bus_bad && !total_write_bad && !total_payload_bad,"Native control timing/payload differs from ROM");
 } catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

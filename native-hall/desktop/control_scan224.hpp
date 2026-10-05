@@ -4,8 +4,9 @@
 namespace native_hall {
 // A fixed native event clock for stable original-224 controls. This stores
 // controller stages, never CPU registers, opcodes or firmware memory.
-// The audio graph still applies changed coefficient groups at call completion;
-// displaced DSP fetches and held ARU clocks are outside this scheduler.
+// Individual write visibility can be supplied to a fixed audio graph. The
+// grant's next fetch follows its commit; write-side padding/operand holds
+// were separately shown to leave stable stock graph audio unchanged.
 class ControlScan224 {
 public:
     enum class Event {Modulation,TransferHigh,TransferLow,Level,LevelWord};
@@ -18,9 +19,9 @@ public:
     // diagnostics may supply a different once-captured stable panel context.
     void set_panel_costs(const std::array<unsigned,9>& costs) noexcept {panel_costs_=costs;}
     uint64_t next_event() const noexcept {return next_;}
-    template<class Word,class Detectors,class Observe>
+    template<class Word,class Detectors,class Observe,class Writes=IgnoreControlWrite224>
     void run_until(uint64_t limit,const ProgramBank& bank,unsigned program,Hall& hall,
-                   const Controls& controls,Word&& word,Detectors&& detectors,Observe&& observe) noexcept {
+                   const Controls& controls,Word&& word,Detectors&& detectors,Observe&& observe,Writes writes={}) noexcept {
         while(next_<limit) {
             switch(stage_) {
             case Stage::First:
@@ -30,7 +31,11 @@ public:
                 mod_enabled_=controls.mode_enhancement;
                 const uint64_t entry=next_;
                 next_+=modulation_cycles224(bank,program,hall.modulation_state(),mod_enabled_,
-                    [&](unsigned at){return bus_.write(entry+at);});
+                    [&](unsigned at,ControlWrite224 payload){
+                        const auto duration=bus_.write(entry+at);
+                        // The commit precedes grant+1's fetch by about 5 ns.
+                        writes(entry+at+duration-3,payload);return duration;
+                    });
                 stage_=first?Stage::FirstDone:Stage::SecondDone;break;
             }
             case Stage::FirstDone:
@@ -81,9 +86,12 @@ public:
                 level_mean_=uint8_t((controls.bass+controls.mid)/2);
                 level_enabled_=controls.decay_optimization;
                 level_period_=bank.programs[program].decay_amount;
-                const unsigned duration=level_cycles224(program,hall.decay_state(),level_word_,
+                const unsigned duration=level_cycles224(bank,program,hall.decay_state(),level_word_,
                     level_mean_,level_enabled_,level_period_,display_check_,false,
-                    [&](unsigned at){return bus_.write(level_entry_+at);});
+                    [&](unsigned at,ControlWrite224 payload){
+                        const auto duration=bus_.write(level_entry_+at);
+                        writes(level_entry_+at+duration-3,payload);return duration;
+                    });
                 next_=level_entry_+duration;stage_=Stage::LevelDone;break;
             }
             case Stage::LevelDone: {

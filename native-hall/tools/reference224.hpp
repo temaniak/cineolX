@@ -2,6 +2,7 @@
 // Offline oracle only. Never include this header in the audio processor.
 #include "../desktop/engine22448.hpp"
 #include "../import/bank_import.hpp"
+#include "../desktop/control_write224.hpp"
 #include <juce-plugin/source/engine.hpp>
 #include <filesystem>
 #include <fstream>
@@ -94,5 +95,16 @@ inline native_hall::ModulationState modulation(const lexicon224x::cpu::Host& h) 
 inline bool equal(const native_hall::ModulationState& a,const native_hall::ModulationState& b) {
     return a.descriptors==b.descriptors && a.coefficients==b.coefficients && a.offsets==b.offsets &&
            a.index==b.index && a.divider==b.divider && a.random_divider==b.random_divider && a.hold==b.hold;
+}
+inline bool matches(const lexicon224x::cpu::Host& h,const lexicon224x::cpu::WcsWrite& actual,
+                    native_hall::ControlWrite224 predicted) {
+    if(actual.address<0x4000 || actual.address>=0x4200)return false;
+    const unsigned row=127-(actual.address-0x4000)/4,lane=actual.address&3;
+    if(row!=predicted.row)return false;
+    if(predicted.kind==native_hall::ControlWrite224::Kind::AddressLow)
+        return lane==0 && actual.value==predicted.value;
+    const bool negative=lexicon224x::decode(h.dsp->wcs[row],lexicon224x::Model::Lexicon224).negative;
+    const int magnitude=(~actual.value&255)>>2;
+    return lane==3 && (negative?-magnitude:magnitude)==int8_t(predicted.value);
 }
 } // namespace sound_validation

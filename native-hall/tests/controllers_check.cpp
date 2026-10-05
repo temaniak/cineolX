@@ -44,6 +44,7 @@ static void check_clock_adapter(const ProgramBank& bank) {
         ControlScan224 clock;clock.reset(program_networks[program]);
         std::array<uint64_t,2> last{};Controls controls;controls.predelay_ms=predelay_minima[program];
         actual->set_controls(controls);expected->set_controls(controls);
+        auto before=actual->modulation_state();
         tracking=true;
         for(uint64_t pass=0;pass<60000;++pass) {
             if(pass%2000==0) {
@@ -68,9 +69,16 @@ static void check_clock_adapter(const ProgramBank& bank) {
                 },[](ControlScan224::Event,uint64_t,uint16_t){});
             int16_t out[4];actual->process(input(0,pass),input(1,pass),out,mask(0,pass)|(mask(1,pass)<<8));
             const auto a=actual->modulation_state(),b=expected->modulation_state();
-            assert(a.descriptors==b.descriptors && a.coefficients==b.coefficients && a.offsets==b.offsets);
+            assert(a.descriptors==b.descriptors);
             assert(a.index==b.index && a.divider==b.divider && a.random_divider==b.random_divider && a.hold==b.hold);
             assert(!std::memcmp(&actual->decay_state(),&expected->decay_state(),sizeof(DecayState)));
+            // Audio coefficients can become visible during a procedure.
+            // Compare the whole group when its controller counters commit;
+            // independent row-machine tests cover intermediate visibility.
+            if(a.divider!=before.divider || a.random_divider!=before.random_divider ||
+                a.hold!=before.hold || a.index!=before.index || a.descriptors!=before.descriptors)
+                assert(a.coefficients==b.coefficients && a.offsets==b.offsets);
+            assert(actual->pending_control_writes()<=ControlWriteQueue224::capacity);before=a;
         }
         tracking=false;
     }

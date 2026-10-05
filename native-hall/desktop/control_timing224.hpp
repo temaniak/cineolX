@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/hall.hpp"
+#include "control_write224.hpp"
 
 namespace native_hall {
 // Original-224 WCS grant clock for the four supported fixed networks. The
@@ -114,6 +115,8 @@ template<class Write> unsigned modulation_cycles224(const ProgramBank& bank,
             cycles+=13;
         }
         const unsigned at=5*j;
+        const unsigned address=state.descriptors[at]|unsigned(state.descriptors[at+1])<<8;
+        const unsigned row=127-(address-0x4000)/4;
         const uint8_t cap=state.descriptors[at+2],cached=state.descriptors[at+3];
         auto phase=state.descriptors[at+4];
         const bool up=random&1;
@@ -121,7 +124,7 @@ template<class Write> unsigned modulation_cycles224(const ProgramBank& bank,
         cycles+=76;
         const bool add=(up && !(phase&1)) || (!up && (phase&1));
         cycles+=add?35:39;
-        const int value=int(phase)+(add?step:-step);
+        int value=int(phase)+(add?step:-step);
         const bool advance=add?value>255:uint8_t(value)<cap;
         bool blocked=false;
         if(advance) {
@@ -137,22 +140,27 @@ template<class Write> unsigned modulation_cycles224(const ProgramBank& bank,
                 cycles+=27; // Restore descriptor pointer; call move helper.
                 if(delta==2 || delta==-2) {
                     cycles+=48; // Helper up to its address write.
-                    cycles+=write(cycles);
+                    cycles+=control_write224(write,cycles,{ControlWrite224::Kind::AddressLow,uint8_t(row),uint8_t(candidate)});
                     cycles+=41;
                 } else {
                     cycles+=107;
-                    cycles+=write(cycles);
+                    cycles+=control_write224(write,cycles,{ControlWrite224::Kind::AddressLow,uint8_t(row+1),uint8_t(candidate)});
                     cycles+=71;
                 }
                 cycles+=10+76; // Jump back for the fractional step.
                 phase^=1;
                 cycles+=((up && !(phase&1)) || (!up && (phase&1)))?35:39;
+                value=int(phase)+(((up && !(phase&1)) || (!up && (phase&1)))?step:-step);
             }
         }
         if(!blocked) {
             cycles+=128; // Descriptor update and coefficient construction.
-            cycles+=write(cycles);
-            cycles+=write(cycles);
+            phase=uint8_t(value);
+            const uint8_t first=uint8_t((phase&0xfc)|(cap&3));
+            const uint8_t second=uint8_t(((cap|3)-4-first)|3);
+            // Firmware commits the second interpolation coefficient first.
+            cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,uint8_t(row+1),uint8_t((~second&255)>>2)});
+            cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,uint8_t(row),uint8_t((~first&255)>>2)});
             cycles+=10;
         }
         cycles+=47; // Descriptor loop, including its conditional jump.

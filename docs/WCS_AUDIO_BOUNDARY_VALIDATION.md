@@ -98,6 +98,10 @@ committed state retained for the next one. First validate payloads and fetch
 visibility against the independent ROM; measure runtime cost only after that
 proof. Initial/program-load phase remains a separate open issue.
 
+That implementation is now complete for stable stock controls; see the
+[native individual-write report](NATIVE_WCS_WRITE_VALIDATION.md) for independent
+payload/fetch verification, fixed-graph queue tests, sound, CPU and regression.
+
 ## Reproduction
 
 ```sh

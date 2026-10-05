@@ -48,6 +48,12 @@ public:
     uint64_t saturation_count() const noexcept {return saturations_;}
     const std::array<int8_t,100>& coefficients() const noexcept {return c_;}
     const std::array<uint16_t,100>& offsets() const noexcept {return offsets_;}
+    // Bounded desktop control writes; the ordinary portable schedule does
+    // not call these. No graph opcode or bank/session layout is changed.
+    void apply_control_coefficient(unsigned row,int8_t value) noexcept {if(row<100)c_[row]=value;}
+    void apply_control_address_low(unsigned row,uint8_t value) noexcept {
+        if(row<100)offsets_[row]=uint16_t((offsets_[row]&0x3f00)|value);
+    }
     const std::array<int16_t,delay_words>& memory() const noexcept {return memory_;}
     int32_t accumulator() const noexcept {return acc_;}
     int16_t result() const noexcept {return rr_;}

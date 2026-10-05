@@ -17,9 +17,9 @@ inline unsigned bit_count224(unsigned value) noexcept {
 inline unsigned multiply_cycles224(unsigned multiplier) noexcept {
     return 346+10*bit_count224(multiplier&255);
 }
-template<class Write> unsigned loop_gain_cycles224(unsigned program,
+template<class Write> unsigned loop_gain_cycles224(const ProgramBank& bank,unsigned program,
         uint8_t mean,uint8_t amount,bool half,unsigned cycles,Write&& write) noexcept {
-    cycles+=85;unsigned previous_type=128;
+    cycles+=85;unsigned previous_type=128;int gain=4;
     for(unsigned loop=0;loop<4;++loop) {
         const auto spec=loop_gain_timing224(program,loop);
         const unsigned type=spec.quarters*32+spec.limit;
@@ -30,7 +30,7 @@ template<class Write> unsigned loop_gain_cycles224(unsigned program,
             if(half)cycles+=14;
             const unsigned raw=(mean*spec.quarters/4)>>(half?1:0);
             cycles+=28;if(spec.limit>=raw)cycles+=5;
-            int gain=int(std::min(raw,spec.limit))-amount;
+            gain=int(std::min(raw,spec.limit))-amount;
             cycles+=60;
             if(gain<4){gain=4;cycles+=7;}
             cycles+=68+multiply_cycles224(unsigned(gain)*2)+59;
@@ -40,7 +40,9 @@ template<class Write> unsigned loop_gain_cycles224(unsigned program,
             // Read the coefficient template from ordinary ROM (seven
             // states), then preserve its other two bits in the WCS write.
             cycles+=87+7+31;
-            cycles+=write(cycles);cycles+=20;
+            const int value=coefficient==0?gain:coefficient==1?32-gain*gain/32:-gain;
+            const auto row=uint8_t(bank.programs[program].loop_rows[loop]+coefficient);
+            cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,row,uint8_t(value)});cycles+=20;
             if(coefficient<2)cycles+=55;
         }
         cycles+=25;
@@ -51,7 +53,7 @@ template<class Write> unsigned loop_gain_cycles224(unsigned program,
 // return. Stable panel mode is assumed: no remote/display-bank transition.
 // The display cartridge check and half-gain flag are explicit context;
 // a free-running scheduler must retain them rather than sample oracle RAM.
-template<class Write> unsigned level_cycles224(unsigned program,
+template<class Write> unsigned level_cycles224(const ProgramBank& bank,unsigned program,
         DecayState state,uint16_t word,uint8_t mean,bool enabled,uint8_t period,
         bool display_check,bool half,Write&& write) noexcept {
     const uint8_t level=DecayController::level_from_word(word);
@@ -104,6 +106,6 @@ template<class Write> unsigned level_cycles224(unsigned program,
         if(state.amount>=12)return cycles+25;
         cycles+=41;++state.amount;
     }
-    return loop_gain_cycles224(program,mean,state.amount,half,cycles,write);
+    return loop_gain_cycles224(bank,program,mean,state.amount,half,cycles,write);
 }
 } // namespace native_hall
