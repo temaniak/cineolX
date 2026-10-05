@@ -8,6 +8,11 @@ AppleClang Release with strict FP.
 
 ## Result and scope
 
+Later [startup/key validation](ORIGINAL_224_STARTUP_VALIDATION.md) verifies
+the bank/compiler seeds and corrects Mod-key seed resets. Its separate
+compiler-start recipe explains the large historical frozen-phase differences;
+the measurements in this report retain their original reference recipe.
+
 The original-bank desktop engine now makes each predicted coefficient or
 delay-address write visible at its target DSP fetch. It no longer waits for
 the whole controller procedure to return and the next audio pass to begin.

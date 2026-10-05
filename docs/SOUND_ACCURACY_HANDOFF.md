@@ -35,6 +35,8 @@ read this record. Current checkpoint history:
 | `bdbc724` | Exact local modulation procedure/write timing model and portable oracle |
 | `0417cf1` | Stable-control scheduler integrated and ROM-validated; see the native scan report |
 | `512f7ba` | Independent isolation of WCS arbitration and grouped coefficient audio effects |
+| `f561f54` | Individual WCS writes made visible at their actual target fetches |
+| Current stage | [Mod-key seed reset, compiler/startup validation and retained phase limits](ORIGINAL_224_STARTUP_VALIDATION.md) |
 
 Reflexion pin: `f68ea1d069fef4a5663201693bfdfa1c579ffd69`.
 JUCE pin: `8.0.14`. Inspect `dependencies.json` and build paths before changes.
@@ -69,10 +71,10 @@ See the reports for exact fixtures, exclusions and limitations.
 
 | Stage | Status | Required result/report |
 | --- | --- | --- |
-| 1. Modulation phase and scheduling | Stable-control scheduler and individual-write visibility corrected and verified; startup/compiler phase remains open | [Individual-write report](NATIVE_WCS_WRITE_VALIDATION.md): 202,866 free-running write payloads/fetches exact; fixed graph matches 216,000 row-machine writes. [Native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md): 260,102 free-running events exact. [Modulation checkpoint](MODULATION_VALIDATION.md): direct switches retain three global counters. |
+| 1. Modulation phase and scheduling | Stable-control timing, write visibility, compiler seeds and Mod-key seed reset verified; compiler transition timing remains open | [Startup report](ORIGINAL_224_STARTUP_VALIDATION.md): bank seeds, 30 directed loads and 24 Mod-key resets exact; Decay Opt retains phase. [Individual-write report](NATIVE_WCS_WRITE_VALIDATION.md): 202,866 free-running write payloads/fetches exact; fixed graph matches 216,000 row-machine writes. |
 | 2. Remaining tails/frequency differences | Cause-isolation checkpoint complete; residuals retained | [Residual report](RESIDUAL_SOUND_VALIDATION.md): 18 all-six/mode runs plus four Chamber level/seed probes. Frozen phase and quiet floors matter; no compensating EQ. |
 | 3. Dry/Wet and Input Gain | Verified | [Gain/timing report](GAIN_TIMING_VALIDATION.md): six-program dry/mix, 24 gain cases; behavior retained. |
-| 4. Final regression/acceptance | Regression passed; full sonic acceptance open | [Current individual-write report](NATIVE_WCS_WRITE_VALIDATION.md): macOS builds, nine CTests, processor/Spillover checks, CPU +3.23% versus `0ebb668`. [Earlier regression](FINAL_SOUND_VALIDATION.md): historical Windows results. |
+| 4. Final regression/acceptance | Regression passed; full sonic acceptance open | [Current startup report](ORIGINAL_224_STARTUP_VALIDATION.md): macOS builds, twelve CTests, processor/Spillover checks, thirty byte-identical historical fixture pairs; CPU ratio 0.99835 versus `f561f54`, unchanged storage. [Individual-write report](NATIVE_WCS_WRITE_VALIDATION.md): CPU +3.23% versus `0ebb668` before the Mod-edge correction. |
 
 A stage report must state its status honestly: completed correction,
 investigation with a retained approximation, or unresolved blocker. Include
@@ -81,8 +83,11 @@ results, sonic/session effects and the next action. Keep this table current
 and create a Git checkpoint for each stage. Additional work may be needed if
 final verification establishes another meaningful defect.
 
-The current required next step is startup/program-load phase. Individual-write
-coefficient/address visibility is now corrected; see the
+The current required next step is actual compiler/key/predelay transition
+timing and phase-aware sonic acceptance. Compiler seeds were verified and
+the Mod-key seed reset was corrected; see the
+[startup report](ORIGINAL_224_STARTUP_VALIDATION.md). Individual-write
+coefficient/address visibility is corrected; see the
 [individual-write report](NATIVE_WCS_WRITE_VALIDATION.md). The
 [WCS audio boundary report](WCS_AUDIO_BOUNDARY_VALIDATION.md) isolated write
 arbitration from coefficient payload timing. No blanket
@@ -99,19 +104,33 @@ at input start reduced Hall B's maximum broad-band tail error from 13.80% to
 1.94%. That alignment is only an offline experiment, not plugin behavior.
 Do not claim it as a shipped improvement or tune a fixed phase to one clip.
 
-Native `Hall::update_modulation()` matches ROM steps at the actual routine
-clock for the importer's base controls. Its internal descriptors/dividers
-come from a captured profile. `set_controls()` writes coefficient tables;
-check whether this leaves the descriptor phase consistent after depth/mode
-changes. ROM program loading resets its random index to 4; other dividers
-can retain their previous phase. Compare the whole state and event ordering.
+Native modulation steps match ROM at actual calls. All six prepared bank seeds
+match the compiler, including descriptors, tap coefficients/offsets and index
+four; 72 depth compositions retain consistency. Direct switches preserve the
+three global counters. The physical Mod key recompiles the program in both
+directions; `DesktopHall::set_controls()` now restores that seed and cancels
+old predicted writes, retaining delay memory and global counters. Decay Opt
+alone does not reload the graph. Compiler duration/transient timing is retained
+as an approximation at the native parameter boundary.
+
+The historical sound tool cleared mode flags directly in RAM after enabled
+operation. This bypassed the physical Mod key's recompile, freezing a different
+tap phase from the bank. Keep these older fixtures as regression diagnostics;
+do not interpret their large Mod-off tail errors as a feedback/EQ defect.
+The new `--compiler-start` recipe captures the same seed as import: Mod off
+with Opt off/on has mean T20 error 0.3393%/0.3792%, maximum 2.7767%/3.8545%
+on six-program noise fixtures. The reference recipe changed, so these are not
+shipped before/after improvement figures. The 24-case `--startup-probe`
+ensemble isolates warmup and initial modulation/decay state. Shared modulation
+state reduces its diagnostic mean 4.0942% to 1.4386%; this is not plugin output.
 
 `DesktopHall` now uses a native event clock for prepared original banks:
 eighteen nonuniform modulation calls, nine transfer reads and a level-controller
 call. Timing follows independently validated state/signal-dependent laws and
 WCS grants. Legacy single-Hall profiles retain their nominal clock.
-Checked-in tools now provide this investigation: `native_224_modulation_check`,
-`native_224_sound_compare`, `script/analyze_sound.py` (NumPy only), and
+Checked-in tools now provide this investigation: `native_224_startup_phase_check`,
+`native_224_modulation_check`, `native_224_sound_compare`,
+`script/probe_startup_phase.py`, `script/analyze_sound.py` (NumPy only), and
 `script/benchmark_sound.py`. The sound tool renders normal native and a clearly
 labelled diagnostic aligned variant separately. ROM1–ROM5 are SHA-256 checked.
 No ignored diagnostic source is required on another computer.

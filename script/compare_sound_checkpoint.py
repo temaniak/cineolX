@@ -82,7 +82,8 @@ add_executable(sound_compare native-hall/tools/sound_compare.cpp
         for result in pool.map(render, fixtures):
             rows.extend(result)
     with (output / "bands.csv").open("w", newline="") as file:
-        writer = csv.DictWriter(file, rows[0].keys())
+        fields = list(dict.fromkeys(key for row in rows for key in row))
+        writer = csv.DictWriter(file, fields)
         writer.writeheader()
         writer.writerows(rows)
     (output / "baseline.txt").write_text(revision + "\n", encoding="utf-8")

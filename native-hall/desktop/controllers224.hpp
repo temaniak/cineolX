@@ -38,7 +38,23 @@ public:
         previous_right_detector_=0;
     }
     void set_controls(const Controls& controls) noexcept {
+        const bool recompile=bank_ && controls.mode_enhancement!=controls_.mode_enhancement;
         controls_=controls;Hall::set_controls(controls);
+        if(recompile) {
+            // The physical Mod key reloads the program in both directions.
+            // Restore its interpolation seed without clearing delay/audio
+            // state or the three global modulation counters. Decay Opt
+            // alone does not reload the program.
+            const auto& p=bank_->programs[program_];auto state=modulation_state();
+            state.descriptors=p.modulation_descriptors;state.index=p.modulation_index;
+            for(unsigned tap=0;tap<(p.modulation_flags&15);++tap) {
+                const unsigned at=tap*5,address=unsigned(state.descriptors[at])|unsigned(state.descriptors[at+1])<<8;
+                const unsigned row=127-(address-0x4000)/4;
+                for(unsigned j=0;j<2;++j){state.coefficients[2*tap+j]=p.coefficients[row+j];state.offsets[2*tap+j]=p.offsets[row+j];}
+            }
+            restore_modulation(state);
+            scan_clock_.reset(program_networks[program_],cycles_);control_writes_.reset();
+        }
     }
     void process(int16_t left,int16_t right,int16_t outputs[4],unsigned detectors=0) noexcept {
         if(bank_) {

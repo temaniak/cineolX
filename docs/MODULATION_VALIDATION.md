@@ -61,6 +61,13 @@ at matched call boundaries, not an identical runtime call schedule.
 
 ## Timing and initial phase
 
+Later [startup/key validation](ORIGINAL_224_STARTUP_VALIDATION.md) corrects
+the physical-key interpretation below: an actual Mod key recompiles the
+program and resets its tap seed. A direct RAM flag clear freezes the reached
+phase, as used by this historical diagnostic. Native Mod edges now reset the
+seed; Decay Opt alone retains phase. Do not treat the historical fixture's
+frozen-phase results as physical Mod-off transition measurements.
+
 At this checkpoint the desktop scheduler distributed 18 calls uniformly per panel scan.
 The ROM has unequal intervals, conditional XREG reads, level-controller work
 and WCS bus waits. Constant-input cases differed from the bank's silent nominal

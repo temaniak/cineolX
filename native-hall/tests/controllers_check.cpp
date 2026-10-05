@@ -36,11 +36,12 @@ static void check_xreg(const char* prefix) {
     std::cout<<"Six independent WCS images: XREG holds input at rows 0/50\n";
 }
 static void check_clock_adapter(const ProgramBank& bank) {
-    auto actual=std::make_unique<DesktopHall>();auto expected=std::make_unique<Hall>();
+    auto actual=std::make_unique<DesktopHall>();auto expected=std::make_unique<Hall>();auto seed=std::make_unique<Hall>();
+    unsigned cancelled=0;
     const auto input=[](unsigned channel,uint64_t pass){return int16_t(uint16_t(pass*(channel?31:71)));};
     const auto mask=[](unsigned channel,uint64_t pass){return unsigned((pass/(channel?11:7))%32);};
     for(unsigned program=0;program<program_count;++program) {
-        actual->prepare(bank,program);expected->prepare(bank,program);expected->restore_decay(actual->decay_state());
+        actual->prepare(bank,program);expected->prepare(bank,program);seed->prepare(bank,program);expected->restore_decay(actual->decay_state());
         ControlScan224 clock;clock.reset(program_networks[program]);
         std::array<uint64_t,2> last{};Controls controls;controls.predelay_ms=predelay_minima[program];
         actual->set_controls(controls);expected->set_controls(controls);
@@ -48,9 +49,17 @@ static void check_clock_adapter(const ProgramBank& bank) {
         tracking=true;
         for(uint64_t pass=0;pass<60000;++pass) {
             if(pass%2000==0) {
+                const auto memory=actual->memory();const auto global=actual->modulation_state();
+                if(actual->pending_control_writes())++cancelled;
                 controls.mode_enhancement=!controls.mode_enhancement;
                 controls.decay_optimization=!controls.decay_optimization;
                 actual->set_controls(controls);expected->set_controls(controls);
+                assert(actual->memory()==memory && actual->pending_control_writes()==0);
+                const auto changed=actual->modulation_state();
+                assert(changed.divider==global.divider && changed.random_divider==global.random_divider && changed.hold==global.hold);
+                auto start=seed->modulation_state();const auto previous=expected->modulation_state();
+                start.divider=previous.divider;start.random_divider=previous.random_divider;start.hold=previous.hold;
+                expected->restore_modulation(start);clock.reset(program_networks[program],pass*100);
             }
             clock.run_until(pass*100,bank,program,*expected,controls,
                 [&](uint64_t t){
@@ -82,6 +91,8 @@ static void check_clock_adapter(const ProgramBank& bank) {
         }
         tracking=false;
     }
+    assert(cancelled>0);
+    std::cout<<cancelled<<" pending procedures cancelled by Mod keys; delay memory/global counters retained\n";
     std::cout<<"360000 streamed passes: sparse byte reads, separate held detectors and mode changes match native event clock\n";
 }
 int main(int argc,char** argv) {

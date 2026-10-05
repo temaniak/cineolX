@@ -1,6 +1,7 @@
 """Analyze private native_224_sound_compare output (requires NumPy only).
 
 All results, including rejected fits, are retained. Aligned is diagnostic.
+With --startup-probe renders, warmup/modulation/decay/load are also diagnostics.
 Usage: python script/analyze_sound.py OUTPUT_DIRECTORY [OUTPUT_DIRECTORY ...]
 """
 import csv
@@ -48,7 +49,10 @@ def analyze(directory):
     start = .3 if meta["fixture"] == "noise" else 2.2
     reference = wav(directory / "reference.wav")
     rows = []
-    variants = {name: wav(directory / f"{name}.wav") for name in ("native", "aligned")}
+    names = ["native", "aligned"]
+    if meta.get("startup_probe") == "1":
+        names += ["warmup", "modulation", "decay", "load"]
+    variants = {name: wav(directory / f"{name}.wav") for name in names}
     for low, high in BANDS:
         ref = filtered(reference, low, high)
         rt, rr, rlast = fit(ref, start)
