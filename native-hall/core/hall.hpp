@@ -24,6 +24,17 @@ public:
     void reset() noexcept;
     void set_controls(const Controls& c) noexcept;
     void process(int16_t left,int16_t right,int16_t outputs[4],unsigned detectors=0) noexcept;
+    // Integer network only: desktop may supply its own control scan clock.
+    void process_uncontrolled(int16_t left,int16_t right,int16_t outputs[4]) noexcept;
+    void observe_decay(int16_t left,int16_t right,unsigned detectors=0) noexcept {
+        decay_.observe(left,right,detectors);
+    }
+    void poll_decay() noexcept {
+        if(!profile_ && !algorithm_)return;
+        if(decay_.poll(uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,
+                       algorithm_?algorithm_->decay_amount:profile_->decay_amount))
+            set_loop_diffusion(decay_.state().amount);
+    }
     uint64_t saturation_count() const noexcept {return saturations_;}
     const std::array<int8_t,100>& coefficients() const noexcept {return c_;}
     const std::array<uint16_t,100>& offsets() const noexcept {return offsets_;}

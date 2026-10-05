@@ -23,9 +23,12 @@ trap 'rm -rf "$TASK_CACHE"' EXIT
 CINEOL224_CACHE_DIR="$TASK_CACHE" "$TASK_CHECK" --empty
 if [[ "$TASK_MODE" != --build-only ]]; then
     cmake --build "$TASK_BUILD" --parallel "${BUILD_JOBS:-6}" --target \
-        native_hall_core_check native_224_bank_check native_hall_compare
+        native_hall_core_check native_224_bank_check native_224_dac_check native_224_adc_check native_224_controllers_check native_hall_compare
     "$TASK_BUILD/native-hall/native_hall_core_check" "$TASK_BUILD/native-hall/hall-v44.hall224"
     "$TASK_BUILD/native-hall/native_224_bank_check" "$TASK_BUILD/native-hall/programs-v44.bank224"
+    "$TASK_BUILD/native-hall/native_224_dac_check" "$TASK_BUILD/native-hall/programs-v44.bank224"
+    "$TASK_BUILD/native-hall/native_224_adc_check" "$TASK_BUILD/native-hall/programs-v44.bank224"
+    "$TASK_BUILD/native-hall/native_224_controllers_check" "$TASK_BUILD/native-hall/programs-v44.bank224"
     "$TASK_BUILD/native_hall_plugin_check_artefacts/Release/native_hall_plugin_check" \
         --bank "$TASK_BUILD/native-hall/programs-v44.bank224"
     CINEOL224_CACHE_DIR="$TASK_CACHE" "$TASK_CHECK" --cancel "$TASK_ROM"
@@ -33,7 +36,7 @@ if [[ "$TASK_MODE" != --build-only ]]; then
     CINEOL224_CACHE_DIR="$TASK_CACHE" "$TASK_CHECK" --cached
 fi
 if [[ "$TASK_MODE" == --compare ]]; then
-    "$TASK_BUILD/native-hall/native_hall_compare" "$TASK_ROM" "$TASK_BUILD/native-hall/hall-v44.hall224" \
+    "$TASK_BUILD/native-hall/native_hall_compare" "$TASK_ROM" "$TASK_BUILD/native-hall/programs-v44.bank224" \
         "$TASK_ROOT/build/validation"
 fi
 echo "Cineol-X 224 bundles: $TASK_BUILD/NativeHall224_artefacts/Release"

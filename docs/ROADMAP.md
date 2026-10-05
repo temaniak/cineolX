@@ -2,9 +2,14 @@
 
 Updated: October 5, 2026.
 
+For the active desktop sound-accuracy work, read the
+[cross-computer continuation record](SOUND_ACCURACY_HANDOFF.md). It records
+the four remaining working stages, checkpoint status and reproduction setup.
+
 This roadmap records the four development stages agreed in the discussion.
 Their order is agreed; detailed designs, implementation choices, dates and
-release versions remain to be defined. All tasks below describe future work.
+release versions remain to be defined. Checked items record completed work;
+unchecked items remain open.
 
 ## Direction
 
@@ -28,8 +33,22 @@ identified the strongest systematic difference.
 - [ ] Bring the combined input/output filtering, sample-rate conversion and
   DAC reconstruction closer to the reference. Evaluate aliasing and spectral
   images as well as bandwidth and phase.
+- [x] Replace the original-224 desktop output boundary with event-timed DAC
+  holds and continuous-time AOUT reconstruction. Verify converter phases,
+  spectrum, decay estimates, allocations and paired desktop CPU cost.
+  See [DAC validation](EVENT_DAC_VALIDATION.md). Daisy work is deferred for
+  the current phase.
+- [x] Replace the original-224 desktop input approximation with the reference
+  interpolator/circuit response sampled at separate ADC hold times. Verify
+  aliasing, converter words, six-program tails and desktop CPU cost.
+  See [input/ADC validation](INPUT_ADC_VALIDATION.md). Full-firmware
+  controller differences and dry/wet timing remain open.
 - [ ] Improve modulation and decay-controller timing and initial state where
   comparisons establish a meaningful difference.
+- [x] Correct the desktop decay startup period, sparse transfer-peak sampling
+  and shared panel-scan cadence. Retain decay state on direct native program
+  switches and measure CPU. See [controller validation](CONTROLLER_VALIDATION.md).
+  Full modulation phase and signal-dependent firmware timing remain open.
 - [ ] Investigate dry/wet timing and Input Gain behavior before deciding whether
   their current behavior should change.
 - [ ] Measure CPU and memory cost on desktop and Daisy targets. Verify actual

@@ -168,7 +168,24 @@ Measure the CPU cost of greater accuracy separately. Keep processing bounded
 and allocation-free, and explain any resulting sonic changes. This discussion
 did not authorize or implement DSP changes.
 
-## Local diagnostic artifacts
+## Subsequent desktop implementations
+
+The following section records work after the initial investigation; the
+measurements above describe the earlier audio path. On October 5, 2026,
+the original-224 desktop output FIR/48 kHz hold approximation was replaced
+with independently timed DAC captures and continuous-time reconstruction.
+The [DAC validation report](EVENT_DAC_VALIDATION.md) records isolated output
+accuracy, full-path limitations, decay estimates and desktop CPU cost.
+The subsequent desktop input step replaced the 48 kHz AIN/downsampling
+approximation with the reference interpolator/circuit response at independent
+ADC hold times. See [input/ADC validation](INPUT_ADC_VALIDATION.md) for
+converter-word agreement, six-program tails, full-firmware spectral results
+and final CPU cost. The next desktop step corrects the decay startup period,
+transfer-peak sampling and panel-scan cadence; see
+[controller validation](CONTROLLER_VALIDATION.md). Modulation phase and precise
+signal-dependent controller timing remain open. Daisy is deferred.
+
+## Initial local diagnostic artifacts
 
 The detailed investigation and private listening renders remain in the ignored
 directory `build/validation/sound-review-20261004/`:

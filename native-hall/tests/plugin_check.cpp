@@ -29,6 +29,13 @@ void operator delete(void* p,std::align_val_t) noexcept {
 }
 void operator delete(void* p,size_t,std::align_val_t a) noexcept {::operator delete(p,a);}
 static void require(bool ok,const char* s) {if(!ok) {std::cerr<<s<<'\n';std::exit(1);}}
+static void set_cache_directory(const juce::File& folder) {
+#ifdef _WIN32
+    require(_putenv_s("CINEOL224_CACHE_DIR",folder.getFullPathName().toRawUTF8())==0,"could not set test cache directory");
+#else
+    require(setenv("CINEOL224_CACHE_DIR",folder.getFullPathName().toRawUTF8(),1)==0,"could not set test cache directory");
+#endif
+}
 static void set(NativeHallProcessor& p,const char* id,float value) {
     auto* param=p.state.getParameter(id);param->setValueNotifyingHost(param->convertTo0to1(value));
 }
@@ -787,17 +794,17 @@ static void check_low_latency() {
     }
     std::cout<<"Low latency: zero-delay exact dry at 44.1/48/96k, mono/stereo, 1..20000 frames, host-rate mix, live latency + closed editor pass\n";
 }
-static void check_daisy_engine(const char* path) {
+static void check_desktop_engine(const char* path) {
     juce::MemoryBlock data;
-    require(juce::File(juce::String::fromUTF8(path)).loadFileAsData(data),"missing Daisy bank fixture");
+    require(juce::File(juce::String::fromUTF8(path)).loadFileAsData(data),"missing desktop bank fixture");
     auto bank=std::make_unique<native_hall::ProgramBank>();
-    require(native_hall::read_bank(data.getData(),data.getSize(),*bank),"invalid Daisy bank fixture");
+    require(native_hall::read_bank(data.getData(),data.getSize(),*bank),"invalid desktop bank fixture");
     auto p=std::make_unique<NativeHallProcessor>();p->prepareToPlay(48000,511);
-    auto engine=std::make_unique<native_hall::Engine48>();engine->prepare(*bank);
+    auto engine=std::make_unique<native_hall::DesktopEngine48>();engine->prepare(*bank);
     juce::AudioBuffer<float> block(2,511);juce::MidiBuffer midi;
     unsigned position=0;
     // Directed switches plus simultaneous delay/mode changes. Compare the
-    // shipped processor with the same public Engine48 used by Daisy.
+    // shipped processor with the desktop event-DAC engine.
     for(int from=0;from<6;++from) for(int to=0;to<6;++to) for(int program:{from,to}) {
         p->setCurrentProgram(program);
         set(*p,"predelay",float(24+(position%3)*64));
@@ -816,12 +823,12 @@ static void check_daisy_engine(const char* path) {
             }
             audio=true;p->processBlock(block,midi);audio=false;
             for(int i=0;i<511;++i) for(int c=0;c<2;++c)
-                require(block.getSample(c,i)==expected[i][c],"plugin differs from Daisy engine");
+                require(block.getSample(c,i)==expected[i][c],"plugin differs from desktop engine");
             // Keep control positions fixed until the next switch.
         }
         ++position;
     }
-    std::cout<<"36 directed switches + all pre-delay ranges/modes: plugin == Daisy Engine48 exactly at 48k\n";
+    std::cout<<"36 directed switches + all pre-delay ranges/modes: plugin == desktop event-DAC engine exactly at 48k\n";
 }
 static void check_dirt() {
     for(int program:{2,6,11}) {
@@ -1150,7 +1157,7 @@ int main(int argc,char** argv) {
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getNonexistentChildFile("cineol-plugin-check",{},false);
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");
-        setenv("CINEOL224_CACHE_DIR",test_cache.folder.getFullPathName().toRawUTF8(),1);
+        set_cache_directory(test_cache.folder);
         require(juce::File(juce::String::fromUTF8(argv[2])).copyFileTo(CineolRomBank::cacheFile()),"could not seed test bank");
         if(argc==4) require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed XL bank");
     }
@@ -1181,7 +1188,7 @@ int main(int argc,char** argv) {
         const auto original=CineolRomBank::cacheFile(),xl=CineolRomBank::xlCacheFile();
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cineol-browser-preview-"+juce::Uuid().toString());
         require(test_cache.folder.createDirectory().wasOk(),"browser preview cache failed");
-        setenv("CINEOL224_CACHE_DIR",test_cache.folder.getFullPathName().toRawUTF8(),1);
+        set_cache_directory(test_cache.folder);
         require(original.copyFileTo(CineolRomBank::cacheFile()) && xl.copyFileTo(CineolRomBank::xlCacheFile()),"browser preview banks failed");
     }
     if((argc==3 || argc==4 || argc==5 || argc==6) && std::string(argv[1])=="--editor") {
@@ -1244,8 +1251,12 @@ int main(int argc,char** argv) {
             snapshot->createComponentSnapshot(snapshot->getLocalBounds()),output),"editor screenshot failed");
         return 0;
     }
-    check_state_and_ranges();check_editor();check_presets();check_preset_bank();check_quick_presets();check_preset_audio();
-    if(std::string(argc>1?argv[1]:"")=="--bank" || std::string(argc>1?argv[1]:"")=="--banks") check_daisy_engine(argv[2]);
+    check_state_and_ranges();check_editor();check_presets();check_preset_bank();
+    // Mixed 224/XL quick recall requires the optional XL bank fixture.
+    if(NativeHallProcessor().programAvailable(6)) check_quick_presets();
+    else std::cout<<"Mixed 224/XL quick recall: skipped (224-only bank fixture)\n";
+    check_preset_audio();
+    if(std::string(argc>1?argv[1]:"")=="--bank" || std::string(argc>1?argv[1]:"")=="--banks") check_desktop_engine(argv[2]);
     check_low_latency();
     if(argc==4 && std::string(argv[1])=="--banks") {check_preset_browser();check_fader_limits();check_xl();check_dirt();check_spillover();}
     for(int program=0;program<6;++program) for(int rate:{44100,48000,96000}) {

@@ -80,17 +80,21 @@ void Hall::set_controls(const Controls& next) noexcept {
     offsets_[89]=uint16_t(profile_->offsets[89]+20*(controls_.predelay_ms-24))&0x3fff;
 }
 void Hall::process(int16_t left,int16_t right,int16_t outputs[4],unsigned detectors) noexcept {
-    if(!profile_ && !algorithm_) {std::fill_n(outputs,4,int16_t(0));return;}
-    if(first_) first_=false; else ++position_;
-    const unsigned network=algorithm_?algorithm_->network:0;
-    #include "program_networks.inc"
-    std::copy(output_.begin(),output_.end(),outputs);
+    process_uncontrolled(left,right,outputs);
+    if(!profile_ && !algorithm_) return;
     decay_.observe(left,right,detectors);update_decay();
     // Per-program/mode nominal ROM clocks, measured offline. Signal-dependent
     // CPU timing remains an approximation. Legacy Hall retains its 1.067 kHz.
     unsigned mode=unsigned(controls_.mode_enhancement)|unsigned(controls_.decay_optimization)<<1;
     mod_clock_+=algorithm_?algorithm_->modulation_rate_tenths[mode]:10670;
     if(mod_clock_>=sample_rate*10) {mod_clock_-=sample_rate*10;if(controls_.mode_enhancement) update_modulation();}
+}
+void Hall::process_uncontrolled(int16_t left,int16_t right,int16_t outputs[4]) noexcept {
+    if(!profile_ && !algorithm_) {std::fill_n(outputs,4,int16_t(0));return;}
+    if(first_) first_=false; else ++position_;
+    const unsigned network=algorithm_?algorithm_->network:0;
+    #include "program_networks.inc"
+    std::copy(output_.begin(),output_.end(),outputs);
 }
 void Hall::update_modulation() noexcept {
     if(--random_divider_==0) {

@@ -71,7 +71,7 @@ static void compare(NativeHallProcessor& processor) {
     juce::MemoryBlock bytes;require(CineolRomBank::cacheFile().loadFileAsData(bytes),"missing saved bank");
     auto bank=std::make_unique<native_hall::ProgramBank>();
     require(native_hall::read_bank(bytes.getData(),bytes.getSize(),*bank),"invalid saved bank");
-    auto reference=std::make_unique<native_hall::Engine48>();reference->prepare(*bank);
+    auto reference=std::make_unique<native_hall::DesktopEngine48>();reference->prepare(*bank);
     // Do not call prepareToPlay here: this checks publication to an already
     // running dry processor, including its first audio-block initialization.
     native_hall::Parameters params;reference->set_parameters(params);

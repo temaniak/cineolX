@@ -1,9 +1,10 @@
 // Offline listening fixture. The reference alone executes the original ROM;
 // no emulator code is linked to the plugin or portable core.
-#include "../core/engine48.hpp"
+#include "../desktop/engine22448.hpp"
 #include <juce-plugin/source/engine.hpp>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <iostream>
 #include <vector>
 #include <stdexcept>
@@ -34,11 +35,12 @@ static void stats(std::ostream& report,const char* name,const Audio& a) {
     if(total<1e-4 || peak>4) throw std::runtime_error("silent or runaway render");
 }
 int main(int argc,char** argv) try {
-    if(argc!=4) throw std::runtime_error("usage: native_hall_compare ROM_DIRECTORY PROFILE OUTPUT_DIRECTORY");
+    if(argc!=4) throw std::runtime_error("usage: native_hall_compare ROM_DIRECTORY BANK_OR_PROFILE OUTPUT_DIRECTORY");
     std::ifstream in(argv[2],std::ios::binary);
     std::vector<char> data((std::istreambuf_iterator<char>(in)),{});
-    native_hall::Profile profile;
-    if(!native_hall::read_profile(data.data(),data.size(),profile)) throw std::runtime_error("bad profile");
+    auto bank=std::make_unique<native_hall::ProgramBank>();native_hall::Profile profile;
+    const bool have_bank=native_hall::read_bank(data.data(),data.size(),*bank);
+    if(!have_bank && !native_hall::read_profile(data.data(),data.size(),profile)) throw std::runtime_error("bad bank or profile");
     auto output=std::filesystem::path(argv[3]);std::filesystem::create_directories(output);
     constexpr int frames=10*48000;
     Audio input;for(auto& c:input) c.resize(frames);
@@ -63,7 +65,7 @@ int main(int argc,char** argv) try {
     report<<"224 v4.4 Large Concert Hall B; 48 kHz float WAV; wet only, outputs A/C.\n"
           <<"Factory: Bass 3.4s, Mid 2.6s, Crossover 540Hz, Treble 4000Hz, Depth 21, Predelay 24ms, Diffusion 1.\n"
           <<"No gain normalization. SRC/analog latency differs; no sample null claimed.\n"
-          <<"Native: normal captured startup state. Native aligned: diagnostic 17-byte decay state aligned after boot/settle.\n";
+          <<"Native: desktop scan with cleared startup diffusion period. Native aligned: diagnostic 17-byte decay state only; scan/modulation phase remains nominal.\n";
     struct Modes {const char* name;bool enhancement,decay,analog=true;};
     for(auto modes:{Modes{"modes-off",false,false},Modes{"modulation-only",true,false},
                     Modes{"decay-only",false,true},Modes{"modes-on",true,true},
@@ -93,8 +95,10 @@ int main(int argc,char** argv) try {
         wait(300);
         reference->set_analog(modes.analog);
         reference->host().audio_observer=std::move(audio_observer);
-        auto native=std::make_unique<native_hall::Engine48>();native->prepare(profile);
-        auto aligned=std::make_unique<native_hall::Engine48>();aligned->prepare(profile);
+        auto native=std::make_unique<native_hall::DesktopEngine48>();
+        auto aligned=std::make_unique<native_hall::DesktopEngine48>();
+        if(have_bank){native->prepare(*bank,2);aligned->prepare(*bank,2);}
+        else{native->prepare(profile);aligned->prepare(profile);}
         native_hall::Parameters params;
         params.hall.mode_enhancement=modes.enhancement;params.hall.decay_optimization=modes.decay;
         params.analog=modes.analog;
@@ -109,8 +113,8 @@ int main(int argc,char** argv) try {
         }
         // The free-running counters are not reset by a program load. A
         // different number of silent boot/menu ticks changes the first tail.
-        // Align that starting phase for this diagnostic A/B only; the plugin
-        // continues from its own captured profile and never reads the ROM.
+        // Align the decay bytes for this diagnostic A/B only; scan and
+        // modulation timing remain nominal. The plugin uses its prepared bank.
         native_hall::DecayState initial;
         std::memcpy(&initial,reference->host().memory.data()+0x3e32,sizeof initial);
         aligned->hall().restore_decay(initial);

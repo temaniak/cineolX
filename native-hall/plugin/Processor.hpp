@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/engine48.hpp"
+#include "../desktop/engine22448.hpp"
 #include "RomBank.hpp"
 #include "Firmware.hpp"
 #include "../desktop/runtime.hpp"
@@ -77,7 +77,7 @@ private:
     // Desktop-only double buffering. Both complete runtimes are constructed
     // before audio starts; transitions exchange indices, never DSP storage.
     struct AudioSlot {
-        native_hall::Engine48 engine;
+        native_hall::DesktopEngine48 engine;
         cineol::xl::Runtime xl_engine;
         std::array<std::array<float,2>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> alignment{};
         unsigned alignment_position=0;

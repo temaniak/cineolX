@@ -557,8 +557,9 @@ NATIVE_HALL_ROM_DIR='/path/to/224-v44-roms' ./script/build_plugin.sh --check
 ```
 
 Checks cover import/cancellation/cache restart, dry behavior before import,
-processor state and automation, allocation-free processing and all six native
-networks against the independent row machine. Daisy `--check` also exercises
+processor state and automation, allocation-free processing, event-timed desktop
+ADC/DAC boundaries and all six native networks against the independent row
+machine. Daisy `--check` also exercises
 voltage normalization, inversion, controller mapping, button gestures, RGB
 colors and stereo DSP before checking the ARM image layout.
 `build_plugin.sh --compare` writes local reference/native audio diagnostics to
@@ -571,9 +572,17 @@ updates logical controls every second block (500 Hz). Hardware adapter reads
 and RGB updates must remain bounded, allocation-free and nonblocking.
 
 Native row arithmetic and extracted control tables have independent exactness
-checks. The complete original hardware audio/control path is not bit-exact:
-analog filters run on the 48 kHz grid, controller clocks use measured nominal
-rates, modulation phases can differ, and the original pre-delay adjustment ramp
+checks. The original-224 desktop input now reproduces the reference interpolator
+and circuit at separate ADC hold times; its output uses independent DAC capture
+phases and continuous-time reconstruction sampled at 48 kHz. See the
+[input/ADC measurements and CPU comparison](docs/INPUT_ADC_VALIDATION.md) and
+[DAC validation](docs/EVENT_DAC_VALIDATION.md).
+The desktop controller also clears an import-sweep startup period and models
+sparse transfer-peak reads within the shared panel scan; see
+[controller validation](docs/CONTROLLER_VALIDATION.md).
+The complete original hardware audio/control path is not bit-exact:
+controller clocks use measured nominal rates, initial state and modulation
+phases can differ, and the original pre-delay adjustment ramp
 is not implemented. This is not a claim of complete hardware equivalence.
 
 ## Native desktop expansion
@@ -641,7 +650,7 @@ native-hall/core/          portable C++17 DSP
 native-hall/import/        shared original-224 ROM importer
 native-hall/plugin/        JUCE processor, editor and current artwork
 native-hall/daisy/         generic I/O contract, configuration and ARM project
-native-hall/desktop/       experimental native XL graphs, controls and audio path
+native-hall/desktop/       original-224 ADC/DAC/control scan and native XL desktop path
 native-hall/tools/         local ROM preparation and reference comparison
 native-hall/tests/         DSP, processor and import checks
 deps/reflexion/            pinned upstream Git submodule
