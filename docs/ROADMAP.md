@@ -49,8 +49,17 @@ identified the strongest systematic difference.
   and shared panel-scan cadence. Retain decay state on direct native program
   switches and measure CPU. See [controller validation](CONTROLLER_VALIDATION.md).
   Full modulation phase and signal-dependent firmware timing remain open.
-- [ ] Investigate dry/wet timing and Input Gain behavior before deciding whether
-  their current behavior should change.
+- [x] Preserve the three free-running modulation counters on direct desktop
+  program switches. Validate the complete step state at actual ROM clocks;
+  record frozen-phase and scheduling limitations. See
+  [modulation validation](MODULATION_VALIDATION.md).
+- [x] Investigate desktop dry/wet timing and Input Gain behavior. Current
+  behavior passes the defined fixtures; see [gain/timing validation](GAIN_TIMING_VALIDATION.md).
+- [x] Add portable ROM-private all-six comparisons, fit analysis and paired
+  CPU tooling, with Git continuation reports. See
+  [residual measurements](RESIDUAL_SOUND_VALIDATION.md) and
+  [regression checkpoint](FINAL_SOUND_VALIDATION.md). Full sonic acceptance,
+  including phase ensembles and musical input, remains open.
 - [ ] Measure CPU and memory cost on desktop and Daisy targets. Verify actual
   realtime margin on hardware rather than relying on build success.
 

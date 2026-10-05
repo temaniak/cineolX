@@ -63,6 +63,9 @@ Results are recorded in [final regression checkpoint](FINAL_SOUND_VALIDATION.md)
 
 ## Reproduction
 
+Enable `CINEOL_BUILD_PLUGIN` for the processor target; the gain check itself
+also builds in a tools-only configuration.
+
 ```sh
 cmake --build build/sound-validation --config Release --target native_224_gain_timing_check native_hall_plugin_check
 native_224_gain_timing_check build/sound-validation/native-hall/programs-v44.bank224

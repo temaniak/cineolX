@@ -183,7 +183,14 @@ converter-word agreement, six-program tails, full-firmware spectral results
 and final CPU cost. The next desktop step corrects the decay startup period,
 transfer-peak sampling and panel-scan cadence; see
 [controller validation](CONTROLLER_VALIDATION.md). Modulation phase and precise
-signal-dependent controller timing remain open. Daisy is deferred.
+signal-dependent controller timing remain open. The next checkpoint validates
+the complete modulation step law and retains its global counters on direct
+desktop switches; see [modulation validation](MODULATION_VALIDATION.md).
+[Residual sound measurements](RESIDUAL_SOUND_VALIDATION.md) separate frozen
+phase/quiet-floor sensitivity from boundary response; [gain/timing](GAIN_TIMING_VALIDATION.md)
+and [regression](FINAL_SOUND_VALIDATION.md) record Dry/Wet, Input Gain and
+original-only Spillover results. Overall sonic acceptance remains open.
+Daisy is deferred.
 
 ## Initial local diagnostic artifacts
 

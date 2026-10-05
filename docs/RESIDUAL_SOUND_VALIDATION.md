@@ -1,9 +1,9 @@
 # Original-224 residual frequency and tail measurements
 
 October 5, 2026. Baseline/source: `0ebb668` plus the checked-in diagnostic
-tools from [modulation validation](MODULATION_VALIDATION.md). Reference:
-Tooling/implementation checkpoint: `ce45a03`.
-Reflexion `f68ea1d069fef4a5663201693bfdfa1c579ffd69`, original v4.4.
+tools from [modulation validation](MODULATION_VALIDATION.md), implementation
+checkpoint `ce45a03`. Reference: Reflexion
+`f68ea1d069fef4a5663201693bfdfa1c579ffd69`, original v4.4.
 Status: cause-isolation checkpoint; full sonic acceptance remains open.
 
 ## Method and result

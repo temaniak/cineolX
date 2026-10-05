@@ -18,6 +18,20 @@ rely on another agent's conversation history or ignored local diagnostics.
 - Never add ROMs, banks, WCS images, audio captures or private adapters to Git.
 
 Primary repository: `https://github.com/temaniak/cineolX`.
+Working branch: `codex/original-224-sound-accuracy`. Baseline checkpoint:
+`0ebb668`. The user explicitly authorized pushing checkpoint commits to this
+repository; do not create a second remote or force-push. The branch is published.
+
+From a clean checkout on another computer, fetch/switch to that branch and
+read this record. Current checkpoint history:
+
+| Commit | Saved step |
+| --- | --- |
+| `0ebb668` | Completed DAC, ADC and initial decay/scan work plus first handoff record |
+| `ce45a03` | Direct-switch modulation counters, ROM oracle/test tools and modulation report |
+| `4a359f4` | Phase-aware all-six/Chamber residual measurements |
+| `484bcc3` | Dry/Wet, gain and overlap behavior report |
+| Latest regression-documentation commit | Final regression/CPU/Spillover results and current open work |
 Reflexion pin: `f68ea1d069fef4a5663201693bfdfa1c579ffd69`.
 JUCE pin: `8.0.14`. Inspect `dependencies.json` and build paths before changes.
 
@@ -41,7 +55,7 @@ The selected engine is `DesktopEngine48` in
 argument. Ordinary `Engine48` keeps its previous boundaries and controls.
 The prepared bank ABI remains version 1: 123,460 payload bytes.
 
-At this checkpoint the six-program decay-only test had mean broad-band T20
+At `0ebb668` the six-program decay-only test had mean broad-band T20
 error 0.36%, maximum 2.92%; with modulation enabled improvements were uneven.
 Incremental decay/scan CPU cost was +0.91% versus the previous ADC/DAC engine.
 See the reports for exact fixtures, exclusions and limitations.
@@ -50,10 +64,10 @@ See the reports for exact fixtures, exclusions and limitations.
 
 | Stage | Status | Required result/report |
 | --- | --- | --- |
-| 1. Modulation phase and scheduling | In progress | Explain startup/phase and signal-dependent clock differences; validate any correction without an excessive CPU cost. `MODULATION_VALIDATION.md` |
-| 2. Remaining tails/frequency differences | Pending | Investigate Chamber and the 9–10 kHz edge; distinguish repeatable defects from initial phase, excitation and quiet-floor fit errors. `RESIDUAL_SOUND_VALIDATION.md` |
-| 3. Dry/Wet and Input Gain | Pending | Measure relative delays/levels and response to input amplitude; change behavior only for established mismatches. `GAIN_TIMING_VALIDATION.md` |
-| 4. Final regression/acceptance | Pending | Six programs, modes, controls, signal levels, musical fixtures, sample rates, switching/state and paired CPU. `FINAL_SOUND_VALIDATION.md` |
+| 1. Modulation phase and scheduling | Counter correction verified; exact scheduler still open | [Modulation checkpoint](MODULATION_VALIDATION.md): ROM step law exact; direct desktop switches retain three global counters. Uniform nominal scheduling remains an approximation. |
+| 2. Remaining tails/frequency differences | Cause-isolation checkpoint complete; residuals retained | [Residual report](RESIDUAL_SOUND_VALIDATION.md): 18 all-six/mode runs plus four Chamber level/seed probes. Frozen phase and quiet floors matter; no compensating EQ. |
+| 3. Dry/Wet and Input Gain | Verified | [Gain/timing report](GAIN_TIMING_VALIDATION.md): six-program dry/mix, 24 gain cases; behavior retained. |
+| 4. Final regression/acceptance | Regression passed; full sonic acceptance open | [Regression checkpoint](FINAL_SOUND_VALIDATION.md): Windows builds, CPU +1.68% versus baseline, original-only Spillover verified separately. |
 
 A stage report must state its status honestly: completed correction,
 investigation with a retained approximation, or unresolved blocker. Include
@@ -61,6 +75,12 @@ baseline revision, changed files, exact test commands/fixtures, measured
 results, sonic/session effects and the next action. Keep this table current
 and create a Git checkpoint for each stage. Additional work may be needed if
 final verification establishes another meaningful defect.
+
+The current required next step is the native control scheduler. No blanket
+claim of identical modulation-on tails is supported. The normal-startup matrix
+must remain separate from offline aligned diagnostics. The user's Spillover
+setting adds two wet networks temporarily; isolate a single program for sound
+measurements, then test the overlap and its CPU separately.
 
 ## Current modulation evidence and next action
 
@@ -81,8 +101,11 @@ can retain their previous phase. Compare the whole state and event ordering.
 routine calls and nine transfer reads per level-controller call. Actual ROM
 instruction timing is state/signal dependent. Derive corrections from ROM
 traces or independently validated native laws, not fitted tail lengths.
-First make a checked-in, ROM-private validation harness so another computer
-can reproduce this investigation without ignored local sources.
+Checked-in tools now provide this investigation: `native_224_modulation_check`,
+`native_224_sound_compare`, `script/analyze_sound.py` (NumPy only), and
+`script/benchmark_sound.py`. The sound tool renders normal native and a clearly
+labelled diagnostic aligned variant separately. ROM1–ROM5 are SHA-256 checked.
+No ignored diagnostic source is required on another computer.
 
 ## Building and checking
 
