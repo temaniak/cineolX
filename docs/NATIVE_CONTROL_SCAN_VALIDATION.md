@@ -178,8 +178,11 @@ tests seed an isolated temporary cache; run their `--bank` and
 Remaining sound work is initial/program-load phase and within-call coefficient
 application. The current audio graph applies coefficient groups at completed
 calls on its 100-row pass boundary. The clock models WCS waits, but the graph
-does not reproduce displaced fetches or operand-clock holds. Their audio effect
-needs independent isolation before changing the graph. Compiler/predelay
+does not reproduce displaced fetches or operand-clock holds. A subsequent
+[WCS audio boundary isolation](WCS_AUDIO_BOUNDARY_VALIDATION.md) found these
+write-side effects audio-invariant in all six stable stock graphs, with
+53,382 grants and 160,146 held edges. Coefficient payload timing remains a
+separate question. Compiler/predelay
 transition timing and remote/cartridge mode changes are outside this stable-
 control model. Keep phase ensembles and normal startup distinct from diagnostics;
 do not tune feedback or EQ to compensate for one valid frozen tap phase.

@@ -33,7 +33,8 @@ read this record. Current checkpoint history:
 | `484bcc3` | Dry/Wet, gain and overlap behavior report |
 | `2677d7c` | Final regression/CPU/Spillover results and current open work |
 | `bdbc724` | Exact local modulation procedure/write timing model and portable oracle |
-| Native event-clock checkpoint | Stable-control scheduler integrated and ROM-validated; see the native scan report |
+| `0417cf1` | Stable-control scheduler integrated and ROM-validated; see the native scan report |
+
 Reflexion pin: `f68ea1d069fef4a5663201693bfdfa1c579ffd69`.
 JUCE pin: `8.0.14`. Inspect `dependencies.json` and build paths before changes.
 
@@ -80,7 +81,8 @@ and create a Git checkpoint for each stage. Additional work may be needed if
 final verification establishes another meaningful defect.
 
 The current required next step is startup/program-load phase and within-call
-coefficient application. No blanket
+coefficient application. The [WCS audio boundary report](WCS_AUDIO_BOUNDARY_VALIDATION.md)
+isolates write arbitration from coefficient payload timing. No blanket
 claim of identical modulation-on tails is supported. The normal-startup matrix
 must remain separate from offline aligned diagnostics. The user's Spillover
 setting adds two wet networks temporarily; isolate a single program for sound
