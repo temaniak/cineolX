@@ -84,6 +84,13 @@ Useful trace boundaries: modulation entry `0x0c7c`; first/second returns
 update `0x0228`. Counter RAM is `0x3e66..0x3e6a`; descriptor pointer is
 `0x3e27..0x3e28`. Keep the emulator confined to offline tools.
 
+The subsequent [native control-timing foundation](CONTROL_TIMING_VALIDATION.md)
+derives the modulation procedure's instruction costs and individual WCS
+access waits. All 576 cases matched, including 238,967 complete call durations
+and 328,567 write boundaries. This local model receives actual entry clocks
+and states in its offline oracle; it does not replace the uniform scheduler
+or establish a new modulation-on sound result.
+
 ## Reproduction
 
 ```sh

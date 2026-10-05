@@ -31,7 +31,8 @@ read this record. Current checkpoint history:
 | `ce45a03` | Direct-switch modulation counters, ROM oracle/test tools and modulation report |
 | `4a359f4` | Phase-aware all-six/Chamber residual measurements |
 | `484bcc3` | Dry/Wet, gain and overlap behavior report |
-| Latest regression-documentation commit | Final regression/CPU/Spillover results and current open work |
+| `2677d7c` | Final regression/CPU/Spillover results and current open work |
+| Native control-timing foundation checkpoint | Exact local modulation procedure/write timing model and portable oracle; full scheduler remains open |
 Reflexion pin: `f68ea1d069fef4a5663201693bfdfa1c579ffd69`.
 JUCE pin: `8.0.14`. Inspect `dependencies.json` and build paths before changes.
 
@@ -64,7 +65,7 @@ See the reports for exact fixtures, exclusions and limitations.
 
 | Stage | Status | Required result/report |
 | --- | --- | --- |
-| 1. Modulation phase and scheduling | Counter correction verified; exact scheduler still open | [Modulation checkpoint](MODULATION_VALIDATION.md): ROM step law exact; direct desktop switches retain three global counters. Uniform nominal scheduling remains an approximation. |
+| 1. Modulation phase and scheduling | Counter correction and local timing model verified; exact scheduler still open | [Modulation checkpoint](MODULATION_VALIDATION.md): ROM step law exact; direct desktop switches retain three global counters. [Timing foundation](CONTROL_TIMING_VALIDATION.md): routine/write costs exact in 576 cases. Uniform nominal scheduling remains an approximation. |
 | 2. Remaining tails/frequency differences | Cause-isolation checkpoint complete; residuals retained | [Residual report](RESIDUAL_SOUND_VALIDATION.md): 18 all-six/mode runs plus four Chamber level/seed probes. Frozen phase and quiet floors matter; no compensating EQ. |
 | 3. Dry/Wet and Input Gain | Verified | [Gain/timing report](GAIN_TIMING_VALIDATION.md): six-program dry/mix, 24 gain cases; behavior retained. |
 | 4. Final regression/acceptance | Regression passed; full sonic acceptance open | [Regression checkpoint](FINAL_SOUND_VALIDATION.md): Windows builds, CPU +1.68% versus baseline, original-only Spillover verified separately. |
@@ -106,6 +107,16 @@ Checked-in tools now provide this investigation: `native_224_modulation_check`,
 `script/benchmark_sound.py`. The sound tool renders normal native and a clearly
 labelled diagnostic aligned variant separately. ROM1–ROM5 are SHA-256 checked.
 No ignored diagnostic source is required on another computer.
+
+The next checkpoint adds `native_224_control_timing_check` and the native laws
+in `desktop/control_timing224.hpp`. On macOS arm64, 576 cases checked 238,967
+complete calls and 328,567 WCS writes with zero instruction-cost, whole-call
+or per-write timing mismatches. See [timing foundation](CONTROL_TIMING_VALIDATION.md)
+for the initial bus-history exclusions and local-oracle limits. The model is
+not wired into the audio processor; plugin sound and CPU are unchanged by it.
+Continue by deriving the surrounding XREG/panel/level event timing and proving
+whole scans without repeatedly supplying actual call-entry clocks/states.
+Include level-controller writes in the shared WCS clock before runtime use.
 
 ## Building and checking
 

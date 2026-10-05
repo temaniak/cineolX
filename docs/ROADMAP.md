@@ -53,6 +53,10 @@ identified the strongest systematic difference.
   program switches. Validate the complete step state at actual ROM clocks;
   record frozen-phase and scheduling limitations. See
   [modulation validation](MODULATION_VALIDATION.md).
+- [x] Derive native modulation procedure costs and WCS grant/write timing.
+  Validate 576 ROM-private cases and every observed write boundary; see
+  [control-timing foundation](CONTROL_TIMING_VALIDATION.md). The model is not
+  yet connected to audio processing; complete scan scheduling remains open.
 - [x] Investigate desktop dry/wet timing and Input Gain behavior. Current
   behavior passes the defined fixtures; see [gain/timing validation](GAIN_TIMING_VALIDATION.md).
 - [x] Add portable ROM-private all-six comparisons, fit analysis and paired
