@@ -149,6 +149,40 @@ void Hall::update_modulation() noexcept {
         c_[row+1]=int8_t((~second&255)>>2);
     }
 }
+ModulationState Hall::modulation_state() const noexcept {
+    ModulationState state;
+    state.descriptors=mod_;state.index=mod_index_;state.divider=mod_divider_;
+    state.random_divider=random_divider_;state.hold=random_hold_;
+    const unsigned count=algorithm_?(algorithm_->modulation_flags&15):profile_?2:0;
+    for(unsigned i=0;i<count;++i) {
+        const unsigned address=unsigned(mod_[5*i])|unsigned(mod_[5*i+1])<<8;
+        if(address<0x4077 || address>0x41ff || (address&3)!=3)continue;
+        const unsigned row=127-(address-0x4000)/4;
+        for(unsigned j=0;j<2;++j) {
+            state.coefficients[2*i+j]=c_[row+j];state.offsets[2*i+j]=offsets_[row+j];
+        }
+    }
+    return state;
+}
+void Hall::restore_modulation(const ModulationState& state) noexcept {
+    if(!profile_ && !algorithm_)return;
+    const unsigned count=algorithm_?(algorithm_->modulation_flags&15):2;
+    // Reject a snapshot from another program before changing any state.
+    for(unsigned i=0;i<count;++i) {
+        const unsigned address=unsigned(state.descriptors[5*i])|unsigned(state.descriptors[5*i+1])<<8;
+        if(address<0x4077 || address>0x41ff || (address&3)!=3 ||
+           state.descriptors[5*i]!=mod_[5*i] || state.descriptors[5*i+1]!=mod_[5*i+1])return;
+    }
+    mod_=state.descriptors;mod_index_=state.index&4095;mod_divider_=state.divider;
+    random_divider_=state.random_divider;random_hold_=state.hold;
+    for(unsigned i=0;i<count;++i) {
+        const unsigned address=unsigned(mod_[5*i])|unsigned(mod_[5*i+1])<<8;
+        const unsigned row=127-(address-0x4000)/4;
+        for(unsigned j=0;j<2;++j) {
+            c_[row+j]=state.coefficients[2*i+j];offsets_[row+j]=state.offsets[2*i+j]&0x3fff;
+        }
+    }
+}
 void Hall::update_decay() noexcept {
     unsigned mode=unsigned(controls_.mode_enhancement) | unsigned(controls_.decay_optimization)<<1;
     level_clock_+=algorithm_?algorithm_->level_rate_tenths[mode]:profile_->level_rate_tenths[mode];

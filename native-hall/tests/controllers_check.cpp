@@ -63,8 +63,14 @@ int main(int argc,char** argv) {
         auto state=hall->decay_state();state.stopped=1;state.amount=7;
         state.diffusion_period=15;state.diffusion_divider=4;state.history.fill(207);
         hall->restore_decay(state);
+        auto modulation=hall->modulation_state();modulation.divider=11;
+        modulation.random_divider=5;modulation.hold=7;modulation.index=177;
+        hall->restore_modulation(modulation);
         tracking=true;hall->select_program((program+1)%program_count);tracking=false;
         assert(!std::memcmp(&state,&hall->decay_state(),sizeof state));
+        const auto switched=hall->modulation_state();
+        assert(switched.divider==11 && switched.random_divider==5 && switched.hold==7);
+        assert(switched.index==bank->programs[(program+1)%program_count].modulation_index);
         hall->reset();assert(hall->decay_state().diffusion_period==0);
         tracking=true;
         for(unsigned n=0;n<180000;++n) {

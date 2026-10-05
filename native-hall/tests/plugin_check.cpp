@@ -2,6 +2,7 @@
 #include <iostream>
 #include <new>
 #include <cstdlib>
+#include <chrono>
 #ifdef _WIN32
 #include <malloc.h>
 #endif
@@ -800,7 +801,9 @@ static void check_desktop_engine(const char* path) {
     auto bank=std::make_unique<native_hall::ProgramBank>();
     require(native_hall::read_bank(data.getData(),data.getSize(),*bank),"invalid desktop bank fixture");
     auto p=std::make_unique<NativeHallProcessor>();p->prepareToPlay(48000,511);
-    auto engine=std::make_unique<native_hall::DesktopEngine48>();engine->prepare(*bank);
+    // Match the processor's first activation, before any free-running
+    // counters exist. Later switches preserve the same counter history.
+    auto engine=std::make_unique<native_hall::DesktopEngine48>();engine->prepare(*bank,0);
     juce::AudioBuffer<float> block(2,511);juce::MidiBuffer midi;
     unsigned position=0;
     // Directed switches plus simultaneous delay/mode changes. Compare the
@@ -990,7 +993,7 @@ static void check_xl() {
     for(int i=1;i<128;++i) require(block.getSample(0,i)==0,"XL dry path modified input");
 }
 // Exercise the complete plugin path; all event positions are independent of host block size.
-static std::vector<float> spillover_render(int rate,int block,int from,int to,bool low,bool rapid=false,bool disable=false,bool mono=false,float mix=1) {
+static std::vector<float> spillover_render(int rate,int block,int from,int to,bool low,bool rapid=false,bool disable=false,bool mono=false,float mix=1,bool original_only=false) {
     NativeHallProcessor p;set(p,"spillover",1);set(p,"spillover_time",1);set(p,"mix",mix);
     set(p,"low_latency",low?1.0f:0.0f);p.setCurrentProgram(from);
     p.setPlayConfigDetails(mono?1:2,2,rate,128);p.prepareToPlay(rate,128);
@@ -999,7 +1002,7 @@ static std::vector<float> spillover_render(int rate,int block,int from,int to,bo
     for(int pos=0;pos<end;) {
         if(pos==change) p.setCurrentProgram(to);
         if(rapid && pos==second) p.setCurrentProgram(1);
-        if(rapid && pos==third) p.setCurrentProgram(27);
+        if(rapid && pos==third) p.setCurrentProgram(original_only?0:27);
         if(disable && pos==rate/2) set(p,"spillover",0);
         int n=std::min(block,end-pos);
         for(int event:{change,second,third,rate/2}) if(pos<event && pos+n>event) n=event-pos;
@@ -1018,10 +1021,10 @@ static std::vector<float> spillover_render(int rate,int block,int from,int to,bo
     }
     return result;
 }
-static std::vector<float> spillover_catalog(int rate,int block) {
+static std::vector<float> spillover_catalog(int rate,int block,bool original_only=false) {
     NativeHallProcessor p;set(p,"spillover",1);set(p,"spillover_time",10);
     p.setPlayConfigDetails(2,2,rate,128);p.prepareToPlay(rate,128);
-    const int section=rate/10,end=section*int(NativeHallProcessor::program_count);
+    const int section=rate/10,end=section*int(original_only?6:NativeHallProcessor::program_count);
     juce::AudioBuffer<float> b(2,20000);juce::MidiBuffer midi;std::vector<float> result(size_t(end)*2);
     for(int pos=0;pos<end;) {
         if(pos%section==0) p.setCurrentProgram(pos/section);
@@ -1036,10 +1039,11 @@ static std::vector<float> spillover_catalog(int rate,int block) {
     }
     return result;
 }
-static void check_spillover_early_disable() {
-    NativeHallProcessor p,old,fresh;
+static void check_spillover_early_disable(bool original_only=false) {
+    auto p_owner=std::make_unique<NativeHallProcessor>(),old_owner=std::make_unique<NativeHallProcessor>(),fresh_owner=std::make_unique<NativeHallProcessor>();
+    auto& p=*p_owner;auto& old=*old_owner;auto& fresh=*fresh_owner;
     set(p,"spillover",1);set(p,"spillover_time",1);set(p,"mix",0.25f);
-    p.setCurrentProgram(6);old.setCurrentProgram(6);fresh.setCurrentProgram(2);
+    p.setCurrentProgram(original_only?1:6);old.setCurrentProgram(original_only?1:6);fresh.setCurrentProgram(2);
     for(auto* processor:{&p,&old,&fresh}) {processor->setPlayConfigDetails(2,2,48000,128);processor->prepareToPlay(48000,128);}
     constexpr int change=12000,disable=change+240,end=change+2400;
     juce::AudioBuffer<float> actual(2,128),previous(2,128),next(2,128);juce::MidiBuffer midi;
@@ -1076,29 +1080,33 @@ static void check_spillover_early_disable() {
     require(worst<2e-7f,"early Spillover disable jumped in mix level, duplicated dry or lost new input");
     std::cout<<"Spillover early disable: continuous new input, 25% wet, common dry, 20ms retirement match independent references; error="<<worst<<'\n';
 }
-static void check_spillover() {
-    check_spillover_early_disable();
-    PresetTestFiles files;NativeHallProcessor options;
+static void check_spillover(bool original_only=false) {
+    check_spillover_early_disable(original_only);
+    PresetTestFiles files;auto options_owner=std::make_unique<NativeHallProcessor>();auto& options=*options_owner;
     const auto preset=files.folder.getChildFile("Spillover.cineol224");
     require(options.savePreset(preset).wasOk(),"Spillover preset fixture failed");
     set(options,"spillover",1);set(options,"spillover_time",7);
     require(options.loadPreset(preset).wasOk() && options.state.getRawParameterValue("spillover")->load()==1 &&
             options.state.getRawParameterValue("spillover_time")->load()==7,"preset overwrote instance Spillover options");
-    juce::MemoryBlock state;options.getStateInformation(state);NativeHallProcessor restored;
+    juce::MemoryBlock state;options.getStateInformation(state);
+    auto restored_owner=std::make_unique<NativeHallProcessor>();auto& restored=*restored_owner;
     restored.setStateInformation(state.getData(),int(state.getSize()));
     require(restored.state.getRawParameterValue("spillover")->load()==1 &&
             restored.state.getRawParameterValue("spillover_time")->load()==7,"session lost Spillover options");
     // Compare to two independent reference instances, preserving the old
     // settings, output pair and delay memory. No new input follows the switch.
     for(int seconds:{1,5,10}) {
-        NativeHallProcessor p,old,fresh;set(p,"spillover",1);set(p,"spillover_time",float(seconds));
-        p.setCurrentProgram(2);old.setCurrentProgram(2);fresh.setCurrentProgram(6);
+        auto p_owner=std::make_unique<NativeHallProcessor>(),old_owner=std::make_unique<NativeHallProcessor>(),fresh_owner=std::make_unique<NativeHallProcessor>();
+        auto& p=*p_owner;auto& old=*old_owner;auto& fresh=*fresh_owner;
+        set(p,"spillover",1);set(p,"spillover_time",float(seconds));
+        const int target=original_only?1:6;
+        p.setCurrentProgram(2);old.setCurrentProgram(2);fresh.setCurrentProgram(target);
         for(auto* processor:{&p,&old,&fresh}) {processor->setPlayConfigDetails(2,2,48000,128);processor->prepareToPlay(48000,128);}
         const int change=12000,length=seconds*48000,end=change+length+256;
         juce::AudioBuffer<float> actual(2,128),previous(2,128),next(2,128);juce::MidiBuffer midi;
         double tail_energy=0;float worst=0;
         for(int pos=0;pos<end;) {
-            if(pos==change) p.setCurrentProgram(6);
+            if(pos==change) p.setCurrentProgram(target);
             int n=std::min(128,end-pos);if(pos<change && pos+n>change) n=change-pos;
             for(auto* b:{&actual,&previous,&next}) b->setSize(2,n,false,false,true);
             next.clear();
@@ -1124,9 +1132,27 @@ static void check_spillover() {
         std::cout<<"Spillover "<<seconds<<"s: old tail + silent new algorithm match independent reference, maximum error="<<worst<<'\n';
     }
     for(int rate:{44100,48000,96000}) {
-        const auto catalog=spillover_catalog(rate,128);
-        require(catalog==spillover_catalog(rate,511) && catalog==spillover_catalog(rate,20000),
-                "Spillover across all 28 programs depends on host block size");
+        const auto catalog=spillover_catalog(rate,128,original_only);
+        require(catalog==spillover_catalog(rate,511,original_only) && catalog==spillover_catalog(rate,20000,original_only),
+                "Spillover catalog depends on host block size");
+        if(original_only) {
+            for(int from=0;from<6;++from)for(int to=0;to<6;++to)if(from!=to) {
+                const auto a=spillover_render(rate,128,from,to,false);
+                require(a==spillover_render(rate,511,from,to,false) && a==spillover_render(rate,20000,from,to,true),
+                        "Original-224 Spillover depends on host blocks or low latency");
+            }
+            const auto rapid=spillover_render(rate,128,2,1,false,true,false,false,1,true);
+            require(rapid==spillover_render(rate,511,2,1,false,true,false,false,1,true) &&
+                    rapid==spillover_render(rate,20000,2,1,false,true,false,false,1,true),"Original rapid retirement depends on block size");
+            const auto disabled=spillover_render(rate,128,1,2,false,false,true);
+            require(disabled==spillover_render(rate,511,1,2,false,false,true),"Original disable depends on block size");
+            for(bool low:{false,true})for(bool mono:{false,true}) {
+                const auto dry=spillover_render(rate,128,2,1,low,true,false,mono,0,true);
+                require(dry==spillover_render(rate,128,5,4,low,true,false,mono,0,true),"Original Spillover duplicated/reset dry");
+            }
+            std::cout<<"Original-224 Spillover "<<rate<<" Hz: 30 directed pairs, 128/511/20000 blocks, rapid/disable, mono/stereo dry and low latency pass\n";
+            continue;
+        }
         for(auto pair:{std::pair{2,1},std::pair{6,7},std::pair{2,6},std::pair{6,2},std::pair{27,2},std::pair{2,27}}) {
             auto a=spillover_render(rate,128,pair.first,pair.second,false);
             require(a==spillover_render(rate,511,pair.first,pair.second,false) &&
@@ -1145,6 +1171,46 @@ static void check_spillover() {
     }
     require(allocations==0 && releases==0,"Spillover audio allocated or released memory");
 }
+static void benchmark_spillover_224() {
+    struct Measurement {double seconds=0,first_block_ms=0;};
+    auto measure=[](int from,bool spill) {
+        NativeHallProcessor p;set(p,"spillover",spill?1.f:0.f);set(p,"spillover_time",10);p.setCurrentProgram(from);
+        p.setPlayConfigDetails(2,2,48000,128);p.prepareToPlay(48000,128);
+        juce::AudioBuffer<float> buffer(2,128);juce::MidiBuffer midi;unsigned frame=0;
+        double processing_seconds=0,last_block_seconds=0;
+        auto render=[&] {
+            for(int i=0;i<128;++i,++frame) {
+                buffer.setSample(0,i,.05f*std::sin(frame*.117f));buffer.setSample(1,i,.04f*std::cos(frame*.093f));
+            }
+            audio=true;const auto begin=std::chrono::steady_clock::now();p.processBlock(buffer,midi);
+            last_block_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count();audio=false;
+            processing_seconds+=last_block_seconds;
+        };
+        for(unsigned block=0;block<96;++block)render();
+        p.setCurrentProgram((from+1)%6);
+        render();const double first_ms=last_block_seconds*1000;
+        for(unsigned block=0;block<24;++block)render();
+        processing_seconds=0;
+        for(unsigned block=0;block<384;++block)render();
+        return Measurement{processing_seconds,first_ms};
+    };
+    double single_total=0,overlap_total=0;
+    std::cout<<"from,to,single_median_s,overlap_median_s,ratio,single_audio_percent,overlap_audio_percent,max_first_overlap_block_ms\n";
+    for(int from=0;from<6;++from) {
+        std::array<double,5> single{},overlap{};double first_max=0;
+        for(unsigned repeat=0;repeat<5;++repeat) {
+            auto a=[&]{single[repeat]=measure(from,false).seconds;};
+            auto b=[&]{auto m=measure(from,true);overlap[repeat]=m.seconds;first_max=std::max(first_max,m.first_block_ms);};
+            if(repeat&1){b();a();}else{a();b();}
+        }
+        std::sort(single.begin(),single.end());std::sort(overlap.begin(),overlap.end());
+        single_total+=single[2];overlap_total+=overlap[2];
+        std::cout<<from<<','<<(from+1)%6<<','<<single[2]<<','<<overlap[2]<<','<<overlap[2]/single[2]<<','
+                 <<single[2]/1.024*100<<','<<overlap[2]/1.024*100<<','<<first_max<<'\n';
+    }
+    require(allocations==0 && releases==0,"Spillover benchmark callback allocated or released memory");
+    std::cout<<"Spillover summed median overlap/single ratio="<<overlap_total/single_total<<"; callback new=0, delete=0\n";
+}
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
     // Offline fixtures belong only to an isolated test cache, never to the
@@ -1153,7 +1219,7 @@ int main(int argc,char** argv) {
         juce::File folder;
         ~TestCache() {if(folder.isDirectory()) folder.deleteRecursively();}
     } test_cache;
-    if((argc==3 && std::string(argv[1])=="--bank") || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check" || std::string(argv[1])=="--spillover-check" || std::string(argv[1])=="--quick-check" || std::string(argv[1])=="--focus-check"))) {
+    if((argc==3 && (std::string(argv[1])=="--bank" || std::string(argv[1])=="--spillover-224-check" || std::string(argv[1])=="--spillover-224-cpu")) || (argc==4 && (std::string(argv[1])=="--banks" || std::string(argv[1])=="--preset-check" || std::string(argv[1])=="--limits-check" || std::string(argv[1])=="--spillover-check" || std::string(argv[1])=="--quick-check" || std::string(argv[1])=="--focus-check"))) {
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getNonexistentChildFile("cineol-plugin-check",{},false);
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");
@@ -1162,6 +1228,8 @@ int main(int argc,char** argv) {
         if(argc==4) require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed XL bank");
     }
     if(argc==4 && std::string(argv[1])=="--focus-check") {check_editor_window_focus();return 0;}
+    if(argc==3 && std::string(argv[1])=="--spillover-224-check") {check_spillover(true);return 0;}
+    if(argc==3 && std::string(argv[1])=="--spillover-224-cpu") {benchmark_spillover_224();return 0;}
     if(argc==4 && std::string(argv[1])=="--quick-check") {check_quick_presets();check_preset_browser();return 0;}
     if(argc==4 && std::string(argv[1])=="--spillover-check") {
         check_state_and_ranges();check_editor();check_spillover();return 0;

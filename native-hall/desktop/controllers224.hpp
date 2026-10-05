@@ -20,9 +20,15 @@ public:
     void select_program(unsigned program) noexcept {
         if(!bank_)return;
         const auto state=decay_state();
+        const auto modulation=modulation_state();
         program_=std::min(program,program_count-1);Hall::select_program(program_);
         // The firmware's level/history dividers live outside the program.
         restore_decay(state);
+        // The ROM program compiler resets its random-table index and tap
+        // descriptors, but leaves these three free-running counters alone.
+        auto next=modulation_state();next.divider=modulation.divider;
+        next.random_divider=modulation.random_divider;next.hold=modulation.hold;
+        restore_modulation(next);
     }
     void set_controls(const Controls& controls) noexcept {
         controls_=controls;Hall::set_controls(controls);

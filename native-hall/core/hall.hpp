@@ -10,6 +10,15 @@ struct Controls {
     bool mode_enhancement=true, decay_optimization=true;
 };
 
+// In-memory diagnostic snapshot only; not a bank, plugin parameter or session ABI.
+struct ModulationState {
+    std::array<uint8_t,10> descriptors{};
+    std::array<int8_t,4> coefficients{};
+    std::array<uint16_t,4> offsets{};
+    uint16_t index=0;
+    uint8_t divider=1,random_divider=8,hold=1;
+};
+
 // Fixed native networks for the original 224 v4.4; legacy Hall profiles
 // remain supported. program_networks.inc has no WCS interpreter. Coefficient and delay
 // address data vary. The original ARU's three-stage rounding/saturation order
@@ -44,6 +53,8 @@ public:
     // Diagnostic/control-rate entry, also usable by an external deterministic
     // control scheduler. Normal process() supplies the prototype's clock.
     void advance_modulation() noexcept {update_modulation();}
+    ModulationState modulation_state() const noexcept;
+    void restore_modulation(const ModulationState&) noexcept;
     const DecayState& decay_state() const noexcept {return decay_.state();}
     void restore_decay(const DecayState& state) noexcept {
         decay_.reset(state);level_clock_=0;set_loop_diffusion(state.amount);
