@@ -6,6 +6,10 @@ checkpoint `ce45a03`. Reference: Reflexion
 `f68ea1d069fef4a5663201693bfdfa1c579ffd69`, original v4.4.
 Status: cause-isolation checkpoint; full sonic acceptance remains open.
 
+The later [native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md) adds the
+stable-control event clock and thirty paired normal-startup sound fixtures.
+The phase/floor limitations identified here still apply.
+
 ## Method and result
 
 `native_224_sound_compare` checks all five ROM hashes and renders a selected

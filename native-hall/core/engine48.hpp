@@ -127,7 +127,8 @@ public:
             for(unsigned c=0;c<2;++c) {
                 int16_t clean=Input::adc(native[c]),bare=adc(raw[c],false);
                 words[c]=int16_t(std::lround(bare+analog_blend_*(float(clean)-bare)));
-                levels|=Input::detectors(raw[c]+analog_blend_*(native[c]-raw[c]));
+                levels|=Input::detectors(raw[c]+analog_blend_*(native[c]-raw[c]))
+                    <<(Core::separate_headroom?8*c:0);
             }
             int16_t four[4];hall_.process(words[0],words[1],four,levels);
             float samples[4];for(unsigned c=0;c<4;++c) samples[c]=raw_hold_[c]=dac(four[c])/32768.0f;

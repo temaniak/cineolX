@@ -21,9 +21,10 @@ public:
         advance(cycle+6);
         unsigned duration=0;
         for(unsigned n=0;n<100;++n) {
+            skip_stable(next_+100);
             const auto grant=next_;
             const bool allowed=!pair_ && !previous_protected_;
-            if(allowed)displaced_=grant+2;
+            if(allowed)displaced_=grant+1;
             fetch();
             if(allowed){duration=unsigned(grant+4-cycle);break;}
         }
@@ -35,6 +36,22 @@ private:
         if(network_==2)return row!=94;
         return row!=46 && row!=95;
     }
+    void skip_stable(uint64_t limit) noexcept {
+        // Protected rows with unchanged reset/protect inputs do not change
+        // the pair flip-flop. Jump to the next falling protect/reset edge or
+        // displaced fetch; rising edges are handled by fetch() immediately
+        // after their unprotected predecessor. This avoids a row-by-row
+        // wait loop without changing the grant clock.
+        if(!previous_protected_ || previous_reset_ || !reset_high_)return;
+        const unsigned row=unsigned((next_-origin_)%100);
+        unsigned at=99;
+        if(network_==1)at=row<=46?46:row<=69?69:row<=93?93:99;
+        else if(network_==2)at=row<=94?94:99;
+        else at=row<=46?46:row<=95?95:99;
+        uint64_t target=next_+at-row;
+        if(displaced_>=next_)target=std::min(target,displaced_);
+        next_=std::min(target,limit);
+    }
     void advance(uint64_t cycle) noexcept {
         // A full unaffected pass resets the pair logic. Skip long quiet gaps
         // without iterating over the elapsed CPU states.
@@ -42,14 +59,17 @@ private:
             next_=cycle-(cycle-origin_)%100;
             pair_=false;previous_protected_=previous_reset_=reset_high_=true;
         }
-        while(next_<cycle)fetch();
+        while(next_<cycle) {
+            skip_stable(cycle);
+            if(next_<cycle)fetch();
+        }
     }
     void fetch() noexcept {
         const unsigned row=unsigned((next_-origin_)%100);
         // The write window is [grant+1, grant+2), so only grant+1's fetch
         // is displaced. Operand-register holds last longer and belong to
         // the DSP boundary model, not this CPU wait clock.
-        const bool displaced=displaced_ && next_+1==displaced_;
+        const bool displaced=displaced_ && next_==displaced_;
         const bool protect=!displaced && protected_row(row);
         if(!previous_protected_ && protect)pair_=reset_high_?!pair_:false;
         if(reset_high_ && previous_reset_)pair_=false;

@@ -9,6 +9,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <vector>
 static bool tracking=false;static unsigned allocations=0;
 void* operator new(size_t n){if(tracking)++allocations;if(void* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
 void operator delete(void* p) noexcept {std::free(p);}
@@ -33,6 +34,47 @@ static void check_xreg(const char* prefix) {
         assert(count==2);
     }
     std::cout<<"Six independent WCS images: XREG holds input at rows 0/50\n";
+}
+static void check_clock_adapter(const ProgramBank& bank) {
+    auto actual=std::make_unique<DesktopHall>();auto expected=std::make_unique<Hall>();
+    const auto input=[](unsigned channel,uint64_t pass){return int16_t(uint16_t(pass*(channel?31:71)));};
+    const auto mask=[](unsigned channel,uint64_t pass){return unsigned((pass/(channel?11:7))%32);};
+    for(unsigned program=0;program<program_count;++program) {
+        actual->prepare(bank,program);expected->prepare(bank,program);expected->restore_decay(actual->decay_state());
+        ControlScan224 clock;clock.reset(program_networks[program]);
+        std::array<uint64_t,2> last{};Controls controls;controls.predelay_ms=predelay_minima[program];
+        actual->set_controls(controls);expected->set_controls(controls);
+        tracking=true;
+        for(uint64_t pass=0;pass<60000;++pass) {
+            if(pass%2000==0) {
+                controls.mode_enhancement=!controls.mode_enhancement;
+                controls.decay_optimization=!controls.decay_optimization;
+                actual->set_controls(controls);expected->set_controls(controls);
+            }
+            clock.run_until(pass*100,bank,program,*expected,controls,
+                [&](uint64_t t){
+                    if(t<3)return int16_t(0);
+                    const unsigned channel=(t-3)%100>=50;
+                    return input(channel,(t-3)/100);
+                },[&](unsigned channel,uint64_t t){
+                    // Independent held-register fixture: right captures at
+                    // row 4; left at row 54 supplies the next pass's word.
+                    const uint64_t phase=channel?6:56;
+                    uint64_t capture=phase;
+                    if(capture<last[channel])capture+=((last[channel]-capture+99)/100)*100;
+                    unsigned held=0;
+                    for(;capture<=t;capture+=100)held|=mask(channel,capture/100+(channel?0:1));
+                    last[channel]=t;return held;
+                },[](ControlScan224::Event,uint64_t,uint16_t){});
+            int16_t out[4];actual->process(input(0,pass),input(1,pass),out,mask(0,pass)|(mask(1,pass)<<8));
+            const auto a=actual->modulation_state(),b=expected->modulation_state();
+            assert(a.descriptors==b.descriptors && a.coefficients==b.coefficients && a.offsets==b.offsets);
+            assert(a.index==b.index && a.divider==b.divider && a.random_divider==b.random_divider && a.hold==b.hold);
+            assert(!std::memcmp(&actual->decay_state(),&expected->decay_state(),sizeof(DecayState)));
+        }
+        tracking=false;
+    }
+    std::cout<<"360000 streamed passes: sparse byte reads, separate held detectors and mode changes match native event clock\n";
 }
 int main(int argc,char** argv) {
     if(argc==2)check_xreg(argv[1]);else assert(argc==1);
@@ -89,5 +131,10 @@ int main(int argc,char** argv) {
     assert(hall->decay_state().held==31);
     for(unsigned n=0;n<1200;++n)hall->process(2048,2048,out);
     assert(hall->decay_state().held==191);
+    if(argc==2) {
+        std::ifstream file(argv[1],std::ios::binary);std::vector<char> bytes((std::istreambuf_iterator<char>(file)),{});
+        assert(read_bank(bytes.data(),bytes.size(),*bank));check_clock_adapter(*bank);
+    }
+    assert(allocations==0);
     std::cout<<"Startup, sparse transfer peaks, held comparators, program continuity and 1,080,000 control passes: allocations=0\n";
 }

@@ -6,11 +6,16 @@ AppleClang Release, strict FP. See [continuation record](SOUND_ACCURACY_HANDOFF.
 
 ## Status and scope
 
-The native modulation **procedure-duration and WCS-write timing model** is
-validated. The complete control-call scheduler is still open. The model is
-not connected to `DesktopHall::process`; application sound, CPU cost, state,
+The native modulation **procedure-duration and WCS-write timing model** was
+validated in this foundation checkpoint. At that point the complete control-call
+scheduler was still open. The model was not connected to `DesktopHall::process`;
+application sound, CPU cost, state,
 parameter identifiers and prepared-bank version remain unchanged by this
 checkpoint. No Daisy code or dependency checkout was modified.
+
+The subsequent [native scan checkpoint](NATIVE_CONTROL_SCAN_VALIDATION.md)
+integrates and validates the surrounding stable-control event clock, with its
+own sound/CPU/regression results. The local-oracle limits below still apply.
 
 The earlier [modulation check](MODULATION_VALIDATION.md) proved state evolution
 when native and ROM routines receive the same calls. This checkpoint proves

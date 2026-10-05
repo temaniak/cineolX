@@ -61,7 +61,7 @@ at matched call boundaries, not an identical runtime call schedule.
 
 ## Timing and initial phase
 
-The current desktop scheduler distributes 18 calls uniformly per panel scan.
+At this checkpoint the desktop scheduler distributed 18 calls uniformly per panel scan.
 The ROM has unequal intervals, conditional XREG reads, level-controller work
 and WCS bus waits. Constant-input cases differed from the bank's silent nominal
 rate by up to **3.17%** in the first run and **3.00%** in the repeat. These
@@ -89,7 +89,12 @@ derives the modulation procedure's instruction costs and individual WCS
 access waits. All 576 cases matched, including 238,967 complete call durations
 and 328,567 write boundaries. This local model receives actual entry clocks
 and states in its offline oracle; it does not replace the uniform scheduler
-or establish a new modulation-on sound result.
+or establish a new modulation-on sound result at that checkpoint.
+
+The later [native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md) documents
+the integrated event clock: 260,102 exact free-running scan events, separate
+input-byte/detector boundaries, normal-startup sound and CPU measurements.
+Startup/compiler phase and within-call audio coefficient application remain open.
 
 ## Reproduction
 

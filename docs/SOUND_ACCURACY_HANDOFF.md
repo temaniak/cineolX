@@ -32,13 +32,15 @@ read this record. Current checkpoint history:
 | `4a359f4` | Phase-aware all-six/Chamber residual measurements |
 | `484bcc3` | Dry/Wet, gain and overlap behavior report |
 | `2677d7c` | Final regression/CPU/Spillover results and current open work |
-| Native control-timing foundation checkpoint | Exact local modulation procedure/write timing model and portable oracle; full scheduler remains open |
+| `bdbc724` | Exact local modulation procedure/write timing model and portable oracle |
+| Native event-clock checkpoint | Stable-control scheduler integrated and ROM-validated; see the native scan report |
 Reflexion pin: `f68ea1d069fef4a5663201693bfdfa1c579ffd69`.
 JUCE pin: `8.0.14`. Inspect `dependencies.json` and build paths before changes.
 
-The user's original ROM files are always under `C:\Users\User\Desktop\lex`,
-in `224 v4_4` on this computer. Another computer needs its own private local
-path to the same supported ROM1–ROM5. Do not copy these assets into Git.
+The user's original Windows ROM location is `C:\Users\User\Desktop\lex`,
+under `224 v4_4`. The macOS continuation used a separate private local ROM
+directory. Another computer needs its own path to the same supported ROM1-ROM5.
+Do not copy these assets into Git.
 
 ## Completed starting point
 
@@ -65,7 +67,7 @@ See the reports for exact fixtures, exclusions and limitations.
 
 | Stage | Status | Required result/report |
 | --- | --- | --- |
-| 1. Modulation phase and scheduling | Counter correction and local timing model verified; exact scheduler still open | [Modulation checkpoint](MODULATION_VALIDATION.md): ROM step law exact; direct desktop switches retain three global counters. [Timing foundation](CONTROL_TIMING_VALIDATION.md): routine/write costs exact in 576 cases. Uniform nominal scheduling remains an approximation. |
+| 1. Modulation phase and scheduling | Stable-control scheduler integrated and verified; startup/compiler phase and within-call audio updates remain open | [Native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md): 260,102 free-running events exact, local timing oracles and desktop adapter passed. [Modulation checkpoint](MODULATION_VALIDATION.md): direct switches retain three global counters. |
 | 2. Remaining tails/frequency differences | Cause-isolation checkpoint complete; residuals retained | [Residual report](RESIDUAL_SOUND_VALIDATION.md): 18 all-six/mode runs plus four Chamber level/seed probes. Frozen phase and quiet floors matter; no compensating EQ. |
 | 3. Dry/Wet and Input Gain | Verified | [Gain/timing report](GAIN_TIMING_VALIDATION.md): six-program dry/mix, 24 gain cases; behavior retained. |
 | 4. Final regression/acceptance | Regression passed; full sonic acceptance open | [Regression checkpoint](FINAL_SOUND_VALIDATION.md): Windows builds, CPU +1.68% versus baseline, original-only Spillover verified separately. |
@@ -77,7 +79,8 @@ results, sonic/session effects and the next action. Keep this table current
 and create a Git checkpoint for each stage. Additional work may be needed if
 final verification establishes another meaningful defect.
 
-The current required next step is the native control scheduler. No blanket
+The current required next step is startup/program-load phase and within-call
+coefficient application. No blanket
 claim of identical modulation-on tails is supported. The normal-startup matrix
 must remain separate from offline aligned diagnostics. The user's Spillover
 setting adds two wet networks temporarily; isolate a single program for sound
@@ -98,25 +101,32 @@ check whether this leaves the descriptor phase consistent after depth/mode
 changes. ROM program loading resets its random index to 4; other dividers
 can retain their previous phase. Compare the whole state and event ordering.
 
-`DesktopHall` currently uses a uniform nominal scan clock: 18 modulation
-routine calls and nine transfer reads per level-controller call. Actual ROM
-instruction timing is state/signal dependent. Derive corrections from ROM
-traces or independently validated native laws, not fitted tail lengths.
+`DesktopHall` now uses a native event clock for prepared original banks:
+eighteen nonuniform modulation calls, nine transfer reads and a level-controller
+call. Timing follows independently validated state/signal-dependent laws and
+WCS grants. Legacy single-Hall profiles retain their nominal clock.
 Checked-in tools now provide this investigation: `native_224_modulation_check`,
 `native_224_sound_compare`, `script/analyze_sound.py` (NumPy only), and
 `script/benchmark_sound.py`. The sound tool renders normal native and a clearly
 labelled diagnostic aligned variant separately. ROM1–ROM5 are SHA-256 checked.
 No ignored diagnostic source is required on another computer.
 
-The next checkpoint adds `native_224_control_timing_check` and the native laws
+The foundation checkpoint added `native_224_control_timing_check` and the native laws
 in `desktop/control_timing224.hpp`. On macOS arm64, 576 cases checked 238,967
 complete calls and 328,567 WCS writes with zero instruction-cost, whole-call
 or per-write timing mismatches. See [timing foundation](CONTROL_TIMING_VALIDATION.md)
-for the initial bus-history exclusions and local-oracle limits. The model is
-not wired into the audio processor; plugin sound and CPU are unchanged by it.
-Continue by deriving the surrounding XREG/panel/level event timing and proving
-whole scans without repeatedly supplying actual call-entry clocks/states.
-Include level-controller writes in the shared WCS clock before runtime use.
+for the initial bus-history exclusions and local-oracle limits. That checkpoint
+did not change the audio processor. The subsequent
+[native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md) covers integration,
+11,242 exact local level calls, 260,102 exact free-running scan events,
+separate left/right held detectors, 360,000 adapter passes, thirty paired sound
+fixtures, CPU and processor/Spillover regression. Future scan events receive no
+actual call-entry clocks or states after their initial alignment.
+
+The normal modulation-on noise matrix improved mean absolute broad-band T20
+error from 4.84% to 4.54%, with uneven results across seeds/programs. Frozen
+startup phases and sparse accepted music fits still limit acceptance. No EQ
+or feedback retuning was added. Read the report before making another change.
 
 ## Building and checking
 

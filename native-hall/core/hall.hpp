@@ -26,6 +26,7 @@ struct ModulationState {
 class Hall {
 public:
     static constexpr int sample_rate=20480, delay_words=16384;
+    static constexpr bool separate_headroom=false;
     void prepare(const Profile& p) noexcept { bank_=nullptr;algorithm_=nullptr;profile_=&p;reset();set_controls(Controls{}); }
     void prepare(const ProgramBank& bank,unsigned program=2) noexcept {bank_=&bank;profile_=nullptr;select_program(program);}
     // Hard switch: reset the network and clear its fixed 32 KiB delay once.

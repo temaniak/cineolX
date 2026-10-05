@@ -5,12 +5,18 @@ Reflexion `f68ea1d069fef4a5663201693bfdfa1c579ffd69`. JUCE: 8.0.14.
 Scope: original-224 application/VST3/Standalone; no Daisy or XL sonic work.
 Implementation/test checkpoint: `ce45a03`.
 
+This report retains the earlier Windows regression checkpoint. The later
+[native scan report](NATIVE_CONTROL_SCAN_VALIDATION.md) documents the integrated
+stable-control clock and new macOS sound/CPU/processor/Spillover checks.
+
 ## Status
 
 The direct-switch counter correction and the current validation tooling pass
 regression. **The overall sound-accuracy objective is not yet complete.**
 Precise control scheduling and normal-startup modulation-on tail equivalence
-remain open; diagnostic alignment is not the shipped plugin. The preceding
+were open at this checkpoint; diagnostic alignment is not the shipped plugin.
+Stable-control scheduling has since been corrected and verified, while startup
+phase and within-call audio updates remain open. The preceding
 [modulation](MODULATION_VALIDATION.md), [residual](RESIDUAL_SOUND_VALIDATION.md)
 and [gain/timing](GAIN_TIMING_VALIDATION.md) reports distinguish these limits.
 
