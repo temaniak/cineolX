@@ -64,6 +64,10 @@ in the plugin; see [ROM requirements and first use](#rom-requirements-and-first-
 
 Primary repository: [temaniak/cineolX](https://github.com/temaniak/cineolX).
 
+See the [development roadmap](docs/ROADMAP.md) for the agreed future direction:
+native sound accuracy, desktop controls, creative algorithm tweaks and original
+algorithms in the same processing environment.
+
 ChatGPT was actively used during the creation of this project, assisting with
 code development, debugging, testing and documentation.
 
