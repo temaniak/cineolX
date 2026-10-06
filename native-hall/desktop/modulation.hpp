@@ -11,6 +11,9 @@ struct ModulationProfile {
     std::array<uint8_t,max_taps> rows{},caps{};
     std::array<std::array<bool,2>,max_taps> negative{};
     uint8_t flags=0,period=1,hold=32,step=4,mask=128;
+    // AB52 starts with a pointer into SBC ROM, not the NVS sequence. The
+    // first index advance at AD77..AD81 moves the pointer to 8000..8FFF.
+    uint8_t startup_byte=0;
     // Nominal controller calls per second, in tenths; measured offline.
     uint32_t rate_tenths=0;
     // The native v8.21 Chorus compiler: its lower half slows a four-unit
@@ -32,7 +35,9 @@ struct ModulationState {
     uint16_t index=0;
     uint8_t divider=1,random_divider=8,random_hold=1;
     std::array<uint8_t,ModulationProfile::max_taps> address_low{},phase{};
-    bool valid() const noexcept {return index<4096 && divider && random_divider && random_hold;}
+    bool startup_lookup=false;
+    bool valid() const noexcept {return index<4096 && divider && random_divider && random_hold &&
+        (!startup_lookup || index==59);}
 };
 // Native integer control law corresponding to the v8.21 AD5C..AE9B work loop.
 // Call at a control boundary, independently of the fixed DSP graph. No CPU,
@@ -46,11 +51,11 @@ public:
         auto& s=state_;
         if(--s.random_divider==0) {
             s.random_divider=8;
-            if(--s.random_hold==0) {s.random_hold=profile.hold;s.index=(s.index+1)&4095;}
+            if(--s.random_hold==0) {s.random_hold=profile.hold;s.index=(s.index+1)&4095;s.startup_lookup=false;}
         }
         if(--s.divider!=0) return;
         s.divider=profile.period;
-        uint8_t random=profile.sequence[s.index];
+        uint8_t random=s.startup_lookup?profile.startup_byte:profile.sequence[s.index];
         const unsigned count=profile.flags&15;
         for(unsigned i=0;i<count;++i) {
             const unsigned flags=profile.flags-i;
@@ -90,4 +95,6 @@ public:
 private:
     ModulationState state_{};
 };
+// Both additions occupy previous padding: preserve the v5 payload layout.
+static_assert(sizeof(ModulationProfile)==4168 && sizeof(ModulationState)==36);
 }

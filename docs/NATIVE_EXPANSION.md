@@ -427,3 +427,24 @@ their executable hashes matched the build, and installed AU validation passed.
 The user's existing v3 cache was preserved beside the new private v4 cache.
 The README screenshots show the actual updated editor. Listening in the host
 remains necessary to assess the musical behavior and hardware similarity.
+
+## XL sound baseline (October 5, 2026)
+
+The [XL sound-accuracy handoff](XL_SOUND_ACCURACY_HANDOFF.md) records the first
+independent full-path Concert Hall baseline: 16 fixtures, all eight toggle
+combinations, block-size repeatability and labelled fixed-WCS diagnostics.
+It establishes startup interpolation-state differences and mode-dependent
+firmware call rates. The subsequent [all-22 catalog validation](XL_CATALOG_VALIDATION.md)
+records individual graph/control/modulation/dynamics checks, the expanded sound
+matrix and a desktop CPU baseline. Production sound is unchanged; full XL sound
+acceptance and a paired CPU measurement of a proposed correction remain open.
+
+Subsequent [startup corrections](XL_SOUND_CORRECTIONS.md) and the
+[event DAC checkpoint](XL_DAC_VALIDATION.md) have independent failing-old and
+passing-current oracles. The DAC delivers repeated channel writes, with
+all-22 graph and dual-bank plugin regression. Its full-path sound/CPU evidence
+is mixed and recorded separately. The subsequent
+[ADC integration](XL_ADC_VALIDATION.md) passes independent all-22 input-policy,
+integer graph and dual-bank plugin checks, retaining mixed full-path sound
+measurements. Firmware scheduling, displaced rows, the expanded sound matrix
+and final host/listening acceptance remain open.

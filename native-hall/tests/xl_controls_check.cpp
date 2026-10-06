@@ -28,7 +28,7 @@ static void check_static(Engine& engine,Machine& machine,LarcOperator& op,const 
         for(const auto& slot:data.controls.slots) if(slot.cell==cell && static_kind(slot.kind) && slot.groups && (slot.group[0].count || (slot.kind==ControlKind::definition && data.controls.feedback.count))) active=true;
         if(!active) continue;
         for(unsigned raw:{2u,66u,130u,250u}) {
-            result=machine.run_task([&]()->Task<void>{co_await op.moveSlider(int(page+1),slider,raw);co_await machine.sleep(0.1);});
+            result=machine.run_task([&]{return xl_test::move_slider(machine,op,page+1,slider,raw,0.1);});
             require(!result.failed,"control fixture failed");
             NetworkSettings<128> predicted;
             for(unsigned row=0;row<info.rows;++row) {
@@ -96,7 +96,7 @@ static void check_size(Engine& engine,Machine& machine,LarcOperator& op,const Ba
     for(unsigned page=0;page<data.page_count;++page) for(unsigned slider=0;slider<6;++slider) {
         if(std::strncmp(data.pages[page].names[slider].data(),"SIZE",4)!=0) continue;
         for(unsigned raw:{2u,66u,130u,250u}) {
-            result=machine.run_task([&]()->Task<void>{co_await op.moveSlider(int(page+1),slider,raw);co_await machine.sleep(1);});
+            result=machine.run_task([&]{return xl_test::move_slider(machine,op,page+1,slider,raw,1);});
             require(!result.failed,"Size fixture failed");
             std::array<uint8_t,48> values;std::copy_n(host.memory.begin()+0x3ca3,values.size(),values.begin());
             const auto layout=data.controls.layout(values);

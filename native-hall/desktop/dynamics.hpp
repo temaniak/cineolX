@@ -31,6 +31,9 @@ public:
         const float peak=std::max(std::abs(left),std::abs(right));
         constexpr float thresholds[]={0.056f,0.112f,0.224f,0.448f,1.0f};
         uint8_t bits=0;for(unsigned i=0;i<5;++i) if(peak>=thresholds[i]) bits|=uint8_t(1u<<i);
+        observe_detectors(bits,transfer);
+    }
+    void observe_detectors(unsigned bits,int16_t transfer) noexcept {
         // The SBC's input bus reverses the five headroom bits.
         const uint8_t reversed=uint8_t((bits&1)<<4|(bits&2)<<2|(bits&4)|(bits&8)>>2|(bits&16)>>4);
         detectors_|=reversed;fast_detectors_|=reversed;

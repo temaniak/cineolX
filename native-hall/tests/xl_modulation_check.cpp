@@ -30,7 +30,7 @@ template<cineol::xl::Graph graph> static void check_modulation(Engine& engine,Ma
     constexpr auto info=cineol::xl::graph_info(graph);
     auto result=machine.run_task([&]{return enable_modulation(machine,op,info.bank,info.program);});
     require(!result.failed,"modulation preparation failed");
-    PagesReading pages;result=machine.run_task([&]()->Task<void>{co_await op.readPages(pages);});
+    PagesReading pages;result=machine.run_task([&]{return xl_test::read_pages(op,pages);});
     require(!result.failed,"modulation page metadata failed");
     unsigned chorus_page=0,chorus_slot=0,chorus_column=0;
     for(unsigned p=0;p<unsigned(pages.count);++p) for(unsigned slot=0;slot<6;++slot)

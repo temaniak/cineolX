@@ -2,9 +2,20 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
+#include <type_traits>
 #include "modulation.hpp"
 #include "graphs.hpp"
 #include "diffusion.hpp"
+
+// Keep the row-emission adapter transparent to the optimizer. Outlining this
+// small proxy doubled Resonant Chords' calls per pass on AppleClang 21.
+#if defined(_MSC_VER)
+#define CINEOL_XL_ROW_PROXY_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define CINEOL_XL_ROW_PROXY_INLINE inline __attribute__((always_inline))
+#else
+#define CINEOL_XL_ROW_PROXY_INLINE inline
+#endif
 
 namespace cineol::xl {
 // Prepared control data, deliberately separate from the native graph. This
@@ -28,7 +39,7 @@ public:
     static constexpr unsigned delay_words=65536;
     bool prepare(const Settings& settings) noexcept {
         if(!settings.valid()) return false;
-        settings_=base_settings_=settings;modulation_enabled_=false;initial_modulation_={};reset();return true;
+        settings_=base_settings_=compiler_settings_=settings;modulation_enabled_=false;initial_modulation_={};reset();return true;
     }
     // Updating coefficients/addresses retains the tail. A program/firmware
     // change must explicitly reset the instance instead.
@@ -37,9 +48,10 @@ public:
         settings_=base_settings_=settings;return true;
     }
     void set_controls(Settings settings) noexcept {
+        compiler_settings_=settings;
         // A coefficient update preserves the current interpolation position.
-        // Only Size replaces the upper address bits; phase belongs to the
-        // modulation controller and must not jump back to its factory state.
+        // Ordinary controls keep the running tap coefficients/low addresses.
+        // The physical Mod/Size compiler edge explicitly restores them below.
         const unsigned taps=modulation_.flags&15;
         for(unsigned i=0;i<taps;++i) for(unsigned pair=0;pair<2;++pair) {
             const unsigned row=modulation_.rows[i]+pair;
@@ -55,9 +67,27 @@ public:
     }
     const ModulationState& modulation_state() const noexcept {return modulator_.state();}
     void set_chorus(uint8_t raw) noexcept {modulation_.set_chorus(raw);}
-    void enable_modulation(bool enabled) noexcept {modulation_enabled_=enabled;}
+    void recompile_modulation() noexcept {
+        // AB52 resets the sequence index, and the program compiler restores
+        // the descriptors and WCS pairs. AD5C's three counters survive the
+        // physical key/Size edge; delay memory and DSP registers survive too.
+        auto state=modulator_.state();state.index=initial_modulation_.index;
+        state.startup_lookup=initial_modulation_.startup_lookup;
+        state.address_low=initial_modulation_.address_low;state.phase=initial_modulation_.phase;
+        modulator_.reset(state);
+        for(unsigned i=0;i<(modulation_.flags&15);++i) for(unsigned pair=0;pair<2;++pair) {
+            const unsigned row=modulation_.rows[i]+pair;
+            settings_.coefficients[row]=compiler_settings_.coefficients[row];
+            settings_.offsets[row]=compiler_settings_.offsets[row];
+        }
+    }
+    void enable_modulation(bool enabled) noexcept {
+        if(enabled!=modulation_enabled_) recompile_modulation();
+        modulation_enabled_=enabled;
+    }
     void set_diffusion(const DiffusionProfile& profile,uint8_t index) noexcept {
         profile.apply(settings_,index,0,0);profile.apply(base_settings_,index,0,0);
+        profile.apply(compiler_settings_,index,0,0);
     }
     const Settings& settings() const noexcept {return settings_;}
     void reset() noexcept {
@@ -69,9 +99,17 @@ public:
         modulation_clock_=0;modulator_.reset(initial_modulation_);
     }
     void process(int16_t left,int16_t right,int16_t outputs[4]) noexcept {
-        if(first_) first_=false;else ++position_;
-        #include "native_graph_dispatch.inc"
+        NoOutput emit;process(left,right,outputs,emit);
+    }
+    template<class Emit> void process(int16_t left,int16_t right,int16_t outputs[4],Emit&& emit) noexcept {
+        process_stream(left,right,emit);
         std::copy(output_.begin(),output_.end(),outputs);
+    }
+    // The event-DAC path consumes every row's bus word; its final four-word
+    // copy is unnecessary. Keep the ordinary output API for offline checks.
+    template<class Emit> void process_stream(int16_t left,int16_t right,Emit&& emit) noexcept {
+        if(first_) first_=false;else ++position_;
+        GraphExecutor<std::remove_reference_t<Emit>>{*this,emit}.run(left,right);
         if(modulation_enabled_) {
             modulation_clock_+=modulation_.rate_tenths*rate_denominator;
             if(modulation_clock_>=rate_numerator*10) {
@@ -86,6 +124,18 @@ public:
     void set_control_input(int16_t value) noexcept {xreg_from_control_=value;}
     uint64_t saturation_count() const noexcept {return saturations_;}
 private:
+    struct NoOutput {template<unsigned Row,unsigned Channels> void operator()(int16_t) const noexcept {}};
+    template<class Emit> struct GraphExecutor {
+        Network& network;Emit& emit;
+        void run(int16_t left,int16_t right) noexcept {
+            #include "native_graph_dispatch.inc"
+        }
+        template<unsigned Row,unsigned Op,unsigned RA,unsigned WA,bool Transfer,bool Zero,unsigned Outputs,bool Shift,bool WriteX=false>
+        CINEOL_XL_ROW_PROXY_INLINE void node(int16_t input=0) noexcept {
+            const auto bus=network.template node<Row,Op,RA,WA,Transfer,Zero,Outputs,Shift,WriteX>(input);
+            if constexpr(Outputs) emit.template operator()<Row,Outputs>(bus);
+        }
+    };
     int32_t sum() noexcept {
         const int32_t value=acc_+partial_;
         const int32_t bounded=std::clamp(value,-262144,262143);
@@ -100,7 +150,7 @@ private:
         acc_=zero?0:added;
     }
     template<unsigned Row,unsigned Op,unsigned RA,unsigned WA,bool Transfer,bool Zero,unsigned Outputs,bool Shift,bool WriteX=false>
-    inline void node(int16_t input=0) noexcept {
+    inline int16_t node(int16_t input=0) noexcept {
         edge((previous_magnitude_>>2)&3,previous_negative_,false,0,false);
         int16_t bus=0;
         const uint16_t address=uint16_t(position_-settings_.offsets[Row]);
@@ -118,8 +168,9 @@ private:
         const unsigned magnitude=unsigned(coefficient<0?-coefficient:coefficient);
         edge((magnitude>>4)&3,coefficient<0,false,0,Zero);
         previous_magnitude_=magnitude;previous_negative_=coefficient<0;
+        return bus;
     }
-    Settings settings_{},base_settings_{};
+    Settings settings_{},base_settings_{},compiler_settings_{};
     ModulationProfile modulation_{};
     ModulationState initial_modulation_{};
     Modulator modulator_;
@@ -137,3 +188,4 @@ private:
 using Concert=Network<Graph::concert>;
 using ConcertSettings=Concert::Settings;
 } // namespace cineol::xl
+#undef CINEOL_XL_ROW_PROXY_INLINE

@@ -1,6 +1,7 @@
 #pragma once
 #include "concert.hpp"
-#include "analog_xl48.hpp"
+#include "input_xl48.hpp"
+#include "output_xl48.hpp"
 #include "dynamics.hpp"
 #include "../core/engine48.hpp"
 #include <numeric>
@@ -16,17 +17,15 @@ public:
     static constexpr int sample_rate=48000;
     static constexpr unsigned divisor=std::gcd(640u,9*Core::rows);
     static constexpr unsigned down_num=640/divisor,down_den=9*Core::rows/divisor;
-    // Existing 64/32-tap design: 32 host + 16 native samples. Align dry to
-    // the rounded integer host delay for this graph's own internal clock.
+    // Preserve the existing graph-specific host delay. Output event/circuit
+    // sampling includes explicit compatibility transport after its captures.
     static constexpr int latency_samples=int(32+16.0*down_den/down_num+0.5);
     bool prepare(const Settings& settings) noexcept {
         if(!concert_.prepare(settings)) return false;
-        down_.prepare();up_.prepare();
-        for(auto& filter:input_) filter.prepare(true);
-        for(auto& filter:output_) filter.prepare(false);
-        fifo_.fill({});dry_.fill({});raw_delay_.fill({});raw_hold_.fill(0);
+        input_.prepare();output_.prepare();
+        dry_.fill({});raw_delay_.fill({});
         control_profile_=nullptr;
-        read_=write_=position_=0;gain_=gain_target_=mix_=mix_target_=analog_=analog_target_=1;
+        position_=0;gain_=gain_target_=mix_=mix_target_=analog_=analog_target_=1;
         left_=0;right_=2;wet_fade_=1;return true;
     }
     bool set_settings(const Settings& settings) noexcept {return concert_.set_settings(settings);}
@@ -35,8 +34,8 @@ public:
     bool activate(const Settings& settings) noexcept {
         if(!concert_.prepare(settings)) return false;
         control_profile_=nullptr;
-        down_.reset();up_.reset();for(auto& f:input_) f.reset();for(auto& f:output_) f.reset();
-        fifo_.fill({});dry_.fill({});raw_delay_.fill({});raw_hold_.fill(0);read_=write_=position_=0;wet_fade_=0;
+        input_.reset();output_.reset();
+        dry_.fill({});raw_delay_.fill({});position_=0;wet_fade_=0;
         return true;
     }
     void set_controls(const Settings& settings) noexcept {concert_.set_controls(settings);}
@@ -45,6 +44,8 @@ public:
     }
     void set_native_controls(const Settings& base,const ControlProfile& controls,const std::array<uint8_t,48>& raw,
         bool optimization) noexcept {
+        const bool rebuild_size=controls.size.enabled && (!control_profile_ ||
+            raw[43]!=control_values_[43] || raw[44]!=control_values_[44]);
         const bool dynamic=(raw[42]&1)!=0;
         bool update_decay=control_profile_!=&controls || dynamic!=dynamic_enabled_;
         for(unsigned cell:{0u,1u,6u,7u,12u,13u,43u,44u}) update_decay|=raw[cell]!=control_values_[cell];
@@ -52,6 +53,7 @@ public:
         dynamic_enabled_=dynamic;optimization_enabled_=optimization;
         dynamics_.parameters(dynamics_profile_,controls,raw,dynamic_enabled_,optimization,update_decay);
         compile_dynamics();
+        if(rebuild_size) concert_.recompile_modulation();
     }
     const DynamicsState& dynamics_state() const noexcept {return dynamics_.state();}
     void set_chorus(uint8_t raw) noexcept {concert_.set_chorus(raw);}
@@ -71,18 +73,18 @@ public:
         analog_+=0.002f*(analog_target_-analog_);
         if(std::abs(mix_-mix_target_)<1e-5f) mix_=mix_target_;
         if(std::abs(analog_-analog_target_)<1e-5f) analog_=analog_target_;
-        const float raw[2]={left*gain_,right*gain_};float filtered[2];
-        for(unsigned c=0;c<2;++c) filtered[c]=input_[c].process(raw[c]);
-        down_.process(filtered,[&](const float* input) {
+        const float raw[2]={left*gain_,right*gain_};
+        input_.process(raw,[&](const InputFrame& input) {
             int16_t words[2];
             for(unsigned c=0;c<2;++c) {
-                const auto clean=native_hall::Engine48::adc(input[c]);
-                const auto bare=native_hall::Engine48::adc(raw[c],false);
+                const auto clean=input.clean[c],bare=input.bare[c];
                 words[c]=int16_t(std::lround(bare+analog_*(float(clean)-bare)));
             }
-            int16_t output[4];concert_.process(words[0],words[1],output);
+            concert_.process_stream(words[0],words[1],[&]<unsigned Row,unsigned Channels>(int16_t bus) noexcept {
+                output_.template request<Row,Channels>(native_hall::Engine48::dac(bus)/32768.0f);
+            });
             if(control_profile_ && dynamics_profile_.enabled) {
-                dynamics_.observe(input[0],input[1],concert_.control_output());
+                dynamics_.observe_detectors(input.detectors,concert_.control_output());
                 bool changed=false;
                 fast_clock_+=dynamics_profile_.fast_rate_tenths*Core::rate_denominator;
                 if(fast_clock_>=Core::rate_numerator*10) {
@@ -96,17 +98,11 @@ public:
                 }
                 if(changed) compile_dynamics();
             }
-            float samples[4];
-            for(unsigned c=0;c<4;++c) samples[c]=raw_hold_[c]=native_hall::Engine48::dac(output[c])/32768.0f;
-            up_.process(samples,[&](const float* upsampled) {
-                std::array<float,4> frame{};
-                for(unsigned c=0;c<4;++c) frame[c]=output_[c].process(upsampled[c]);
-                fifo_[write_++%fifo_.size()]=frame;
-            });
+            output_.finish_pass();
         });
-        std::array<float,4> wet{};if(read_<write_) wet=fifo_[read_++%fifo_.size()];
-        raw_delay_[position_%raw_delay_.size()]=raw_hold_;
-        const auto& bare=raw_delay_[(position_+raw_delay_.size()-latency_samples)%raw_delay_.size()];
+        auto wet=output_.sample((1u<<left_)|(1u<<right_));
+        raw_delay_[position_%raw_delay_.size()]=output_.raw_sample();
+        const auto& bare=raw_delay_[(position_+raw_delay_.size()-Output48<graph>::raw_delay_samples)%raw_delay_.size()];
         wet_fade_=std::min(1.0f,wet_fade_+1.0f/128);
         for(unsigned c=0;c<4;++c) wet[c]=(bare[c]+analog_*(wet[c]-bare[c]))*wet_fade_;
         dry_[position_%dry_.size()]={left,right};
@@ -133,15 +129,11 @@ private:
     uint32_t slow_clock_=0,fast_clock_=0;
     bool dynamic_enabled_=false,optimization_enabled_=false;
     Core concert_;
-    native_hall::RationalFilter<down_num,down_den,64,2> down_;
-    native_hall::RationalFilter<down_den,down_num,32,4> up_;
-    std::array<Analog48,2> input_;
-    std::array<Analog48,4> output_;
-    std::array<std::array<float,4>,16> fifo_{};
+    Input48<graph> input_;
+    Output48<graph> output_;
     std::array<std::array<float,2>,128> dry_{};
     std::array<std::array<float,4>,128> raw_delay_{};
-    std::array<float,4> raw_hold_{};
-    uint64_t read_=0,write_=0,position_=0;
+    uint64_t position_=0;
     float wet_fade_=1;
     float gain_=1,gain_target_=1,mix_=1,mix_target_=1,analog_=1,analog_target_=1;
     int left_=0,right_=2;

@@ -2,10 +2,28 @@
 
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
 the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
-preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.6**, with the metal-panel artwork, 21-mark fader scales
+preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.8**, with the metal-panel artwork, 21-mark fader scales
 and six page-bound faders beside permanent Dirt, Input and Mix faders.
 
-## What's new in 0.9.6
+## What's new in 0.9.8
+
+- More accurate original-224 input/output conversion, control-write timing and
+  modulation startup/retention; refined XL input/output circuit processing and
+  modulation initialization. Plugin and parameter identifiers remain stable.
+- Uniform fixed-size controller captions and values in the bottom display and
+  right-hand switches. Long captions are abbreviated, such as **HF BW**, while
+  full control names and automation metadata are preserved.
+- Compact **984 x 744** default editor, with resizing still available.
+- Faster offline ROM preparation. XL requires the corrected **version-5 cache**:
+  **re-import the complete original 224XL v8.21 ROM set once when upgrading from
+  an older XL cache**, including v0.9.6. Previous XL caches, the original-224
+  cache and sound presets are retained.
+- Full dual-bank plugin regression and strict local AU validation pass. XL
+  remains a preview: catalog measurements are complete, but listening review
+  of fourteen musical examples is still pending. Intermittent Logic input
+  unresponsiveness after returning from another window is not claimed fixed.
+
+## Earlier changes in 0.9.6
 
 - **Fixed rebuild:** ROM setup remains visible when adding XL to an imported
   original 224. Windows has separate file/ZIP and folder pickers. Import errors
@@ -49,12 +67,12 @@ Changes since the previous published release, 0.6.0:
 
 Spillover and quick presets are desktop features. This release's UI and transition
 changes leave Daisy processing unchanged. Plugin identifiers and existing
-parameter IDs remain stable. Version 0.9.6 adds the XL dynamics update above.
+parameter IDs remain stable. Version 0.9.8 adds the sound and editor refinements above.
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
-[0.9.6 release](https://github.com/temaniak/cineolX/releases/tag/v0.9.6).
-See the [release notes](docs/releases/v0.9.6.md) for installation, compatibility
+[0.9.8 release](https://github.com/temaniak/cineolX/releases/tag/v0.9.8).
+See the [release notes](docs/releases/v0.9.8.md) for installation, compatibility
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files
@@ -325,7 +343,7 @@ On macOS the resulting cache is stored at:
 
 ```text
 ~/Library/Application Support/Cineol-X 224/programs-v44-import-v1.bank224
-~/Library/Application Support/Cineol-X 224/programs-v821-native-v4.bankxl
+~/Library/Application Support/Cineol-X 224/programs-v821-native-v5.bankxl
 ```
 
 Later launches use that cache without asking for the original files. A corrupt
@@ -605,11 +623,12 @@ page and global setting as one complete audio update.
 
 ![Cineol-X 224 XL preview](docs/images/cineol-x-224-xl.png)
 
-Version 0.9.6 includes native XL dynamic decay/gating, stop controls
-and Decay Optimization. A new version-4 prepared XL bank stores their initial
-state and measured control clocks. **Import your original 224XL v8.21 ROM set
-once again when upgrading from the published 0.9.5 build**; the previous
-version-3 cache is retained and the original 224 v4.4 cache is unchanged.
+Version 0.9.8 retains native XL dynamic decay/gating, stop controls and Decay
+Optimization, and refines modulation startup and event-timed input/output
+conversion. The corrected version-5 XL bank stores the required startup state.
+**Import your original 224XL v8.21 ROM set once again when upgrading from an
+older XL cache, including the published 0.9.6 build**; previous XL caches are
+retained and the original 224 v4.4 cache is unchanged.
 Presets keep format 4 and existing DAW parameter IDs/indices. Daisy continues
 to use the original-224 engine.
 

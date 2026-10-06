@@ -91,6 +91,7 @@ struct ProgramData {
     static bool size_cell(unsigned cell) noexcept {return cell==43 || cell==44;}
     bool valid(Graph graph) const noexcept {
         const unsigned rows=graph_info(graph).rows;
+        if((modulation.flags&15) && (initial_modulation.index!=59 || !initial_modulation.startup_lookup)) return false;
         for(unsigned r=0;r<rows;++r) if(coefficients[r]<-63 || coefficients[r]>63) return false;
         if(!page_count || page_count>pages.size()) return false;
         for(unsigned p=0;p<page_count;++p) for(unsigned slot=0;slot<6;++slot) {
@@ -117,7 +118,10 @@ struct Bank {
 };
 struct BankHeader {
     char magic[8]={'B','X','L','8','2','1',0,0};
-    uint32_t version=4,size=sizeof(Bank),checksum=0;
+    // v5 retains the payload layout but stores the physical compiler's
+    // interpolation seed/taps. A v4 running-phase snapshot cannot reconstruct
+    // the program's original descriptors; re-import it outside audio.
+    uint32_t version=5,size=sizeof(Bank),checksum=0;
 };
 inline bool read_bank(const void* data,size_t size,Bank& result) noexcept {
     if(!data || size!=sizeof(BankHeader)+sizeof(Bank)) return false;

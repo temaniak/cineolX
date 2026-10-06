@@ -256,9 +256,21 @@ static Task<void> prepare_program_dynamics(Engine& engine,Machine& machine,LarcO
     initial.feedback_mid=uint8_t(host.memory[0x3e3e]<<3);initial.feedback_amount=initial.amount;
     if(!(!taps || (calls>100 && last>first))) co_await fail("XL modulation clock measurement failed.");
     modulation.rate_tenths=taps?uint32_t(std::lround(double(calls-1)*20480000.0/double(last-first))):1;
+    // A physical Mode Enhancement edge recompiles the program. The AD5C
+    // controller then leaves that compiler seed and its WCS taps unchanged
+    // while disabled. Keep the measured enabled clock above, but save this
+    // native startup state rather than the importer's arbitrary running phase.
+    bool modulation_off=false;
+    for(unsigned attempt=0;attempt<8 && !modulation_off;++attempt) {
+        co_await op.setToggle(1,false);co_await machine.sleep(0.2);
+        modulation_off=(host.memory[0x3ccd]&64)==0;
+    }
+    if(!modulation_off || word(0x3e47)!=59) co_await fail("XL compiler startup state did not settle.");
+    modulation.startup_byte=host.memory[word(0x3e47)];
     auto& state=data.initial_modulation;
     state.divider=host.memory[0x3e44];state.random_divider=host.memory[0x3e45];state.random_hold=host.memory[0x3e46];
     state.index=uint16_t(word(0x3e47)&4095);
+    state.startup_lookup=(word(0x3e47)&0x8000)==0;
     for(unsigned i=0;i<taps;++i) {state.address_low[i]=host.memory[descriptors+i*5+3];state.phase[i]=host.memory[descriptors+i*5+4];}
     if(!taps) {modulation.period=1;modulation.hold=32;modulation.step=4;state={};}
     ShapeCheck shape{*host.dsp,Graph(index)};shape.run();if(!(shape.valid)) co_await fail("Unsupported XL native graph variation.");

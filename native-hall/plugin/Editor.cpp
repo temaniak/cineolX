@@ -4,6 +4,8 @@
 
 namespace {
 constexpr int panel_width=1640,panel_height=1240;
+constexpr int minimum_editor_width=984,minimum_editor_height=744;
+constexpr float status_text_pitch=2.1f;
 constexpr int variable_fader_x=64,fader_step=164,global_fader_x=1098,global_fader_step=fader_step;
 constexpr int fader_y=370,fader_height=525;
 constexpr int display_global_x=global_fader_x-variable_fader_x,display_divider_x=display_global_x-30;
@@ -276,8 +278,8 @@ const char* glyph(char c) {
         default:return "00000000000000";
     }
 }
-void dotText(juce::Graphics& g,const juce::String& text,juce::Rectangle<float> area,float maxPitch,bool centred,juce::Colour colour=led_text) {
-    const float pitch=std::min({maxPitch,area.getHeight()/7,area.getWidth()/float(std::max(1,text.length()*6-1))});
+void dotText(juce::Graphics& g,const juce::String& text,juce::Rectangle<float> area,float maxPitch,bool centred,juce::Colour colour=led_text,bool fit=true) {
+    const float pitch=fit?std::min({maxPitch,area.getHeight()/7,area.getWidth()/float(std::max(1,text.length()*6-1))}):maxPitch;
     const float textWidth=float(text.length()*6-1)*pitch;
     float x=centred?area.getCentreX()-textWidth/2:area.getX();
     const float y=area.getCentreY()-3.5f*pitch;
@@ -296,6 +298,25 @@ void dotText(juce::Graphics& g,const juce::String& text,juce::Rectangle<float> a
         }
         x+=6*pitch;
     }
+}
+void statusText(juce::Graphics& g,const juce::String& text,juce::Rectangle<float> area,juce::Colour colour=led_text) {
+    // Controller names, values and right-hand switches share one fixed font.
+    // Abbreviate captions instead of silently shrinking individual strings.
+    dotText(g,text,area,status_text_pitch,true,colour,false);
+}
+juce::String statusCaption(const juce::String& name) {
+    auto text=name.toUpperCase().trim().replace("HF BANDWIDTH","HF BW").replace("HF BNDWTH","HF BW");
+    // Firmware captions include padding before L/R; preserve the channel suffix.
+    auto words=juce::StringArray::fromTokens(text," ",{});
+    words.removeEmptyStrings();text=words.joinIntoString(" ");
+    text=text.replace("REV STOP DLY","STOP DLY").replace("MID STOP DCY","MID STOP")
+        .replace("MID STPDCY","MID STOP").replace("LF STOP DCY","LF STOP").replace("LF STP DCY","LF STOP")
+        .replace("TREBLE DECAY","HF DECAY").replace("TREB DECAY","HF DECAY")
+        .replace("CUTOFF","CUT").replace("CROSSOVER","XOVER").replace("DEFINITION","DEFINIT")
+        .replace("FIN PDLY","F PDLY").replace("NOTE PITCH","PITCH").replace("RESONANCE","RESON");
+    if(text.length()>10) text=text.replace("DIFFUSION","DIFF").replace("DECAY","DCY")
+        .replace("LEVEL","LVL").replace("DELAY","DLY");
+    return text;
 }
 class PresetButton final : public juce::Button,private juce::Timer {
 public:
@@ -361,8 +382,8 @@ public:
         if(caption_.isNotEmpty()) {
             auto value=getButtonText();
             if(value.startsWithIgnoreCase(caption_)) value=value.substring(caption_.length()).trim();
-            dotText(g,caption_,{6,3,128,19},2.5f,true,colour);
-            dotText(g,value,{6,30,128,23},3.0f,true,colour);
+            statusText(g,caption_,{6,3,128,19},colour);
+            statusText(g,value,{6,30,128,23},colour);
         } else dotText(g,getButtonText(),getLocalBounds().toFloat().reduced(4),pitch_,centred_,colour);
         if(hasKeyboardFocus(true)) {g.setColour(led);g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1),4,1);}
     }
@@ -402,7 +423,14 @@ public:
         setName(juce::String(program+1).paddedLeft('0',2)+" | "+name+" | "+parameter+" "+value);repaint();
     }
     void updateSlots(const std::array<juce::String,9>& names,const std::array<juce::String,9>& values) {
-        if(names!=slot_names_ || values!=slot_values_) {slot_names_=names;slot_values_=values;repaint();}
+        if(names!=slot_names_ || values!=slot_values_) {
+            slot_names_=names;slot_values_=values;
+            for(unsigned slot=0;slot<names.size();++slot) {
+                getProperties().set("slot_caption_"+juce::String(slot),statusCaption(names[slot]));
+                getProperties().set("slot_value_"+juce::String(slot),values[slot]);
+            }
+            repaint();
+        }
     }
     void updatePages(unsigned count,unsigned selected,bool enabled) {
         count=std::clamp(count,1u,unsigned(page_buttons.size()));
@@ -423,8 +451,8 @@ public:
         g.drawHorizontalLine(154,0,1512);
         for(unsigned slot=0;slot<slot_names_.size();++slot) {
             const float x=slot<6?float(slot)*fader_step:float(global_fader_x+int(slot-6)*global_fader_step-variable_fader_x);
-            dotText(g,slot_names_[slot],{x+6,170,128,19},2.5f,true);
-            dotText(g,slot_values_[slot],{x+6,197,128,23},3.0f,true);
+            statusText(g,statusCaption(slot_names_[slot]),{x+6,170,128,19});
+            statusText(g,slot_values_[slot],{x+6,197,128,23});
         }
     }
     PresetButton preset;
@@ -1295,8 +1323,8 @@ private:
 };
 
 CineolEditor::CineolEditor(NativeHallProcessor& processor):AudioProcessorEditor(processor),panel_(std::make_unique<Panel>(processor)) {
-    addAndMakeVisible(*panel_);setResizable(true,true);setResizeLimits(984,744,panel_width,panel_height);
-    getConstrainer()->setFixedAspectRatio(double(panel_width)/panel_height);setSize(1148,868);
+    addAndMakeVisible(*panel_);setResizable(true,true);setResizeLimits(minimum_editor_width,minimum_editor_height,panel_width,panel_height);
+    getConstrainer()->setFixedAspectRatio(double(panel_width)/panel_height);setSize(minimum_editor_width,minimum_editor_height);
 }
 CineolEditor::~CineolEditor()=default;
 void CineolEditor::resized() {

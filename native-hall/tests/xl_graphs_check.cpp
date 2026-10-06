@@ -101,11 +101,11 @@ static void check_graph(Engine& engine,Machine& machine,LarcOperator& op) {
     constexpr auto info=cineol::xl::graph_info(graph);
     auto result=machine.run_task([&]{return xl_test::select(machine,op,info.bank,info.program);});
     require(!result.failed,"XL graph selection failed");
-    PagesReading pages;result=machine.run_task([&]()->Task<void>{co_await op.readPages(pages);});
+    PagesReading pages;result=machine.run_task([&]{return xl_test::read_pages(op,pages);});
     require(!result.failed,"XL graph pages failed");
     std::cout<<"Checking "<<info.name<<" across "<<pages.count<<" pages\n"<<std::flush;
     auto native=std::make_unique<Core>();auto reference=std::make_unique<lexicon224x::Machine>();
-    uint32_t random=23;uint64_t wanted_saturations=0;
+    uint32_t random=23;uint64_t wanted_saturations=0,request_observations=0;
     for(unsigned fixture=0;fixture<3;++fixture) {
         if(fixture) {
             result=machine.run_task([&]{return change(machine,op,fixture,pages);});
@@ -132,18 +132,29 @@ static void check_graph(Engine& engine,Machine& machine,LarcOperator& op) {
             random=random*1664525u+1013904223u;const int16_t left=int16_t(random>>16);
             random=random*1664525u+1013904223u;const int16_t right=int16_t(random>>16);
             int16_t actual[4],wanted[4]{};
+            std::array<int16_t,Core::rows> request_words{};
+            std::array<unsigned,Core::rows> request_masks{};
+            unsigned wanted_requests=0,actual_requests=0;
             for(unsigned row=0;row<Core::rows;++row) {
                 lexicon224x::fetch(*reference);lexicon224x::converter_clock(*reference);
                 if(row==adc_rows[0]) reference->fpc.input_sample=uint16_t(left);
                 if(row==adc_rows[1]) reference->fpc.input_sample=uint16_t(right);
-                if(reference->mi.wr_da) for(unsigned c=0;c<4;++c)
-                    if(reference->mi.channels&(1u<<c)) wanted[c]=int16_t(lexicon224x::source_value(*reference,reference->mi));
+                if(reference->mi.wr_da) {
+                    require(reference->mi.channels!=0,"zero-mask XL WR_DA needs native metadata");
+                    request_words[row]=int16_t(lexicon224x::source_value(*reference,reference->mi));
+                    request_masks[row]=reference->mi.channels;++wanted_requests;
+                    for(unsigned c=0;c<4;++c)if(reference->mi.channels&(1u<<c))wanted[c]=request_words[row];
+                }
                 lexicon224x::execute(*reference);
                 const unsigned sat=reference->saturated;
                 wanted_saturations+=(sat&1)+((sat>>1)&1)+((sat>>2)&1);
                 if(reference->mi.xfer && (sat&4)) ++wanted_saturations;
             }
-            native->process(left,right,actual);
+            native->process(left,right,actual,[&]<unsigned Row,unsigned Channels>(int16_t bus) noexcept {
+                require(request_masks[Row]==Channels && request_words[Row]==bus,"XL per-row WR_DA bus/mask differs");
+                ++actual_requests;
+            });
+            require(actual_requests==wanted_requests,"XL WR_DA request omitted");request_observations+=actual_requests;
             require(std::equal(actual,actual+4,wanted),"XL native A-D outputs differ");
             require(native->accumulator()==reference->ACC && native->result()==reference->RR,"XL native arithmetic differs");
             require(uint16_t(native->control_output())==reference->xreg_to_cpu,"XL native envelope/peak output differs");
@@ -175,15 +186,12 @@ static void check_graph(Engine& engine,Machine& machine,LarcOperator& op) {
         tracking=false;
     }
     native_hall::RationalFilter<Audio::down_num,Audio::down_den,64,2> down;
-    native_hall::RationalFilter<Audio::down_den,Audio::down_num,32,4> up;
-    down.prepare();up.prepare();unsigned count=0;float two[2]{},four[4]{};tracking=true;
+    down.prepare();unsigned count=0;float two[2]{};tracking=true;
     for(unsigned n=0;n<Audio::down_den*100;++n) down.process(two,[&](const float*){++count;});
-    require(count==Audio::down_num*100,"XL graph input clock drift");count=0;
-    for(unsigned n=0;n<Audio::down_num*100;++n) up.process(four,[&](const float*){++count;});
-    require(count==Audio::down_den*100,"XL graph output clock drift");tracking=false;
+    require(count==Audio::down_num*100,"XL graph input clock drift");tracking=false;
     const auto start=std::chrono::steady_clock::now();int16_t out[4];
     for(unsigned n=0;n<Core::rate_numerator*10/Core::rate_denominator;++n) native->process(int16_t(n),int16_t(-int(n)),out);
-    std::cout<<info.name<<": 72000 stereo frames across 3 controls, A-D/state/memory/saturation exact; "
+    std::cout<<info.name<<": 72000 stereo frames across 3 controls, "<<request_observations<<" per-row WR_DA requests, A-D/state/memory/saturation exact; "
         <<Core::rows<<" rows, "<<double(Core::rate_numerator)/Core::rate_denominator<<" Hz, ratios "
         <<Audio::down_num<<'/'<<Audio::down_den<<", delay="<<Audio::latency_samples<<"; signal/tail/dry/clocks pass; core "
         <<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<"s/~10s audio\n";

@@ -69,6 +69,7 @@ def package(platform, build_dir, output_dir):
             verify_bundle(destination, platform)
         for document in ('README.md', 'NOTICE.md'):
             shutil.copy2(ROOT / document, staging / document)
+        shutil.copy2(ROOT / 'docs/releases' / ('v' + version() + '.md'), staging / 'RELEASE-NOTES.md')
         metadata = dict(version=version(), platform=label,
                         commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                         dependencies=json.loads((ROOT / 'dependencies.json').read_text()), juce='8.0.14')
@@ -101,15 +102,14 @@ def package(platform, build_dir, output_dir):
                     '224X v8.1, 224 XL v8.1A and incomplete or modified sets are rejected.\n'
                     'ROMs and prepared banks are not included. Your files stay local;\n'
                     'later launches use the cache. See README.md for details.\n')
-        install += ('\nUPGRADING FROM 0.9.5\n'
-                    'XL dynamics require a new version-4 prepared cache. Re-import your\n'
+        install += ('\nUPGRADING TO 0.9.8\n'
+                    'XL sound corrections require the version-5 prepared cache. Re-import your\n'
                     'complete original 224XL v8.21 ROM set once after updating. The previous\n'
-                    'XL cache is retained. Original-224 caches and sound presets remain compatible.\n')
-        install += ('\n0.9.6 FIXED REBUILD\n'
-                    'This archive contains the corrected ROM import UI and XL formatter\n'
-                    'memory handling. Replace the earlier 0.9.6 plugin, restart the DAW\n'
-                    'and retry the complete v8.21 import if it previously failed.\n'
-                    'Plugin version, identifiers, presets and bank formats remain compatible.\n')
+                    'XL caches, including the 0.9.6 version-4 cache, are retained. Original-224\n'
+                    'caches and sound presets remain compatible. No re-import is needed if\n'
+                    'the corrected version-5 cache has already been prepared locally.\n'
+                    'The editor opens at 984 x 744; a host may restore its saved window size.\n'
+                    'See RELEASE-NOTES.md for changes, validation and known limitations.\n')
         (staging / 'INSTALL.txt').write_text(install, encoding='utf-8')
         if platform == 'macos':
             subprocess.run(['ditto', '-c', '-k', '--keepParent', str(staging), str(archive)], check=True)

@@ -122,7 +122,7 @@ jobs:
             gh release upload "$RELEASE_TAG" build/dist/*.zip build/dist/SHA256SUMS.txt --clobber
           else
             gh release create "$RELEASE_TAG" --verify-tag \
-              --title "Cineol-X 224 $RELEASE_TAG — Low latency" \
+              --title "Cineol-X 224 $RELEASE_TAG — Sound accuracy and compact editor" \
               --notes-file "docs/releases/$RELEASE_TAG.md" \
               build/dist/*.zip build/dist/SHA256SUMS.txt
           fi

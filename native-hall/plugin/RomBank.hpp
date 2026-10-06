@@ -19,7 +19,7 @@ public:
     bool startImport(const juce::Array<juce::File>&);
     void cancelImport() {signalThreadShouldExit();}
     static juce::File cacheFile();
-    static juce::File xlCacheFile() {return cacheFile().getParentDirectory().getChildFile("programs-v821-native-v4.bankxl");}
+    static juce::File xlCacheFile() {return cacheFile().getParentDirectory().getChildFile("programs-v821-native-v5.bankxl");}
 private:
     void run() override;
     void setStatus(const juce::String&);

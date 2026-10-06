@@ -63,6 +63,7 @@ static juce::Component* findNamed(juce::Component& root,const juce::String& name
 static void check_editor() {
     NativeHallProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    require(editor->getWidth()==984 && editor->getHeight()==744,"editor did not open at its minimum size");
     auto* dirt=dynamic_cast<juce::Slider*>(find(*editor,"dirt"));
     auto* bass=dynamic_cast<juce::Slider*>(find(*editor,"bass"));
     auto* delay=dynamic_cast<juce::Slider*>(find(*editor,"predelay"));
@@ -217,8 +218,16 @@ static void check_fader_limits() {
                 const auto id=p.usesXL()?"xl_slot_"+juce::String(slot+1):juce::String(NativeHallProcessor::ids[slot]);
                 auto* slider=dynamic_cast<juce::Slider*>(find(*editor,id.toRawUTF8()));
                 if(!slider || !slider->isVisible() || !slider->isEnabled()) continue;
-                slider->setValue(slider->getMinimum(),juce::sendNotificationSync);
-                slider->setValue(slider->getMaximum(),juce::sendNotificationSync);
+                for(const auto endpoint:{slider->getMinimum(),slider->getMaximum()}) {
+                    slider->setValue(endpoint,juce::sendNotificationSync);
+                    for(unsigned field=0;field<9;++field) for(const char* prefix:{"slot_caption_","slot_value_"}) {
+                        const auto text=display->getProperties()[juce::String(prefix)+juce::String(field)].toString();
+                        if((text.length()*6-1)*2.1f>126) {
+                            std::cerr<<p.getProgramName(program)<<" page "<<current+1<<": "<<text<<'\n';
+                            require(false,"fixed controller font overflows its display cell");
+                        }
+                    }
+                }
                 if(display->getName().contains("--")) {
                     std::cerr<<"Endpoint "<<p.getProgramName(program)<<" page "<<current+1<<" slot "<<slot+1<<": "<<display->getName()<<'\n';
                     require(false,"active fader maximum displayed as inactive dashes");
@@ -473,9 +482,17 @@ static void check_editor_window_focus() {
             first_host.clearContentComponent();
             require(menu->isVisible() && menu->isCurrentlyModal(),"closing one editor dismissed another instance's menu");
             menu->keyPressed(juce::KeyPress(juce::KeyPress::downKey));menu->keyPressed(juce::KeyPress(juce::KeyPress::returnKey));
-            juce::Timer::callAfterDelay(100,[&] {
+            juce::Timer::callAfterDelay(100,[&,output] {
                 require(!juce::Component::getCurrentlyModalComponent() && !other_bass->isCurrentlyBlockedByAnotherModalComponent(),
                     "selecting a menu item left the faders blocked");
+                // No timer/message-loop gap between hide and reopen: hosts may
+                // reuse an editor while switching plugin windows quickly.
+                for(unsigned repeat=0;repeat<8;++repeat) {
+                    output->onClick();
+                    require(juce::Component::getCurrentlyModalComponent()!=nullptr,"rapid-switch popup missing");
+                    second_host.setVisible(false);second_host.setVisible(true);second_host.toFront(true);
+                    require(!other_bass->isCurrentlyBlockedByAnotherModalComponent(),"rapid editor reopen retained a modal input lock");
+                }
                 require(second.saveBankPreset("Focus Hall").wasOk(),"focus preset fixture failed");
                 second.setCurrentProgram(6);
                 require(second.loadBankPreset("Focus Hall").wasOk(),"focus fixture preset recall failed");
@@ -495,7 +512,7 @@ static void check_editor_window_focus() {
         });
     });
     juce::MessageManager::getInstance()->runDispatchLoop();
-    std::cout<<"Editor focus: scoped dialogs, hide/refocus cancellation, safe reopen, parented menus, instance isolation and real fader drag after preset recall pass\n";
+    std::cout<<"Editor focus: scoped dialogs, hide/refocus cancellation, rapid hide/reopen, parented menus, instance isolation and real fader drag after preset recall pass\n";
 }
 static void check_quick_presets() {
     PresetTestFiles files;NativeHallProcessor p;
@@ -1216,7 +1233,8 @@ int main(int argc,char** argv) {
     const bool original_fixture=argc==3 && (option=="--bank" || option=="--spillover-224-check" || option=="--spillover-224-cpu");
     const bool dual_fixture=argc==4 && (option=="--banks" || option=="--preset-check" || option=="--limits-check" ||
         option=="--spillover-check" || option=="--quick-check" || option=="--focus-check");
-    require(argc==1 || original_fixture || dual_fixture || (argc==2 && option=="--ui") ||
+    const bool migration_fixture=argc==5 && option=="--xl-cache-migration";
+    require(argc==1 || original_fixture || dual_fixture || migration_fixture || (argc==2 && option=="--ui") ||
         (argc>=3 && argc<=6 && option=="--editor"),
         "Invalid test arguments: --bank, --spillover-224-check and --spillover-224-cpu require BANK; dual-bank modes require BANK XL_BANK");
     juce::ScopedJuceInitialiser_GUI init;
@@ -1226,13 +1244,31 @@ int main(int argc,char** argv) {
         juce::File folder;
         ~TestCache() {if(folder.isDirectory()) folder.deleteRecursively();}
     } test_cache;
-    if(original_fixture || dual_fixture) {
+    if(original_fixture || dual_fixture || migration_fixture) {
         test_cache.folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getNonexistentChildFile("cineol-plugin-check",{},false);
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");
         set_cache_directory(test_cache.folder);
         require(juce::File(juce::String::fromUTF8(argv[2])).copyFileTo(CineolRomBank::cacheFile()),"could not seed test bank");
         if(argc==4) require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed XL bank");
+    }
+    if(migration_fixture) {
+        const auto legacy=CineolRomBank::xlCacheFile().getSiblingFile("programs-v821-native-v4.bankxl");
+        require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(legacy),"could not seed legacy XL cache");
+        juce::MemoryBlock before,after;require(legacy.loadFileAsData(before),"could not read legacy cache");
+        {
+            CineolRomBank bank;
+            require(bank.ready() && !bank.xlReady(),"legacy XL cache accepted or original bank lost");
+            require(bank.status().contains("Re-import") && bank.status().contains("modulation startup"),
+                "legacy XL cache migration message missing");
+        }
+        require(juce::File(juce::String::fromUTF8(argv[4])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed corrected XL cache");
+        {
+            CineolRomBank bank;require(bank.ready() && bank.xlReady(),"corrected dual-bank cache did not load");
+        }
+        require(legacy.loadFileAsData(after) && before==after,"legacy XL cache was modified during migration");
+        std::cout<<"XL v4 -> v5 cache: explicit re-import, original bank retained, corrected cache ready, legacy bytes preserved\n";
+        return 0;
     }
     if(argc==4 && std::string(argv[1])=="--focus-check") {check_editor_window_focus();return 0;}
     if(argc==3 && std::string(argv[1])=="--spillover-224-check") {check_spillover(true);return 0;}

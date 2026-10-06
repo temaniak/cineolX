@@ -37,6 +37,12 @@ inline Task<void> select(Machine& machine,LarcOperator& op,unsigned bank,unsigne
 inline Task<void> boot(Machine& machine,LarcOperator& op) {
     co_await machine.sleep(16);co_await select(machine,op,1,1);
 }
+// run_task's factory must call a coroutine function. A capturing coroutine
+// lambda would retain the destroyed factory closure after its first wait.
+inline Task<void> read_pages(LarcOperator& op,PagesReading& pages) {co_await op.readPages(pages);}
+inline Task<void> move_slider(Machine& machine,LarcOperator& op,unsigned page,unsigned slot,unsigned raw,double settle) {
+    co_await op.moveSlider(int(page),slot,raw);co_await machine.sleep(settle);
+}
 struct ShapeCheck {
     const lexicon224x::Machine& source;
     cineol::xl::Graph graph=cineol::xl::Graph::concert;
