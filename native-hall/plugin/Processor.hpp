@@ -60,6 +60,23 @@ public:
     bool presetModified();
     int editorPage() {const juce::ScopedLock lock(preset_write_lock_);return std::clamp(int(state.state.getProperty("editor_page",0)),0,8);}
     void setEditorPage(int page) {const juce::ScopedLock lock(preset_write_lock_);state.state.setProperty("editor_page",std::clamp(page,0,8),nullptr);}
+    // Presentation preferences are session properties, never audio parameters.
+    struct EditorAppearance {float brightness=1,emphasis=0.8f;bool compact=false;};
+    EditorAppearance editorAppearance() {
+        const juce::ScopedLock lock(preset_write_lock_);
+        auto number=[this](const char* key,float fallback,float low) {
+            const float value=float(state.state.getProperty(key,fallback));
+            return std::isfinite(value)?std::clamp(value,low,1.0f):fallback;
+        };
+        return {number("display_brightness",1,0.15f),number("display_emphasis",0.8f,0),
+                bool(state.state.getProperty("editor_compact",false))};
+    }
+    void setEditorAppearance(EditorAppearance value) {
+        const juce::ScopedLock lock(preset_write_lock_);
+        state.state.setProperty("display_brightness",std::isfinite(value.brightness)?std::clamp(value.brightness,0.15f,1.0f):1.0f,nullptr);
+        state.state.setProperty("display_emphasis",std::isfinite(value.emphasis)?std::clamp(value.emphasis,0.0f,1.0f):0.8f,nullptr);
+        state.state.setProperty("editor_compact",value.compact,nullptr);
+    }
     unsigned presetRecallRevision() const noexcept {return preset_recall_revision_.load(std::memory_order_acquire);}
     bool presetRecallInProgress() const noexcept {return (parameter_transaction_.load(std::memory_order_acquire)&1u)!=0;}
     juce::AudioProcessorValueTreeState state;

@@ -118,11 +118,15 @@ jobs:
           else
             gh api "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
           fi
+          release_flags=()
+          if [[ "$(python script/package_release.py --prerelease)" == true ]]; then
+            release_flags+=(--prerelease)
+          fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" build/dist/*.zip build/dist/SHA256SUMS.txt --clobber
           else
             gh release create "$RELEASE_TAG" --verify-tag \
-              --title "Cineol-X 224 $RELEASE_TAG — Sound accuracy and compact editor" \
+              --title "Cineol-X 224 $RELEASE_TAG" "${release_flags[@]}" \
               --notes-file "docs/releases/$RELEASE_TAG.md" \
               build/dist/*.zip build/dist/SHA256SUMS.txt
           fi

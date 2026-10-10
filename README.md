@@ -2,10 +2,25 @@
 
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
 the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
-preview of all 22 **224 XL v8.21** programs. The desktop plugin is version **0.9.8**, with the metal-panel artwork, 21-mark fader scales
+preview of all 22 **224 XL v8.21** programs. The desktop plugin release is **0.99A (alpha)**, with the metal-panel artwork, 21-mark fader scales
 and six page-bound faders beside permanent Dirt, Input and Mix faders.
 
-## What's new in 0.9.8
+## What's new in 0.99A (alpha)
+
+- The gear's **Settings** panel now contains **Display brightness** (15–100%),
+  **Option illumination** (0–100%) and **Compact display mode**.
+- Compact mode reduces the default editor to **984 x 252**, preserving a complete
+  metal housing with an integrated recessed screen, intact screws and title.
+- Drag numeric screen values up/down in either layout; hold **Shift** for finer
+  adjustment or double-click to reset. Host automation and 224/XL page bindings
+  remain attached to the existing parameters.
+- Display preferences are saved per instance in DAW sessions. The audio engine,
+  plugin identity, parameter IDs and existing sound presets retain compatibility.
+- Public releases now use alphabetic suffixes: **0.99A**, **0.99B**, **0.99C**,
+  **0.99D**, and onward until the user explicitly requests version 1. AU/VST3 use
+  compatible numeric bundle versions; 0.99A corresponds to **0.99.1**.
+
+## Earlier changes in 0.9.8
 
 - More accurate original-224 input/output conversion, control-write timing and
   modulation startup/retention; refined XL input/output circuit processing and
@@ -71,8 +86,8 @@ parameter IDs remain stable. Version 0.9.8 adds the sound and editor refinements
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
-[0.9.8 release](https://github.com/temaniak/cineolX/releases/tag/v0.9.8).
-See the [release notes](docs/releases/v0.9.8.md) for installation, compatibility
+[0.99A alpha release](https://github.com/temaniak/cineolX/releases/tag/v0.99A).
+See the [release notes](docs/releases/v0.99A.md) for installation, compatibility
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files
@@ -450,7 +465,8 @@ gh run download RUN_ID --dir build/downloaded
 Manual runs and pull requests upload downloadable archives without publishing
 by default. On `main`, selecting **publish** (or passing `-f publish=true` to
 `gh workflow run`) creates the version tag and release after both builds pass.
-To publish a version, update the version in `CMakeLists.txt`, add English release
+To publish a version, update both the numeric plugin version and
+`CINEOL_RELEASE_VERSION` in `CMakeLists.txt`, add English release
 notes at `docs/releases/vVERSION.md`, commit and push, then push the matching tag:
 
 ```sh

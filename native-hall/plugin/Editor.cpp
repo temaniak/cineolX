@@ -3,7 +3,7 @@
 #include <algorithm>
 
 namespace {
-constexpr int panel_width=1640,panel_height=1240;
+constexpr int panel_width=1640,panel_height=1240,compact_height=420;
 constexpr int minimum_editor_width=984,minimum_editor_height=744;
 constexpr float status_text_pitch=2.1f;
 constexpr int variable_fader_x=64,fader_step=164,global_fader_x=1098,global_fader_step=fader_step;
@@ -58,6 +58,17 @@ void drawBezel(juce::Graphics& g,const juce::Image& image,juce::Rectangle<int> s
     const int dy[]={destination.getY(),destination.getY()+border,destination.getBottom()-border,destination.getBottom()};
     for(int y=0;y<3;++y) for(int x=0;x<3;++x)
         g.drawImage(image,dx[x],dy[y],dx[x+1]-dx[x],dy[y+1]-dy[y],sx[x],sy[y],sx[x+1]-sx[x],sy[y+1]-sy[y]);
+}
+void drawCompactHousing(juce::Graphics& g,const juce::Image& image) {
+    // The complete housing includes its recessed glass. Fit it uniformly with
+    // an outer safety margin; every screw and the whole molded edge stay visible.
+    g.setColour(ink);g.fillRect(0,0,panel_width,compact_height);
+    g.drawImage(image,{8,8,float(panel_width-16),float(compact_height-16)},juce::RectanglePlacement::centred);
+}
+float emphasisFor(const juce::Component& component) {
+    for(auto* parent=component.getParentComponent();parent;parent=parent->getParentComponent())
+        if(parent->getComponentID()=="display") return float(parent->getProperties().getWithDefault("emphasis",0.8f));
+    return 0.8f;
 }
 // The attached Slider always holds the actual parameter. Only the cap's
 // painted position moves; animation never emits a parameter/automation event.
@@ -190,13 +201,15 @@ public:
     }
     int getSliderThumbRadius(juce::Slider&) override {return 33;}
     juce::Slider::SliderLayout getSliderLayout(juce::Slider& s) override {
+        if(s.getSliderStyle()!=juce::Slider::LinearVertical) return juce::LookAndFeel_V4::getSliderLayout(s);
         juce::Slider::SliderLayout l;
         // One rail/cap geometry for every page and enabled state. Leave room
         // for the cap and its shadow at both ends, without a numeric text box.
         l.sliderBounds={0,33,s.getWidth(),s.getHeight()-80};return l;
     }
-    void drawLinearSlider(juce::Graphics& g,int x,int y,int width,int height,float pos,float,float,
-                          juce::Slider::SliderStyle,juce::Slider& s) override {
+    void drawLinearSlider(juce::Graphics& g,int x,int y,int width,int height,float pos,float minPos,float maxPos,
+                          juce::Slider::SliderStyle style,juce::Slider& s) override {
+        if(style!=juce::Slider::LinearVertical) {juce::LookAndFeel_V4::drawLinearSlider(g,x,y,width,height,pos,minPos,maxPos,style,s);return;}
         if(auto* motor=dynamic_cast<MotorFader*>(&s)) pos=float(y)+float(height)*float(1-motor->visualProportion());
         const float cx=float(x)+float(width)/2;
         g.setOpacity(1.0f);
@@ -292,7 +305,7 @@ void dotText(juce::Graphics& g,const juce::String& text,juce::Rectangle<float> a
                 const float dx=x+float(col)*pitch,dy=y+float(row)*pitch;
                 // Broader luminous cores keep small labels readable when the
                 // editor is scaled down, while retaining the dotted LED face.
-                g.setColour(led.withAlpha(0.18f));g.fillEllipse(dx-pitch*0.31f,dy-pitch*0.31f,pitch*1.2f,pitch*1.2f);
+                g.setColour(led.withAlpha(0.18f*colour.getFloatAlpha()));g.fillEllipse(dx-pitch*0.31f,dy-pitch*0.31f,pitch*1.2f,pitch*1.2f);
                 g.setColour(colour);g.fillEllipse(dx-pitch*0.09f,dy-pitch*0.09f,pitch*0.76f,pitch*0.76f);
             }
         }
@@ -377,8 +390,16 @@ public:
     void setDimWhenUnselected(bool dim) {dim_when_unselected_=dim;repaint();}
     void paintButton(juce::Graphics& g,bool highlighted,bool down) override {
         if(highlighted || down) {g.setColour(led.withAlpha(0.08f));g.fillRoundedRectangle(getLocalBounds().toFloat(),4);}
-        const float alpha=(isEnabled()?1.0f:0.35f)*(dim_when_unselected_ && !getToggleState()?0.35f:1.0f);
-        const auto colour=led_text.withAlpha(alpha);
+        const float alpha=(isEnabled()?1.0f:0.25f)*(dim_when_unselected_ && !getToggleState()?0.3f:1.0f);
+        const float emphasis=emphasisFor(*this);
+        const bool active=!dim_when_unselected_ || getToggleState();
+        const auto colour=led_text.interpolatedWith(juce::Colour(0xffffd5b0),active?emphasis*0.55f:0).withAlpha(alpha);
+        if(isEnabled() && active && emphasis>0) {
+            auto bounds=getLocalBounds().toFloat().reduced(1);
+            g.setColour(led.withAlpha(emphasis*(getToggleState()?0.16f:0.055f)));g.fillRoundedRectangle(bounds,4);
+            g.setColour(colour.withAlpha(emphasis*(getToggleState()?0.6f:0.28f)));
+            g.drawRoundedRectangle(bounds,4,getToggleState()?1.5f:1.0f);
+        }
         if(caption_.isNotEmpty()) {
             auto value=getButtonText();
             if(value.startsWithIgnoreCase(caption_)) value=value.substring(caption_.length()).trim();
@@ -389,6 +410,26 @@ public:
     }
 private:
     float pitch_;bool centred_;juce::String caption_;bool dim_when_unselected_=false;
+};
+class ScreenValue final : public juce::Slider {
+public:
+    ScreenValue() {
+        setSliderStyle(juce::Slider::RotaryVerticalDrag);setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);
+        setMouseDragSensitivity(250);setSliderSnapsToMousePosition(false);
+        setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+    }
+    void setDisplayText(const juce::String& text) {if(text_!=text) {text_=text;repaint();}}
+    void paint(juce::Graphics& g) override {
+        const bool highlight=isEnabled() && (isMouseOverOrDragging() || hasKeyboardFocus(true));
+        const auto bounds=getLocalBounds().toFloat().reduced(1);
+        if(highlight) {
+            g.setColour(led.withAlpha(0.16f));g.fillRoundedRectangle(bounds,3);
+            g.setColour(led_text.withAlpha(0.65f));g.drawRoundedRectangle(bounds,3,1);
+        }
+        statusText(g,text_,bounds,highlight?juce::Colour(0xffffd5b0):led_text.withAlpha(isEnabled()?1.0f:0.3f));
+    }
+private:
+    juce::String text_="--";
 };
 class Display final : public juce::Component {
 public:
@@ -404,11 +445,21 @@ public:
         firmware.setTooltip("Engine used by the selected algorithm. Click to import ROMs.");
         for(unsigned i=0;i<outputs.size();++i) {addAndMakeVisible(outputs[i]);outputs[i].setBounds(display_global_x+int(i)*global_fader_step,8,140,56);}
         for(unsigned i=0;i<modes.size();++i) {addAndMakeVisible(modes[i]);modes[i].setBounds(display_global_x+int(i+1)*global_fader_step,82,140,56);modes[i].setClickingTogglesState(true);}
+        for(unsigned slot=0;slot<values.size();++slot) {
+            auto& value=values[slot];addAndMakeVisible(value);
+            const int x=slot<6?int(slot)*fader_step:global_fader_x+int(slot-6)*global_fader_step-variable_fader_x;
+            value.setComponentID("screen_value_"+juce::String(slot));value.setBounds(x+6,193,128,31);
+        }
         for(unsigned i=0;i<page_buttons.size();++i) {
             auto& button=page_buttons[i];button.setButtonText(juce::String(i+1));button.setDimWhenUnselected(true);
             button.setTitle("Parameter page "+juce::String(i+1));button.setTooltip("Go directly to parameter page "+juce::String(i+1)+".");
             addChildComponent(button);
         }
+    }
+    void setCompact(bool compact) {
+        compact_=compact;setSize(1512,compact?212:240);
+        for(unsigned slot=0;slot<values.size();++slot) values[slot].setTopLeftPosition(values[slot].getX(),compact?179:193);
+        repaint();
     }
     void updatePreset(const juce::String& name,bool modified) {
         const auto text=name+(modified?" *":"");
@@ -426,6 +477,8 @@ public:
         if(names!=slot_names_ || values!=slot_values_) {
             slot_names_=names;slot_values_=values;
             for(unsigned slot=0;slot<names.size();++slot) {
+                this->values[slot].setDisplayText(slot_values_[slot]);
+                this->values[slot].setTitle(names[slot]);this->values[slot].setTooltip(names[slot]+": drag up/down; Shift for fine adjustment. Double-click resets.");
                 getProperties().set("slot_caption_"+juce::String(slot),statusCaption(names[slot]));
                 getProperties().set("slot_value_"+juce::String(slot),values[slot]);
             }
@@ -447,14 +500,15 @@ public:
         dotText(g,"PRESET",{12,1,160,14},1.8f,false);
         dotText(g,"ALGORITHM",{12,78,210,12},1.5f,false);
         // The algorithm row is an interactive LED button.
-        g.setColour(led.withAlpha(0.2f));g.drawVerticalLine(display_divider_x,0,240);
-        g.drawHorizontalLine(154,0,1512);
+        g.setColour(led.withAlpha(0.2f));g.drawVerticalLine(display_divider_x,0,float(getHeight()));
+        g.drawHorizontalLine(compact_?142:154,0,1512);
         for(unsigned slot=0;slot<slot_names_.size();++slot) {
             const float x=slot<6?float(slot)*fader_step:float(global_fader_x+int(slot-6)*global_fader_step-variable_fader_x);
-            statusText(g,statusCaption(slot_names_[slot]),{x+6,170,128,19});
-            statusText(g,slot_values_[slot],{x+6,197,128,23});
+            statusText(g,statusCaption(slot_names_[slot]),{x+6,compact_?154.0f:170.0f,128,19});
+
         }
     }
+    std::array<ScreenValue,9> values;
     PresetButton preset;
     SavePresetButton save;
     LedButton firmware{"firmware",2.5f,true,"MODEL"},algorithm{"algorithm",4.5f,false};
@@ -465,6 +519,7 @@ public:
         LedButton{"parameter_page_3",4.0f},LedButton{"parameter_page_4",4.0f},LedButton{"parameter_page_5",4.0f},
         LedButton{"parameter_page_6",4.0f},LedButton{"parameter_page_7",4.0f},LedButton{"parameter_page_8",4.0f},LedButton{"parameter_page_9",4.0f}};
 private:
+    bool compact_=false;
     int program_=2;
     juce::String name_,parameter_,value_;
     std::array<juce::String,9> slot_names_,slot_values_;
@@ -493,7 +548,7 @@ public:
 
 class SettingsPanel final : public juce::Component {
 public:
-    explicit SettingsPanel(NativeHallProcessor& processor) {
+    explicit SettingsPanel(NativeHallProcessor& processor):processor_(processor) {
         setComponentID("settings_panel");setName("Settings");setWantsKeyboardFocus(true);
         low_latency_.setComponentID("low_latency");low_latency_.setButtonText("Low latency");
         low_latency_.setTitle("Low latency");
@@ -514,29 +569,66 @@ public:
         duration_attachment_=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
             processor.state,"spillover_time",duration_);
         duration_.setEnabled(spillover_.getToggleState());
+        brightness_.setComponentID("display_brightness");brightness_.setTitle("Display brightness");
+        emphasis_.setComponentID("display_emphasis");emphasis_.setTitle("Option illumination");
+        for(auto* slider:{&brightness_,&emphasis_}) {
+            slider->setSliderStyle(juce::Slider::LinearHorizontal);slider->setTextBoxStyle(juce::Slider::TextBoxRight,false,72,32);
+            slider->setRange(slider==&brightness_?15:0,100,1);slider->setTextValueSuffix(" %");
+            slider->setColour(juce::Slider::textBoxTextColourId,ink);
+            slider->setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xffeee5d2));
+            slider->setColour(juce::Slider::thumbColourId,led);slider->setColour(juce::Slider::trackColourId,juce::Colour(0xff873d32));
+            addAndMakeVisible(*slider);slider->onValueChange=[this]{commit();};
+        }
+        brightness_.setDoubleClickReturnValue(true,100);emphasis_.setDoubleClickReturnValue(true,80);
+        brightness_.setTooltip("Brightness of every virtual LED pixel on the red display.");
+        emphasis_.setTooltip("Illumination of algorithm, page selectors and screen options.");
+        compact_.setComponentID("compact_mode");compact_.setButtonText("Compact display mode");
+        compact_.setTooltip("Hide the faders. Drag numbers directly on the red display.");
+        compact_.onClick=[this]{commit();};addAndMakeVisible(compact_);sync();
+    }
+    std::function<void()> onAppearanceChanged;
+    void sync() {
+        const auto value=processor_.editorAppearance();
+        brightness_.setValue(value.brightness*100,juce::dontSendNotification);
+        emphasis_.setValue(value.emphasis*100,juce::dontSendNotification);
+        compact_.setToggleState(value.compact,juce::dontSendNotification);
     }
     void paint(juce::Graphics& g) override {
-        auto bounds=getLocalBounds().toFloat().reduced(4);
         auto& look=static_cast<InstrumentLook&>(getLookAndFeel());
-        look.drawMetalSurface(g,bounds);
-        look.drawScreenHeader(g,"Settings",{28,20,float(getWidth()-56),38},25);
-        g.setColour(ink);g.setFont(font(22));
-        g.drawText("When enabled: zero-latency dry signal.",28,145,getWidth()-56,30,juce::Justification::centredLeft);
-        g.drawText("Reverb and pre-delay keep their timing.",28,175,getWidth()-56,30,juce::Justification::centredLeft);
-        g.setColour(ink.withAlpha(0.16f));g.drawHorizontalLine(215,28,float(getWidth()-28));
-        g.setColour(ink);g.setFont(font(21));
-        g.drawText("Old tail fades while the new effect plays.",28,315,getWidth()-56,30,juce::Justification::centredLeft);
-        g.drawText("Transitions temporarily increase CPU use.",28,345,getWidth()-56,30,juce::Justification::centredLeft);
+        look.drawMetalSurface(g,getLocalBounds().toFloat().reduced(4));
+        look.drawScreenHeader(g,"Settings",{28,16,float(getWidth()-56),38},25);
+        const bool wide=getWidth()>800;const int column=wide?590:28;
+        auto text=[&](const char* title,int x,int y,int width=490) {g.setColour(ink);g.setFont(font(21));g.drawText(title,x,y,width,28,juce::Justification::centredLeft);};
+        text("When enabled: zero-latency dry signal.",28,wide?123:145);
+        text("Reverb and pre-delay keep their timing.",28,wide?151:175);
+        text("Old tail fades while the new effect plays.",28,wide?251:315);
+        text("Transitions temporarily increase CPU use.",28,wide?279:345);
+        g.setColour(ink.withAlpha(0.16f));g.drawHorizontalLine(wide?188:215,28,530);
+        if(wide) g.drawVerticalLine(563,65,307);else g.drawHorizontalLine(385,28,530);
+        text("Display brightness",column,wide?66:409);
+        text("Option illumination",column,wide?144:500);
+        if(!wide) text("Drag values up / down on the red display.",column,664,510);
     }
     void resized() override {
-        low_latency_.setBounds(28,75,getWidth()-56,64);
-        spillover_.setBounds(28,235,245,64);duration_.setBounds(280,243,170,48);
+        const bool wide=getWidth()>800;const int column=wide?590:28;
+        low_latency_.setBounds(28,wide?62:75,490,wide?56:64);
+        spillover_.setBounds(28,wide?194:235,245,wide?56:64);duration_.setBounds(280,wide?198:243,170,48);
+        brightness_.setBounds(column,wide?101:448,490,40);
+        emphasis_.setBounds(column,wide?180:539,490,40);
+        compact_.setBounds(column,wide?224:590,510,wide?58:64);
     }
 private:
-    juce::ToggleButton low_latency_,spillover_;
+    void commit() {
+        processor_.setEditorAppearance({float(brightness_.getValue()/100),float(emphasis_.getValue()/100),compact_.getToggleState()});
+        if(onAppearanceChanged) onAppearanceChanged();
+    }
+    NativeHallProcessor& processor_;
+    juce::Slider brightness_,emphasis_;
+    juce::ToggleButton compact_,low_latency_,spillover_;
     juce::ComboBox duration_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment_,spillover_attachment_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> duration_attachment_;
+
 };
 
 class QuickPresetKey final : public juce::Button {
@@ -675,7 +767,7 @@ public:
     }
     std::function<void()> onClose,onSave,onLoad,onAssign;
 private:
-    juce::Rectangle<int> body() const {return {230,175,1180,690};}
+    juce::Rectangle<int> body() const {return getHeight()<700?juce::Rectangle<int>(70,8,1500,getHeight()-16):juce::Rectangle<int>(230,175,1180,690);}
     juce::String algorithmLabel(const NativeHallProcessor::PresetInfo& entry) const {
         const auto* firmware=cineol::find_firmware(entry.firmware.toStdString());
         const auto model=entry.firmware=="224-v4.4"?juce::String("224"):entry.firmware=="224xl-v8.21"?juce::String("224 XL"):
@@ -821,6 +913,7 @@ public:
     ~RomSetup() override {stopTimer();setLookAndFeel(nullptr);}
     void paint(juce::Graphics& g) override {
         g.fillAll(juce::Colours::black.withAlpha(0.64f));
+        g.addTransform(contentTransform());
         look_.drawMetalSurface(g,{245,285,980,500});
         look_.drawScreenHeader(g,{}, {285,315,900,60},30);
     }
@@ -829,12 +922,18 @@ public:
         status_.setBounds(290,520,890,95);progress_bar_.setBounds(365,625,740,25);
         choose_.setBounds(320,680,330,62);folder_.setBounds(675,680,330,62);
         cancel_.setBounds(410,680,440,62);close_.setBounds(1030,680,160,62);
+        for(auto* child:getChildren()) child->setTransform(contentTransform());
     }
     bool shouldBeVisible() const {return requested_ || processor_.importingRoms() || (!processor_.programAvailable(0) && !processor_.programAvailable(6));}
     void open() {
         requested_=true;setVisible(true);toFront(false);update();
     }
 private:
+    juce::AffineTransform contentTransform() const {
+        if(getHeight()>=800) return {};
+        const float scale=float(getHeight()-20)/500;
+        return juce::AffineTransform::translation(-245,-285).scaled(scale).translated((getWidth()-980*scale)/2,10);
+    }
     struct SetupLook final : InstrumentLook {
         void drawButtonText(juce::Graphics& g,juce::TextButton& button,bool,bool) override {
             g.setColour(button.findColour(juce::TextButton::textColourOffId).withAlpha(button.isEnabled()?1.0f:0.5f));
@@ -887,9 +986,23 @@ private:
 }
 
 struct CineolEditor::Panel final : public juce::Component,private juce::Timer,private juce::FocusChangeListener {
-    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panelquickpresets_png")),bezel_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor),preset_browser_(processor) {
+    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panelquickpresets_png")),compact_background_(loadImage("panelcompactintegrated_png").getClippedImage({0,128,2062,488})),bezel_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor),preset_browser_(processor) {
         setComponentID("cineol_panel");setLookAndFeel(&look_);setSize(panel_width,panel_height);addAndMakeVisible(display_);
         display_.setBounds(variable_fader_x,100,1512,240);
+        settings_panel_.onAppearanceChanged=[this]{applyAppearance();};
+        for(unsigned slot=0;slot<display_.values.size();++slot) {
+            auto& value=display_.values[slot];
+            value.onDragStart=[this,slot]{if(slot<6) {if(displayed_xl_) focused_xl_slot_=slot;else focused_=page_==0?slot:6;}if(value_attachments_[slot]) {value_dragging_[slot]=true;value_attachments_[slot]->beginGesture();}};
+            value.onDragEnd=[this,slot]{endValueGesture(slot);};
+            value.onValueChange=[this,slot]{
+                if(binding_values_ || !value_attachments_[slot]) return;
+                float raw=float(display_.values[slot].getValue());
+                if(slot==6) raw=1-raw;else if(displayed_xl_ && slot<6) raw/=xl_scales_[slot];
+                if(value_dragging_[slot]) value_attachments_[slot]->setValueAsPartOfGesture(raw);
+                else value_attachments_[slot]->setValueAsCompleteGesture(raw);
+                refreshDisplay();
+            };
+        }
         display_.algorithm.onClick=[this]{showAlgorithms();};
         page_=processor_.editorPage();
         for(unsigned i=0;i<display_.page_buttons.size();++i) display_.page_buttons[i].onClick=[this,i]{changePage(int(i));};
@@ -993,7 +1106,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
             key.onClick=[this,slot]{reportPresetResult(processor_.loadQuickPreset(slot));};
         }
         addChildComponent(rom_setup_);rom_setup_.setBounds(0,0,panel_width,panel_height);
-        addChildComponent(settings_panel_);settings_panel_.setBounds(990,76,550,400);
+        addChildComponent(settings_panel_);settings_panel_.setBounds(990,76,550,720);
         addChildComponent(preset_browser_);preset_browser_.setBounds(0,0,panel_width,panel_height);
         preset_browser_.onClose=[this]{display_.preset.grabKeyboardFocus();};
         preset_browser_.onSave=[this]{namePreset();};preset_browser_.onLoad=[this]{refreshProgram();};
@@ -1003,18 +1116,21 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
             settings_panel_.setVisible(settings_button_.getToggleState());
             if(settings_panel_.isVisible()) {settings_panel_.toFront(false);settings_panel_.grabKeyboardFocus();}
         };
-        refreshProgram();juce::Desktop::getInstance().addFocusChangeListener(this);startTimerHz(30);
+        applyAppearance();refreshProgram();juce::Desktop::getInstance().addFocusChangeListener(this);startTimerHz(30);
     }
     ~Panel() override {
+        for(unsigned slot=0;slot<value_dragging_.size();++slot) endValueGesture(slot);
         stopTimer();juce::Desktop::getInstance().removeFocusChangeListener(this);cancelTransientUi();
         for(auto dialog:owned_dialogs_) dialog.deleteAndZero();
         setLookAndFeel(nullptr);
     }
     void paint(juce::Graphics& g) override {
-        // One full-size photographic faceplate: no stretched strips or joins.
-        g.drawImage(background_,getLocalBounds().toFloat(),juce::RectanglePlacement::stretchToFit);
-        drawBezel(g,bezel_,{60,65,1354,178},{52,78,1536,274},12);
-        g.setColour(ink);g.setFont(font(40,true));g.drawText("Cineol-X 224",84,17,800,44,juce::Justification::centredLeft);
+        // Each mode retains a complete faceplate at a uniform scale.
+        if(compact_) drawCompactHousing(g,compact_background_);
+        else g.drawImage(background_,getLocalBounds().toFloat(),juce::RectanglePlacement::stretchToFit);
+        if(!compact_) drawBezel(g,bezel_,{60,65,1354,178},{52,78,1536,274},12);
+        g.setColour(ink);g.setFont(font(40,true));g.drawText("Cineol-X 224",compact_?100:84,compact_?30:17,800,44,juce::Justification::centredLeft);
+        if(compact_) {g.setFont(font(18));g.drawText("DRAG VALUES UP / DOWN     SHIFT: FINE ADJUST",100,355,1100,27,juce::Justification::centredLeft);return;}
         g.setColour(ink.withAlpha(0.45f));g.drawVerticalLine(global_fader_x-30,370,883.0f);
         g.setFont(font(21,true));g.setColour(ink);g.drawText("QUICK PRESETS",600,916,440,28,juce::Justification::centred);
     }
@@ -1025,7 +1141,55 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
         }
         return false;
     }
+    std::function<void(bool)> onCompactChanged;
+    bool isCompact() const {return compact_;}
 private:
+    void endValueGesture(unsigned slot) {
+        if(value_dragging_[slot] && value_attachments_[slot]) value_attachments_[slot]->endGesture();
+        value_dragging_[slot]=false;
+    }
+    void applyAppearance() {
+        const auto appearance=processor_.editorAppearance();settings_panel_.sync();
+        display_.setAlpha(appearance.brightness);display_.getProperties().set("emphasis",appearance.emphasis);
+        display_.repaint();for(auto* child:display_.getChildren()) child->repaint();
+        if(compact_!=appearance.compact) {
+            compact_=appearance.compact;setSize(panel_width,compact_?compact_height:panel_height);
+            display_.setCompact(compact_);
+            display_.setTopLeftPosition(compact_?76:variable_fader_x,compact_?105:100);
+            display_.setTransform(compact_?juce::AffineTransform::scale(0.98f):juce::AffineTransform());
+            settings_button_.setTopLeftPosition(1480,compact_?28:12);
+            settings_panel_.setBounds(compact_?juce::Rectangle<int>(440,94,1160,318):juce::Rectangle<int>(990,76,550,720));
+            rom_setup_.setBounds(getLocalBounds());preset_browser_.setBounds(getLocalBounds());
+            for(auto& key:quick_keys_) key.setVisible(!compact_);
+            if(onCompactChanged) onCompactChanged(compact_);
+            refreshProgram();repaint();
+        }
+        appearance_=appearance;
+    }
+    MotorFader& valueSource(unsigned slot) {return slot<6?slotFader(slot):slot==6?dirt_:sliders_[slot];}
+    void bindValues() {
+        for(unsigned slot=0;slot<display_.values.size();++slot) {
+            auto& source=valueSource(slot);auto& value=display_.values[slot];
+            juce::String id=source.isEnabled()?(slot==6?juce::String("analog"):source.getComponentID()):juce::String{};
+            if(displayed_xl_ && slot<6 && source.isEnabled()) id=source.getProperties()["parameter_id"].toString();
+            value.setEnabled(source.isEnabled());
+            if(id==value_ids_[slot]) continue;
+            endValueGesture(slot);value_attachments_[slot].reset();value_ids_[slot]=id;
+            value.getProperties().set("parameter_id",id);
+            if(auto* parameter=processor_.state.getParameter(id))
+                value_attachments_[slot]=std::make_unique<juce::ParameterAttachment>(*parameter,[](float){});
+        }
+    }
+    void syncValues() {
+        const juce::ScopedValueSetter<bool> binding(binding_values_,true);
+        for(unsigned slot=0;slot<display_.values.size();++slot) {
+            auto& source=valueSource(slot);auto& value=display_.values[slot];
+            // Reuse each fader's native, including non-linear, range and snapping.
+            value.setNormalisableRange(source.getNormalisableRange());
+            value.setDoubleClickReturnValue(source.isDoubleClickReturnEnabled(),source.getDoubleClickReturnValue());
+            value.setValue(source.getValue(),juce::dontSendNotification);
+        }
+    }
     using SliderAttachment=juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment=juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboAttachment=juce::AudioProcessorValueTreeState::ComboBoxAttachment;
@@ -1211,7 +1375,7 @@ private:
             names[slot]=index==15?"CHORUS":index==16?"DIFFUSION":captions[index];values[slot]=param->getText(param->getValue(),0);
             if(param->getLabel().isNotEmpty()) values[slot]+=" "+param->getLabel();
         }
-        display_.updateSlots(names,values);
+        display_.updateSlots(names,values);syncValues();
         if(xl) display_.update(program,processor_.getProgramName(program),names[focused_xl_slot_],values[focused_xl_slot_]);
         display_.updatePages(processor_.parameterPages(),unsigned(page_),processor_.ready());
         display_.getProperties().set("page_index",page_);
@@ -1239,20 +1403,20 @@ private:
         rom_setup_.setVisible(rom_setup_.shouldBeVisible());
         display_.firmware.setTooltip(ready?"Engine used by the selected algorithm. Click to import ROMs.":processor_.romStatus()+" Click to import ROMs.");
         for(unsigned i=0;i<sliders_.size();++i) {
-            auto& slider=sliders_[i];slider.setVisible(i>=7 || (!xl && (page_==0?i<6:i==6)));
+            auto& slider=sliders_[i];slider.setVisible(!compact_ && (i>=7 || (!xl && (page_==0?i<6:i==6))));
             slider.setEnabled(ready && (i!=6 || program!=3));slider.setParked(i==6 && program==3);
         }
-        for(auto& slider:xl_sliders_) slider.setVisible(xl);
+        for(auto& slider:xl_sliders_) slider.setVisible(xl && !compact_);
         if(rebind) {bindXL();bound_program_=program;bound_page_=page_;bound_ready_=ready;}
         if(const auto* data=processor_.xlProgram()) synchronizeXL(*data);
-        for(unsigned slot=0;slot<6;++slot) parked_[slot].setVisible(!xl && page_==1 && slot!=4);
+        for(unsigned slot=0;slot<6;++slot) parked_[slot].setVisible(!compact_ && !xl && page_==1 && slot!=4);
         if(engine_changed) for(unsigned slot=0;slot<6;++slot) slotFader(slot).animateFrom(positions[slot]);
         // The unified list remains accessible so a missing bank cannot trap the UI.
         display_.algorithm.setEnabled(processor_.programAvailable(0) || processor_.programAvailable(6));
         display_.preset.setEnabled((processor_.programAvailable(0) || processor_.programAvailable(6)) && !preset_dialog_open_);
         display_.save.setEnabled(ready && !preset_dialog_open_);
         for(auto& output:display_.outputs) output.setEnabled(ready);
-        dirt_.setEnabled(ready);
+        dirt_.setEnabled(ready);dirt_.setVisible(!compact_);
         const auto* data=processor_.xlProgram();
         for(unsigned i=0;i<display_.modes.size();++i) display_.modes[i].setEnabled(ready && (!xl || (data && (i==0?(data->modulation.flags&15):data->dynamics.enabled))));
         display_.modes[1].setTooltip("Decay Optimization: adapts feedback diffusion during the decay. Saved in presets.");
@@ -1263,7 +1427,7 @@ private:
                 "Diffusion: drag or use arrow keys. Double-click resets.");
             repaint();
         }
-        refreshDisplay();refreshQuickPresets();
+        bindValues();refreshDisplay();refreshQuickPresets();
     }
     void refreshQuickPresets() {
         const auto names=processor_.quickPresetNames();const int active=processor_.activeQuickPreset();
@@ -1282,11 +1446,19 @@ private:
     void timerCallback() override {
         const bool showing=isShowing();const bool focused=getPeer() && getPeer()->isFocused();
         if((was_showing_ && !showing) || (was_focused_ && !focused)) cancelTransientUi();
-        was_showing_=showing;was_focused_=focused;refreshProgram();
+        was_showing_=showing;was_focused_=focused;
+        const auto appearance=processor_.editorAppearance();
+        if(appearance.brightness!=appearance_.brightness || appearance.emphasis!=appearance_.emphasis || appearance.compact!=compact_) applyAppearance();
+        refreshProgram();
         owned_dialogs_.erase(std::remove_if(owned_dialogs_.begin(),owned_dialogs_.end(),[](auto dialog){return dialog==nullptr;}),owned_dialogs_.end());
     }
     NativeHallProcessor& processor_;
-    juce::Image background_,bezel_;
+    juce::Image background_,compact_background_,bezel_;
+    NativeHallProcessor::EditorAppearance appearance_;
+    bool compact_=false,binding_values_=false;
+    std::array<juce::String,9> value_ids_;
+    std::array<bool,9> value_dragging_{};
+    std::array<std::unique_ptr<juce::ParameterAttachment>,9> value_attachments_;
     InstrumentLook look_;
     juce::TooltipWindow tooltips_{this,650};
     Display display_;
@@ -1323,10 +1495,19 @@ private:
 };
 
 CineolEditor::CineolEditor(NativeHallProcessor& processor):AudioProcessorEditor(processor),panel_(std::make_unique<Panel>(processor)) {
-    addAndMakeVisible(*panel_);setResizable(true,true);setResizeLimits(minimum_editor_width,minimum_editor_height,panel_width,panel_height);
-    getConstrainer()->setFixedAspectRatio(double(panel_width)/panel_height);setSize(minimum_editor_width,minimum_editor_height);
+    addAndMakeVisible(*panel_);setResizable(true,true);
+    panel_->onCompactChanged=[this](bool compact){setCompact(compact);};
+    setCompact(panel_->isCompact());
 }
 CineolEditor::~CineolEditor()=default;
+void CineolEditor::setCompact(bool compact) {
+    if(getWidth()>0) full_width_=getWidth();
+    const int height=compact?compact_height:panel_height;
+    getConstrainer()->setFixedAspectRatio(double(panel_width)/height);
+    setResizeLimits(minimum_editor_width,int(std::lround(minimum_editor_width*double(height)/panel_width)),panel_width,height);
+    setSize(full_width_,int(std::lround(full_width_*double(height)/panel_width)));
+    resized();
+}
 void CineolEditor::resized() {
-    panel_->setTransform(juce::AffineTransform::scale(float(getWidth())/panel_width,float(getHeight())/panel_height));
+    panel_->setTransform(juce::AffineTransform::scale(float(getWidth())/panel_width));
 }

@@ -60,6 +60,95 @@ static juce::Component* findNamed(juce::Component& root,const juce::String& name
     for(auto* child:root.getChildren()) if(auto* found=findNamed(*child,name)) return found;
     return nullptr;
 }
+static void dragScreenValue(juce::Slider& value,float dy) {
+    const auto start=value.getLocalBounds().toFloat().getCentre();
+    const auto now=juce::Time::getCurrentTime();
+    const auto source=juce::Desktop::getInstance().getMainMouseSource();
+    const juce::MouseEvent down(source,start,juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier),1,0,0,0,0,
+        &value,&value,now,start,now,1,false);
+    value.mouseDown(down);value.mouseDrag(down.withNewPosition(start.translated(0,dy)));
+    value.mouseUp(down.withNewPosition(start.translated(0,dy)));
+}
+static void check_display_controls() {
+    NativeHallProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* display=find(*editor,"display");
+    auto* compact=dynamic_cast<juce::ToggleButton*>(find(*editor,"compact_mode"));
+    auto* brightness=dynamic_cast<juce::Slider*>(find(*editor,"display_brightness"));
+    auto* emphasis=dynamic_cast<juce::Slider*>(find(*editor,"display_emphasis"));
+    require(display && compact && brightness && emphasis,"display preferences missing");
+    struct Events final : juce::AudioProcessorParameter::Listener {
+        unsigned changes=0,begins=0,ends=0;
+        void parameterValueChanged(int,float) override {++changes;}
+        void parameterGestureChanged(int,bool starting) override {starting?++begins:++ends;}
+    } events;
+    for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->addListener(&events);
+    brightness->setValue(35,juce::sendNotificationSync);emphasis->setValue(95,juce::sendNotificationSync);
+    compact->setToggleState(true,juce::dontSendNotification);compact->onClick();
+    require(editor->getWidth()==984 && editor->getHeight()==252,"compact editor dimensions");
+    auto* settings=find(*editor,"settings_panel");auto* gear=find(*editor,"settings");
+    auto* panel=find(*editor,"cineol_panel");
+    require(settings->getY()>gear->getBottom() && panel->getLocalBounds().contains(settings->getBounds()),
+            "compact Settings obscures gear or leaves housing");
+    for(const char* id:{"display_brightness","display_emphasis","compact_mode","low_latency","spillover","spillover_time"})
+        require(settings->getLocalBounds().contains(find(*editor,id)->getBounds()),"compact settings control is clipped");
+    require(!find(*editor,"bass")->isVisible() && !find(*editor,"dirt")->isVisible() &&
+            !find(*editor,"quick_preset_1")->isVisible(),"compact mode retained physical controls");
+    require(std::abs(display->getAlpha()-0.35f)<1.0f/255 && std::abs(float(display->getProperties()["emphasis"])-0.95f)<1e-5f,
+            "appearance settings did not reach display");
+    require(events.changes==0 && events.begins==0 && events.ends==0,"appearance changed audio parameters");
+    auto* crossover=dynamic_cast<juce::Slider*>(find(*editor,"screen_value_2"));
+    require(crossover && crossover->isEnabled(),"screen crossover missing");
+    crossover->setValue((crossover->getMinimum()+crossover->getMaximum())/2,juce::sendNotificationSync);
+    events={};const double before=crossover->getValue();dragScreenValue(*crossover,-45);
+    require(crossover->getValue()>before && p.state.getRawParameterValue("crossover")->load()==float(crossover->getValue()),"upward number drag did not increase crossover");
+    require(events.begins==1 && events.ends==1 && events.changes>0,"number drag automation gesture is unbalanced");
+    events={};const double high=crossover->getValue();dragScreenValue(*crossover,45);
+    require(crossover->getValue()<high && events.begins==1 && events.ends==1,"downward drag/gesture failed");
+    set(p,"crossover",12);require(crossover->getValue()==12,"host automation did not update screen number");
+    auto* dirt=dynamic_cast<juce::Slider*>(find(*editor,"screen_value_6"));
+    dirt->setValue(0.4,juce::sendNotificationSync);
+    require(std::abs(p.state.getRawParameterValue("analog")->load()-0.6f)<1e-5f,"screen Dirt inversion failed");
+    juce::MemoryBlock saved;p.getStateInformation(saved);
+    NativeHallProcessor restored;restored.setStateInformation(saved.getData(),int(saved.getSize()));
+    std::unique_ptr<juce::AudioProcessorEditor> reopened(restored.createEditor());
+    require(reopened->getHeight()==252 && std::abs(find(*reopened,"display")->getAlpha()-0.35f)<1.0f/255 &&
+        std::abs(restored.editorAppearance().emphasis-0.95f)<1e-5f,"session appearance restoration failed");
+    const auto count=p.getParameters().size();
+    // Exercise every available page/number in both engines, including the
+    // XL controls that use scale factors and program-dependent pre-delay ranges.
+    for(int program=0;program<p.getNumPrograms();++program) {
+        if(!p.programAvailable(program)) continue;
+        p.setCurrentProgram(program);
+        juce::Timer::callPendingTimersSynchronously();
+        for(unsigned page=0;page<p.parameterPages();++page) {
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(page+1)).toRawUTF8()));
+            button->onClick();
+            for(unsigned slot=0;slot<9;++slot) {
+                auto* number=dynamic_cast<juce::Slider*>(find(*editor,("screen_value_"+juce::String(slot)).toRawUTF8()));
+                if(!number->isEnabled()) continue;
+                const auto id=number->getProperties()["parameter_id"].toString();
+                auto* parameter=p.state.getParameter(id);require(parameter!=nullptr,"number bound to missing parameter");
+                number->setValue(number->proportionOfLengthToValue(0.35),juce::sendNotificationSync);
+                events={};const double low=number->getValue();dragScreenValue(*number,-40);
+                require(number->getValue()>low && events.begins==1 && events.ends==1,"page number upward gesture failed");
+                double expected=number->getValue();
+                if(slot==6) expected=1-expected;
+                else if(NativeHallProcessor::isXL(program) && slot<6) {
+                    if(id=="xl_chorus") expected/=8;
+                    if(id=="xl_diffusion") expected/=4;
+                }
+                require(std::abs(parameter->convertFrom0to1(parameter->getValue())-expected)<0.001,"page number changed wrong parameter or scale");
+            }
+        }
+    }
+    for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->removeListener(&events);
+    compact->setToggleState(false,juce::dontSendNotification);compact->onClick();
+    require(editor->getWidth()==984 && editor->getHeight()==744 && find(*editor,"dirt")->isVisible(),"full-mode restoration failed");
+    require(p.getParameters().size()==count,"presentation added DAW parameters");
+    std::cout<<"Display: preferences isolated, session restoration, compact layout, bidirectional drag and balanced automation on all available program pages passed\n";
+}
+
 static void check_editor() {
     NativeHallProcessor p;
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
@@ -1232,7 +1321,7 @@ int main(int argc,char** argv) {
     const std::string option=argc>1?argv[1]:"";
     const bool original_fixture=argc==3 && (option=="--bank" || option=="--spillover-224-check" || option=="--spillover-224-cpu");
     const bool dual_fixture=argc==4 && (option=="--banks" || option=="--preset-check" || option=="--limits-check" ||
-        option=="--spillover-check" || option=="--quick-check" || option=="--focus-check");
+        option=="--spillover-check" || option=="--quick-check" || option=="--focus-check" || option=="--display-check");
     const bool migration_fixture=argc==5 && option=="--xl-cache-migration";
     require(argc==1 || original_fixture || dual_fixture || migration_fixture || (argc==2 && option=="--ui") ||
         (argc>=3 && argc<=6 && option=="--editor"),
@@ -1270,6 +1359,7 @@ int main(int argc,char** argv) {
         std::cout<<"XL v4 -> v5 cache: explicit re-import, original bank retained, corrected cache ready, legacy bytes preserved\n";
         return 0;
     }
+    if(argc==4 && option=="--display-check") {check_display_controls();return 0;}
     if(argc==4 && std::string(argv[1])=="--focus-check") {check_editor_window_focus();return 0;}
     if(argc==3 && std::string(argv[1])=="--spillover-224-check") {check_spillover(true);return 0;}
     if(argc==3 && std::string(argv[1])=="--spillover-224-cpu") {benchmark_spillover_224();return 0;}
@@ -1318,6 +1408,8 @@ int main(int argc,char** argv) {
         }
         if(argc==5 && std::string(argv[4])=="preset")
             require(p.savePreset(demo.folder.getChildFile("Warm Concert Hall.cineol224")).wasOk(),"preview preset failed");
+        if(argc==5 && (std::string(argv[4])=="compact" || std::string(argv[4])=="compact-settings" || std::string(argv[4])=="compact-presets" || std::string(argv[4])=="compact-dim" || std::string(argv[4])=="compact-save"))
+            p.setEditorAppearance({std::string(argv[4])=="compact-dim"?0.35f:1.0f,0.8f,true});
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
         juce::Component* snapshot=editor.get();
         if(argc==6) {
@@ -1332,17 +1424,17 @@ int main(int argc,char** argv) {
             const auto end=juce::Time::getMillisecondCounterHiRes()+400;
             while(juce::Time::getMillisecondCounterHiRes()<end) {juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();}
         }
-        if(argc==5 && std::string(argv[4])=="settings") {
+        if(argc==5 && (std::string(argv[4])=="settings" || std::string(argv[4])=="compact-settings")) {
             auto* button=dynamic_cast<juce::Button*>(find(*editor,"settings"));
             require(button!=nullptr,"Settings button missing");button->setToggleState(true,juce::sendNotificationSync);
         }
-        if(argc==5 && std::string(argv[4])=="save") {
+        if(argc==5 && (std::string(argv[4])=="save" || std::string(argv[4])=="compact-save")) {
             auto* button=dynamic_cast<juce::Button*>(find(*editor,"save_preset"));
             require(button!=nullptr,"Save button missing");button->onClick();
             snapshot=juce::Component::getCurrentlyModalComponent();
             require(dynamic_cast<juce::AlertWindow*>(snapshot)!=nullptr,"Save dialog missing");
         }
-        if(argc==5 && (std::string(argv[4])=="presets" || std::string(argv[4])=="assign")) {
+        if(argc==5 && (std::string(argv[4])=="presets" || std::string(argv[4])=="assign" || std::string(argv[4])=="compact-presets")) {
             auto* button=dynamic_cast<juce::Button*>(find(*editor,"preset"));
             require(button && bool(button->onClick),"Preset browser button missing");button->onClick();
             require(find(*editor,"preset_browser") && find(*editor,"preset_browser")->isVisible(),"Preset browser missing");

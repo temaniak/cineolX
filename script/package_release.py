@@ -17,15 +17,27 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def version():
+def numeric_version():
     return re.search(r'project\(CineolX224 VERSION ([0-9]+\.[0-9]+\.[0-9]+)',
                      (ROOT / 'CMakeLists.txt').read_text()).group(1)
+
+
+def version():
+    public = re.search(r'set\(CINEOL_RELEASE_VERSION "([^"\n]+)"\)',
+                       (ROOT / 'CMakeLists.txt').read_text())
+    if public and not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+|[A-Z]+)', public.group(1)):
+        raise ValueError('Invalid public release version')
+    return public.group(1) if public else numeric_version()
+
+
+def is_prerelease():
+    return bool(re.fullmatch(r'[0-9]+\.[0-9]+[A-Z]+', version()))
 
 
 def verify_bundle(bundle, platform):
     if platform == 'macos':
         info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
-        if info['CFBundleShortVersionString'] != version():
+        if info['CFBundleShortVersionString'] != numeric_version():
             raise RuntimeError(f'{bundle.name}: stale bundle version')
         executable = bundle / 'Contents/MacOS' / info['CFBundleExecutable']
         architectures = subprocess.check_output(['lipo', '-archs', str(executable)], text=True).split()
@@ -70,7 +82,7 @@ def package(platform, build_dir, output_dir):
         for document in ('README.md', 'NOTICE.md'):
             shutil.copy2(ROOT / document, staging / document)
         shutil.copy2(ROOT / 'docs/releases' / ('v' + version() + '.md'), staging / 'RELEASE-NOTES.md')
-        metadata = dict(version=version(), platform=label,
+        metadata = dict(version=version(), numeric_version=numeric_version(), prerelease=is_prerelease(), platform=label,
                         commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                         dependencies=json.loads((ROOT / 'dependencies.json').read_text()), juce='8.0.14')
         (staging / 'BUILD-INFO.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
@@ -102,13 +114,16 @@ def package(platform, build_dir, output_dir):
                     '224X v8.1, 224 XL v8.1A and incomplete or modified sets are rejected.\n'
                     'ROMs and prepared banks are not included. Your files stay local;\n'
                     'later launches use the cache. See README.md for details.\n')
-        install += ('\nUPGRADING TO 0.9.8\n'
+        install += ('\nUPGRADING TO ' + version() + '\n'
                     'XL sound corrections require the version-5 prepared cache. Re-import your\n'
                     'complete original 224XL v8.21 ROM set once after updating. The previous\n'
                     'XL caches, including the 0.9.6 version-4 cache, are retained. Original-224\n'
                     'caches and sound presets remain compatible. No re-import is needed if\n'
                     'the corrected version-5 cache has already been prepared locally.\n'
-                    'The editor opens at 984 x 744; a host may restore its saved window size.\n'
+                    'The editor opens at 984 x 744; compact display mode is 984 x 252.\n'
+                    'The gear contains Display brightness, Option illumination and Compact\n'
+                    'display mode. Drag screen values up/down; hold Shift for fine adjustment.\n'
+                    'Appearance is saved in the DAW session. A host may restore window size.\n'
                     'See RELEASE-NOTES.md for changes, validation and known limitations.\n')
         (staging / 'INSTALL.txt').write_text(install, encoding='utf-8')
         if platform == 'macos':
@@ -139,14 +154,18 @@ def main():
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/dist')
     parser.add_argument('--check-tag', action='store_true')
     parser.add_argument('--version', action='store_true')
+    parser.add_argument('--prerelease', action='store_true')
     args = parser.parse_args()
+    if args.prerelease:
+        print('true' if is_prerelease() else 'false')
+        return
     if args.version:
         print(version())
         return
     if args.check_tag:
         expected = 'v' + version()
         if os.environ.get('RELEASE_TAG') != expected:
-            parser.error(f'Release tag must match CMake version: {expected}')
+            parser.error(f'Release tag must match public version: {expected}')
         print(f'Release tag matches {expected}')
         return
     if not args.platform or not args.build_dir:

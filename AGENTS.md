@@ -28,3 +28,14 @@
 - Preserve reports, metrics, logs and provenance. Record removed archive paths and any retained identical replacement so historical evidence can still be located.
 - Do not delete user recordings, source assets, ROMs, banks, firmware, hardware adapters, dependency resources or unrelated files as cache cleanup. Never clean or perform file I/O inside audio processing.
 - Reuse existing fixtures and avoid accumulating repeated full WAV campaigns when a narrow check or saved metrics suffice.
+
+## Release naming
+
+- Use the lettered pre-1 release series requested by the user, starting with
+  `0.99A`, then `0.99B`, `0.99C`, `0.99D`, and subsequent alphabetic suffixes.
+- Publish these as GitHub prereleases. Public tags and archives use the lettered
+  version (`v0.99A`); keep a monotonically increasing numeric CMake/plugin version
+  for AU/VST3 and bundle compatibility (`0.99.1` for A, `0.99.2` for B, etc.).
+- Do not create version 1 or switch back to numeric public release names until
+  the user explicitly requests release 1. Do not create future releases without
+  a release request; this rule defines naming, not an automatic schedule.
