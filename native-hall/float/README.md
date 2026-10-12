@@ -14,10 +14,18 @@ delay lines during preparation. All storage is reserved outside processing.
 
 The coefficient tables and modulation/decay control laws reuse the existing
 locally imported bank. Audio never runs through the integer signal core.
-Control-envelope observations still use the original level coding; control
-tables retain the original coefficient steps. Positive one-sample recursive
-poles are converted to preserve their time constants and DC gains at 48 kHz.
-Other delays retain their durations with linear fractional reads.
+Control-envelope observations still use the original level coding; original
+gain/control steps remain. Internal filter feedback reads retain their original
+coefficients and scaled delays, including a native one-sample delay of
+`1 / 20480` seconds, or `2.34375` host frames. All fractional reads use
+fifth-order Lagrange interpolation, reducing repeated high-frequency loss in
+feedback. It preserves DC gain and delay; magnitude and phase remain
+approximations at higher frequencies. Short recursive reads include a small
+current-sample term, solved analytically before writing the delay line.
+All bank coefficients, including rounded allpass complements, remain literal.
+
+The first prototype's linear interpolation and pole remapping caused audible
+darkening. See [the diagnosis and correction](../../docs/FLOAT_HALL_DARKNESS.md).
 
 ## A/B listening
 
@@ -52,6 +60,8 @@ From the repository root:
 ```sh
 cmake -S . -B build/float-ab -DCMAKE_BUILD_TYPE=Release -DCINEOL_BUILD_FLOAT_AB=ON
 cmake --build build/float-ab --target CineolFloatHallAB_AU CineolFloatHallAB_VST3 CineolFloatHallAB_Standalone cineol_float_hall_check cineol_float_ab_plugin_check -j 6
+cmake --build build/float-ab --target cineol_float_fractional_delay_check
+build/float-ab/native-hall/float/cineol_float_fractional_delay_check
 build/float-ab/native-hall/float/cineol_float_hall_check /absolute/path/to/programs-v44-import-v1.bank224
 build/float-ab/native-hall/float/cineol_float_ab_plugin_check_artefacts/Release/cineol_float_ab_plugin_check
 ```
@@ -61,16 +71,51 @@ the plugin/check to a private test cache containing
 `programs-v44-import-v1.bank224`; the ordinary cache is read-only for this work.
 ROMs, banks and rendered audio stay outside Git.
 
+### Windows x64
+
+Install Visual Studio 2022 Build Tools with the C++ desktop workload and
+Windows SDK, CMake 3.22 or later, Python 3, and Git for Windows. The Git for
+Windows `patch.exe` utility must be on PATH during configuration. In
+PowerShell, from the repository root:
+
+```powershell
+git fetch origin
+git switch cineol_float
+git pull --ff-only
+git submodule update --init deps/reflexion
+
+# Locate Git for Windows' patch utility, as in script/build_plugin.ps1.
+$floatGit = (Get-Command git -ErrorAction Stop).Source
+$floatPatchDir = Join-Path (Split-Path (Split-Path $floatGit -Parent) -Parent) 'usr/bin'
+if (Test-Path (Join-Path $floatPatchDir 'patch.exe')) {
+    $env:PATH = "$floatPatchDir;$env:PATH"
+}
+cmake -S . -B build/float-ab -G "Visual Studio 17 2022" -A x64 -DCINEOL_BUILD_FLOAT_AB=ON -DNATIVE_HALL_BUILD_TOOLS=OFF
+cmake --build build/float-ab --config Release --parallel 6 --target CineolFloatHallAB_VST3 CineolFloatHallAB_Standalone
+```
+
+The VST3 bundle is
+`build/float-ab/native-hall/float/CineolFloatHallAB_artefacts/Release/VST3/Cineol Float Hall AB.vst3`.
+Copy the entire bundle to your VST3 directory and rescan the host. The ordinary
+`script/build_plugin.ps1` builds the main Cineol-X plugin; it does not select
+the experimental A/B targets. This float revision has been validated on macOS;
+the Windows commands describe the intended build and are not a completed
+MSVC/runtime validation. Private ROMs or an existing compatible bank are needed
+for audio, but are not needed to compile the plugin.
+
 ## Current limits
 
-The offline 20.48 kHz specialization checks the collapsed graph against an
-independent, real-valued three-edge ARU with the original shared delay RAM.
+The offline 20.48 kHz specialization
+checks the literal-bank collapsed graph against an independent, real-valued
+three-edge ARU with the original shared delay RAM.
 It proves algebra and memory connectivity without asserting identical integer
 rounding, converter behavior or sound at 48 kHz.
 
 The 48 kHz version intentionally changes bandwidth, arithmetic and quiet-tail
-behavior. Linear interpolation introduces its own high-frequency loss in
-delay feedback; it is an initial interpolation policy, not a final sonic choice.
+behavior. Fractional delay magnitude and phase differ from an ideal delay at high
+frequencies. The wider bandwidth and removed circuit filters can make B
+brighter above the original passband. This is not a claim of identical
+original arithmetic or sound.
 Modulation and Decay Optimization retain nominal control rates rather than
 the original desktop engine's full scan/write timing. Live predelay changes
 are immediate retaps; no click-free predelay transition is claimed.
@@ -79,4 +124,5 @@ Stability, reset, finite guards, allocation checks, native-rate algebra and
 plugin routing/state/host-rate checks do not establish listening acceptance.
 Desktop CPU results do not establish Daisy hardware margin.
 
-See [the first validation report](../../docs/FLOAT_HALL_VALIDATION.md).
+See [the historical first validation report](../../docs/FLOAT_HALL_VALIDATION.md)
+and [the current darkness correction report](../../docs/FLOAT_HALL_DARKNESS.md).

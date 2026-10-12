@@ -2,6 +2,8 @@
 add_executable(cineol_float_hall_check check.cpp)
 target_link_libraries(cineol_float_hall_check PRIVATE native_hall_core)
 set_target_properties(cineol_float_hall_check PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES)
+add_executable(cineol_float_fractional_delay_check fractional_delay_check.cpp)
+set_target_properties(cineol_float_fractional_delay_check PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
 option(CINEOL_BUILD_FLOAT_AB "Build separate experimental Hall A/B plugin" OFF)
 if(CINEOL_BUILD_FLOAT_AB)
     if(NOT CINEOL_BUILD_PLUGIN)

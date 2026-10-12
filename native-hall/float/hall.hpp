@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/hall.hpp"
+#include "fractional_delay.hpp"
 #include <cmath>
 #include <vector>
 
@@ -48,7 +49,7 @@ public:
     void reset() noexcept {
         for(auto& line:lines_) {std::fill(line.samples.begin(),line.samples.end(),0);line.position=0;}
         if(bank_) {compiler_.prepare(*bank_,program);compiler_.set_controls(controls_);}
-        modulation_clock_=decay_clock_=0;crossover_state_.fill(0);treble_state_.fill(0);
+        modulation_clock_=decay_clock_=0;
         if(ready_) compile();
     }
     void set_controls(const native_hall::Controls& controls) noexcept {
@@ -68,6 +69,9 @@ public:
         // Each group below is a sum/allpass/delay connection, collapsed from
         // the fixed Hall B row graph. There are no opcodes or ARU bit edges.
         write<3>(c_[0]*left);
+        // Both captured inputs are available for causal high-order reads of
+        // the short input cross-taps. Integral/native-rate reads are unchanged.
+        write<53>(c_[50]*right);
         const float t1=tap<1>(),t2=tap<2>();
         write<4>(c_[1]*t1+c_[2]*t2);
         write<7>(c_[3]*t2+c_[4]*t1);
@@ -89,14 +93,12 @@ public:
         const float t31=tap<31>(),t32=tap<32>();
         write<34>(c_[31]*t31+c_[32]*t32);write<37>(c_[33]*t32+c_[34]*t31);
         const float t35=tap<35>();
-        const float x37=left_crossover_recursive_?
-            pole(t35,cross_pole_[0],cross_feed_[0],crossover_state_[0]):c_[35]*t35+c_[36]*tap<36>();
+        const float x37=feedback<36,38>(c_[35]*t35,c_[36]);
         write<38>(x37);
         const float x40=c_[37]*t35+c_[38]*x37+c_[39]*tap<39>();
-        write<46>(pole(x40,treble_pole_[0],treble_feed_[0],treble_state_[0]));
+        write<46>(feedback<40,46>(c_[41]*x40,c_[40]));
         output[0]=c_[42]*tap<42>()+c_[43]*tap<43>()+c_[44]*tap<44>()+c_[45]*tap<45>();
 
-        write<53>(c_[50]*right);
         const float t51=tap<51>(),t52=tap<52>();
         write<54>(c_[51]*t51+c_[52]*t52);write<57>(c_[53]*t52+c_[54]*t51);
         const float t55=tap<55>(),t56=tap<56>();
@@ -115,11 +117,10 @@ public:
         const float t81=tap<81>(),t82=tap<82>();
         write<84>(c_[81]*t81+c_[82]*t82);write<87>(c_[83]*t82+c_[84]*t81);
         const float t85=tap<85>();
-        const float x87=right_crossover_recursive_?
-            pole(t85,cross_pole_[1],cross_feed_[1],crossover_state_[1]):c_[85]*t85+c_[86]*tap<86>();
+        const float x87=feedback<86,88>(c_[85]*t85,c_[86]);
         write<88>(x87);
         const float x90=c_[87]*t85+c_[88]*x87+c_[89]*tap<89>();
-        write<96>(pole(x90,treble_pole_[1],treble_feed_[1],treble_state_[1]));
+        write<96>(feedback<90,96>(c_[91]*x90,c_[90]));
         output[2]=c_[92]*tap<92>()+c_[93]*tap<93>()+c_[94]*tap<94>()+c_[95]*tap<95>();
         for(auto& line:lines_) if(++line.position==line.samples.size())line.position=0;
         update_control_clock(left,right);
@@ -132,7 +133,7 @@ private:
         result[48]=94;result[49]=95;return result;
     }();
     struct Binding {unsigned source=0,delay=0;};
-    struct Tap {unsigned source=0,whole=0;float fraction=0;};
+    struct Tap {unsigned source=0,whole=0;FractionalDelay fractional;};
     struct Line {std::vector<float> samples;unsigned position=0;};
     static constexpr unsigned writer_index(unsigned row) noexcept {
         for(unsigned i=0;i<writers.size();++i)if(writers[i]==row)return i;
@@ -152,38 +153,38 @@ private:
     void bind(unsigned row) noexcept {
         const auto binding=resolve(row,compiler_.offsets()[row],compiler_.offsets());
         const float delay=binding.delay*rate_ratio;
-        taps_[row]={binding.source,unsigned(delay),delay-std::floor(delay)};
+        auto& tap=taps_[row];tap.source=binding.source;tap.whole=unsigned(delay);
+        tap.fractional.set_fraction(delay-std::floor(delay));
     }
-    template<unsigned Row> float tap() const noexcept {
+    template<unsigned Row> float tap() noexcept {
         const auto& t=taps_[Row];const auto& line=lines_[t.source];
+        if(t.fractional.integral())return read(line,t.whole);
+        float sum=0;
+        for(unsigned i=0;i<6;++i)sum+=t.fractional.weight(i)*read(line,t.whole-2+i);
+        return sum;
+    }
+    static float read(const Line& line,unsigned delay) noexcept {
         const unsigned size=unsigned(line.samples.size());
-        const unsigned a=line.position>=t.whole?line.position-t.whole:line.position+size-t.whole;
-        const unsigned b=a?a-1:size-1;
-        return line.samples[a]+t.fraction*(line.samples[b]-line.samples[a]);
+        const unsigned index=line.position>=delay?line.position-delay:line.position+size-delay;
+        return line.samples[index];
+    }
+    template<unsigned Row,unsigned Writer> float feedback(float input,float gain) noexcept {
+        const auto& t=taps_[Row];
+        if(t.source==writer_index(Writer) && !t.fractional.integral() && t.whole==2) {
+            // A 2.34375-frame recurrence includes a small current-sample term.
+            // Solve it analytically; do not read an unwritten circular slot.
+            const auto& line=lines_[t.source];float past=0;
+            for(unsigned i=1;i<6;++i)past+=t.fractional.weight(i)*read(line,i);
+            return (input+gain*past)/(1-gain*t.fractional.weight(0));
+        }
+        return input+gain*tap<Row>();
     }
     template<unsigned Row> void write(float value) noexcept {
         auto& line=lines_[writer_index(Row)];line.samples[line.position]=value;
     }
-    static float pole(float input,float feedback,float feed,float& state) noexcept {
-        state=feedback*state+feed*input;return state;
-    }
-    static void convert_pole(float feedback,float feed,float& mapped,float& gain) noexcept {
-        // Preserve positive real pole time and DC gain, rather than copying
-        // a 20.48 kHz coefficient into a 48 kHz recurrence.
-        mapped=feedback>0 && feedback<1?std::pow(feedback,1/rate_ratio):feedback;
-        gain=feedback!=1?feed*(1-mapped)/(1-feedback):feed;
-    }
     void compile() noexcept {
         for(unsigned r=0;r<100;++r)c_[r]=compiler_.coefficients()[r]/32.0f;
         for(unsigned row:all_readers)bind(row);
-        const auto left=resolve(36,compiler_.offsets()[36],compiler_.offsets());
-        const auto right=resolve(86,compiler_.offsets()[86],compiler_.offsets());
-        left_crossover_recursive_=writers[left.source]==38 && left.delay==1;
-        right_crossover_recursive_=writers[right.source]==88 && right.delay==1;
-        convert_pole(c_[36],c_[35],cross_pole_[0],cross_feed_[0]);
-        convert_pole(c_[86],c_[85],cross_pole_[1],cross_feed_[1]);
-        convert_pole(c_[40],c_[41],treble_pole_[0],treble_feed_[0]);
-        convert_pole(c_[90],c_[91],treble_pole_[1],treble_feed_[1]);
     }
     void update_control_clock(float left,float right) noexcept {
         const auto& p=bank_->programs[program];
@@ -218,9 +219,8 @@ private:
     std::array<Line,34> lines_;
     std::array<Tap,100> taps_{};
     std::array<float,100> c_{};
-    std::array<float,2> crossover_state_{},treble_state_{},cross_pole_{},cross_feed_{},treble_pole_{},treble_feed_{};
     unsigned modulation_clock_=0,decay_clock_=0;
-    bool ready_=false,left_crossover_recursive_=false,right_crossover_recursive_=false;
+    bool ready_=false;
 };
 using Hall48=Hall<48000>;
 } // namespace cineol::floating

@@ -2,6 +2,11 @@
 
 October 12, 2026. Branch: `cineol_float`.
 
+Historical first-prototype checkpoint. The user's subsequent listening found
+the float path darker. Its linear interpolation and pole remapping were
+superseded by the [darkness diagnosis and correction](FLOAT_HALL_DARKNESS.md).
+The original results below remain evidence for that first implementation.
+
 ## Scope and behavior
 
 The user requested a separate float Hall at 48 kHz, direct input/output without
@@ -45,10 +50,11 @@ JUCE: 8.0.14, reused from the existing local source checkout.
 Build: macOS arm64, Release, floating-point contraction disabled.
 The original v4.4 bank was reused; no ROMs or banks were reimported or changed.
 
-Exact local commands:
+Reproduction commands (local JUCE source paths are retained only in ignored
+build logs; CMake otherwise fetches the pinned JUCE version):
 
 ```sh
-cmake -S . -B build/float-ab -DCMAKE_BUILD_TYPE=Release -DCINEOL_BUILD_FLOAT_AB=ON -DFETCHCONTENT_SOURCE_DIR_JUCE=/Users/evgeniystrukov/reflexion-224/out/reflexion-private-backup-20261003/juce-plugin/build/_deps/juce-src -DNATIVE_HALL_ROM_DIR= -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake -S . -B build/float-ab -DCMAKE_BUILD_TYPE=Release -DCINEOL_BUILD_FLOAT_AB=ON -DNATIVE_HALL_ROM_DIR= -DCMAKE_OSX_ARCHITECTURES=arm64
 cmake --build build/float-ab --target CineolFloatHallAB_AU CineolFloatHallAB_VST3 CineolFloatHallAB_Standalone cineol_float_ab_plugin_check cineol_float_hall_check -j 6
 build/float-ab/native-hall/float/cineol_float_hall_check build/rom/native-hall/programs-v44.bank224
 build/float-ab/native-hall/float/cineol_float_ab_plugin_check_artefacts/Release/cineol_float_ab_plugin_check
