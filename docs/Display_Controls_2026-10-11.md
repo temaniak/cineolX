@@ -22,10 +22,21 @@ DAW gesture boundaries, original 224 bindings, XL chorus/diffusion scaling and
 Dirt's inverse relationship to the legacy `analog` parameter. Unavailable
 controls are disabled.
 
-Appearance is stored as session properties (`display_brightness`,
-`display_emphasis`, `editor_compact`), outside the audio parameter list and sound
-presets. Existing parameter IDs, bank data, DSP processing and firmware are
-unchanged. Opening a restored session/editor restores the appearance.
+Appearance and size are stored as session properties (`display_brightness`,
+`display_emphasis`, `editor_compact`, `editor_width`), outside the audio parameter
+list and sound presets. Editor changes also persist defaults in
+`editor-settings.xml`, beside the imported bank caches. Writes are coalesced on
+the message thread and flushed when the editor closes. New instances and
+application restarts inherit these defaults; explicit session values take
+precedence. Older sessions without these properties retain the current defaults.
+The fixed aspect ratio determines height from saved width and display mode.
+Existing parameter IDs, bank data, DSP processing and firmware are unchanged.
+
+At 75–100% brightness, LED cores gradually gain a small warm luminance lift
+(18% interpolation toward pale orange at 100%). Brightness settings at or below
+75% retain their original rendering. This applies to both layouts, including
+numeric values, captions, selectors and preset text, preserving disabled-control
+alpha and the glass artwork.
 
 ## Artwork
 
@@ -87,3 +98,22 @@ cmake --build build/plugin --parallel 6 --target NativeHall224_VST3 NativeHall22
 
 Built bundles are in `build/plugin/NativeHall224_artefacts/Release/`.
 Current screenshots and logs are in `build/validation/display-20261011/`.
+
+## Persistence correction validation
+
+- Universal AU, VST3 and Standalone rebuilds succeeded; bundles were signed and
+  verified. Build logs: `persistence-build.log`, `persistence-final-build.log`.
+- The expanded `--display-check` verifies a resized 1230×315 compact editor,
+  editor reopen, session restore, new-instance defaults, independent disk reads,
+  legacy-session fallback, restore into an already-open editor and return to a
+  1230×930 full editor, as well as the existing controls on all 28 programs.
+- `--appearance-write DIR` and `--appearance-read DIR` passed in separate
+  processes, confirming application-restart restoration without relying on
+  shared in-memory preferences. Fixture settings and logs are retained under
+  `restart-preferences/` and `persistence-restart-*.log`.
+- `compact-brighter-xl.png` was visually compared with the original
+  `compact.png`: slightly brighter LED cores, intact glass and housing. Preview
+  cache entries in `appearance-preview/` are symlinks to existing validation
+  banks, avoiding additional bank copies. No obsolete bulk material was created.
+- This correction does not change DSP. Actual DAW-host installation was not
+  performed as part of this correction.

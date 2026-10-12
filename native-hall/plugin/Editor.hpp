@@ -8,7 +8,8 @@ public:
     void resized() override;
 private:
     void setCompact(bool);
-    int full_width_=984;
+    NativeHallProcessor& processor_;
+    bool initialising_=true;
     struct Panel;
     std::unique_ptr<Panel> panel_;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CineolEditor)

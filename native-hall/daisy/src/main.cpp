@@ -7,6 +7,7 @@ using Board=daisy::patch_sm::DaisyPatchSM;
 using Board=daisy::DaisySeed;
 #endif
 #include "Controls.hpp"
+#include "Io224.hpp"
 #if __has_include("HardwareAdapter.local.hpp")
 #include "HardwareAdapter.local.hpp"
 #else
@@ -19,7 +20,7 @@ namespace {
 Board hardware;
 HardwareAdapter adapter;
 cineol::controls::Mapper mapper;
-native_hall::Engine48 engine;
+native_hall::DaisyEngine224 engine;
 alignas(native_hall::ProgramBank) unsigned char bank_storage[sizeof(native_hall::ProgramBank)]
     __attribute__((section(".hall_bank_bss")));
 unsigned blocks=0,last_program=native_hall::program_count;

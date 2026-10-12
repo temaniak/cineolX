@@ -5,6 +5,15 @@ The controller interface is independent of the carrier board: ten readings,
 two logical buttons and RGB output for the selected algorithm. No button LED
 outputs are exposed. The default reference adapter has no assigned I/O pins.
 
+The original-224 audio boundary follows current Cineol-X converter phases and
+filters using a compact float 33-tap input kernel and event-timed output
+reconstruction. Coefficients are prepared offline; no output SRC FIR is needed.
+Reverberation algorithms and the hardware control schedule are unchanged.
+See [converter validation](../../docs/DAISY_IO224_VALIDATION.md) for sound, CPU,
+memory and physical-hardware limitations. Tables are checked before every build;
+regenerate them with `python3 tools/generate_io_tables.py` after changing the
+desktop original-224 ADC/DAC model. 224XL is outside this Daisy implementation.
+
 ## Connect your hardware
 
 1. Copy `src/ControlConfig.example.hpp` to `src/ControlConfig.local.hpp`.

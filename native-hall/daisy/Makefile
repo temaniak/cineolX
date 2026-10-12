@@ -6,6 +6,9 @@ SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core
 PROFILE ?= ../../build/rom/native-hall/programs-v44.bank224
 NATIVE_HALL_ROM_DIR ?= $(abspath ../../firmware)/224 v4_4
 ifneq ($(MAKECMDGOALS),clean)
+ifneq ($(shell python3 tools/generate_io_tables.py --check >/dev/null && echo verified),verified)
+$(error Daisy I/O tables must match the current Cineol-X original-224 ADC/DAC sources)
+endif
 ifneq ($(shell python3 tools/verify_roms.py "$(NATIVE_HALL_ROM_DIR)" >/dev/null && echo verified),verified)
 $(error Original Lexicon 224 v4.4 ROM1-ROM5 are required to build or flash this firmware)
 endif

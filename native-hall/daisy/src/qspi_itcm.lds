@@ -27,6 +27,8 @@ SECTIONS
         _hall_itcm_start = .;
         *hall.o(.text .text.*)
         *main.o(.text.*AudioCallback* .text.*Engine48*process* .text.*ProcessControls*)
+        *main.o(.text._ZN11native_hall13DaisyInput224* .text._ZNK11native_hall13DaisyInput224*
+                .text._ZN11native_hall14DaisyOutput224* .text._ZNK11native_hall14DaisyOutput224*)
         . = ALIGN(4); _hall_itcm_end = .;
     } > ITCMRAM AT > QSPIFLASH
     _hall_itcm_load = LOADADDR(.itcm_text);

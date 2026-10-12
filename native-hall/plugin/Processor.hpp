@@ -6,6 +6,13 @@
 #include <juce-plugin/plugin/rate_bridge.hpp>
 #include <juce_audio_utils/juce_audio_utils.h>
 
+// Shared across plugin instances; loaded at construction and written only by UI
+// actions. PropertiesFile coalesces resize/slider changes on the message thread.
+struct CineolEditorPreferences {
+    CineolEditorPreferences();
+    juce::PropertiesFile file;
+};
+
 class NativeHallProcessor final : public juce::AudioProcessor,private juce::Timer {
 public:
     NativeHallProcessor();
@@ -60,7 +67,8 @@ public:
     bool presetModified();
     int editorPage() {const juce::ScopedLock lock(preset_write_lock_);return std::clamp(int(state.state.getProperty("editor_page",0)),0,8);}
     void setEditorPage(int page) {const juce::ScopedLock lock(preset_write_lock_);state.state.setProperty("editor_page",std::clamp(page,0,8),nullptr);}
-    // Presentation preferences are session properties, never audio parameters.
+    // Presentation preferences are session properties with persistent defaults,
+    // never audio parameters. Setters are called only by the editor.
     struct EditorAppearance {float brightness=1,emphasis=0.8f;bool compact=false;};
     EditorAppearance editorAppearance() {
         const juce::ScopedLock lock(preset_write_lock_);
@@ -71,12 +79,10 @@ public:
         return {number("display_brightness",1,0.15f),number("display_emphasis",0.8f,0),
                 bool(state.state.getProperty("editor_compact",false))};
     }
-    void setEditorAppearance(EditorAppearance value) {
-        const juce::ScopedLock lock(preset_write_lock_);
-        state.state.setProperty("display_brightness",std::isfinite(value.brightness)?std::clamp(value.brightness,0.15f,1.0f):1.0f,nullptr);
-        state.state.setProperty("display_emphasis",std::isfinite(value.emphasis)?std::clamp(value.emphasis,0.0f,1.0f):0.8f,nullptr);
-        state.state.setProperty("editor_compact",value.compact,nullptr);
-    }
+    void setEditorAppearance(EditorAppearance);
+    int editorWidth() {const juce::ScopedLock lock(preset_write_lock_);return std::clamp(int(state.state.getProperty("editor_width",984)),984,1640);}
+    void setEditorWidth(int);
+    void flushEditorPreferences() {editor_preferences_->file.saveIfNeeded();}
     unsigned presetRecallRevision() const noexcept {return preset_recall_revision_.load(std::memory_order_acquire);}
     bool presetRecallInProgress() const noexcept {return (parameter_transaction_.load(std::memory_order_acquire)&1u)!=0;}
     juce::AudioProcessorValueTreeState state;
@@ -86,6 +92,7 @@ public:
     static constexpr unsigned xl_parameter_begin=17;
     static constexpr unsigned parameter_count=std::size(ids);
 private:
+    juce::SharedResourcePointer<CineolEditorPreferences> editor_preferences_;
     juce::Result applyPreset(const juce::ValueTree&,const juce::String&);
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
     void updateLatency();

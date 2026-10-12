@@ -13,6 +13,10 @@ cmake -S "$TASK_ROOT" -B "$TASK_ROOT/build/rom" -DCMAKE_BUILD_TYPE=Release \
     -DCINEOL_BUILD_PLUGIN=OFF -DNATIVE_HALL_BUILD_TOOLS=ON "-DNATIVE_HALL_ROM_DIR=$TASK_ROM"
 cmake --build "$TASK_ROOT/build/rom" --parallel "${BUILD_JOBS:-6}" --target native_224_bank_check
 if [[ "$TASK_MODE" != --build-only ]]; then
+    python3 "$TASK_ROOT/native-hall/daisy/tools/generate_io_tables.py" --check
+    cmake --build "$TASK_ROOT/build/rom" --parallel "${BUILD_JOBS:-6}" --target cineol_daisy_io224_check
+    "$TASK_ROOT/build/rom/native-hall/cineol_daisy_io224_check" \
+        "$TASK_ROOT/build/rom/native-hall/programs-v44.bank224" "$TASK_ROOT/build/rom/native-hall/daisy-io224-check" --quick
     python3 "$TASK_ROOT/native-hall/daisy/tests/rom_build_check.py" "$TASK_ROM"
     "$TASK_ROOT/build/rom/native-hall/native_224_bank_check" "$TASK_ROOT/build/rom/native-hall/programs-v44.bank224"
     clang++ -std=c++17 -O2 -ffp-contract=off "$TASK_ROOT/native-hall/daisy/tests/controls_check.cpp" \

@@ -13,10 +13,12 @@ assert 0x90040000 <= (reset & ~1) < 0x90040000+len(data) and reset & 1, 'Expecte
 assert len(data) <= 7936*1024, 'Image exceeds the Daisy QSPI application region'
 symbols = subprocess.check_output(['arm-none-eabi-nm', '-n', str(elf)], text=True)
 found = {}
+symbol_types = {}
 for line in symbols.splitlines():
     fields = line.split()
     if len(fields) == 3:
         found[fields[2]] = int(fields[0], 16)
+        symbol_types[fields[2]] = fields[1]
 for name in ('_hall_itcm_start', '_hall_itcm_end', '_hall_itcm_load', '_ebss', '_estack',
              '_hall_vector_start', '_hall_vector_end', '_hall_vector_load',
              '_hall_runtime_start', '_hall_runtime_end', '_hall_runtime_load',
@@ -32,7 +34,10 @@ assert 0x24000000 <= found['_hall_runtime_start'] < found['_hall_runtime_end'] <
 assert 0x24000000 <= found['_hall_bank_start'] < found['_hall_bank_end'] <= 0x24078000, 'Bank outside AXI SRAM'
 assert found['_hall_bank_start'] >= found['_hall_runtime_end'], 'Bank overlaps runtime'
 assert found['_ebss'] <= found['_estack']-16384, 'Insufficient stack margin'
-hot = [name for name in found if 'AudioCallbackE' in name or '4Hall7processE' in name or '4Hall7node_atI' in name]
+hot = [name for name in found if symbol_types[name] in ('T', 't', 'W', 'w')
+       and ('AudioCallbackE' in name or '4Hall7processE' in name or '4Hall7node_atI' in name
+            or name.startswith(('_ZN11native_hall13DaisyInput224', '_ZNK11native_hall13DaisyInput224',
+                                '_ZN11native_hall14DaisyOutput224', '_ZNK11native_hall14DaisyOutput224')))]
 assert len(hot) >= 2, 'Missing Hall/callback symbols'
 for name in hot:
     assert found[name] < 65536, f'Hot audio code outside ITCM: {name}'

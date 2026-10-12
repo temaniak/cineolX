@@ -1,4 +1,5 @@
 #include "../plugin/Processor.hpp"
+#include "../plugin/ParameterHelp.hpp"
 #include <iostream>
 #include <new>
 #include <cstdlib>
@@ -97,6 +98,8 @@ static void check_display_controls() {
     require(std::abs(display->getAlpha()-0.35f)<1.0f/255 && std::abs(float(display->getProperties()["emphasis"])-0.95f)<1e-5f,
             "appearance settings did not reach display");
     require(events.changes==0 && events.begins==0 && events.ends==0,"appearance changed audio parameters");
+    editor->setSize(1230,315);
+    require(p.editorWidth()==1230,"resize was not saved in the session");
     auto* crossover=dynamic_cast<juce::Slider*>(find(*editor,"screen_value_2"));
     require(crossover && crossover->isEnabled(),"screen crossover missing");
     crossover->setValue((crossover->getMinimum()+crossover->getMaximum())/2,juce::sendNotificationSync);
@@ -112,8 +115,24 @@ static void check_display_controls() {
     juce::MemoryBlock saved;p.getStateInformation(saved);
     NativeHallProcessor restored;restored.setStateInformation(saved.getData(),int(saved.getSize()));
     std::unique_ptr<juce::AudioProcessorEditor> reopened(restored.createEditor());
-    require(reopened->getHeight()==252 && std::abs(find(*reopened,"display")->getAlpha()-0.35f)<1.0f/255 &&
+    require(reopened->getWidth()==1230 && reopened->getHeight()==315 && std::abs(find(*reopened,"display")->getAlpha()-0.35f)<1.0f/255 &&
         std::abs(restored.editorAppearance().emphasis-0.95f)<1e-5f,"session appearance restoration failed");
+    editor.reset();editor.reset(p.createEditor());
+    require(editor->getWidth()==1230 && editor->getHeight()==315,"editor reopen lost size or compact mode");
+    compact=dynamic_cast<juce::ToggleButton*>(find(*editor,"compact_mode"));
+    NativeHallProcessor fresh;
+    require(fresh.editorWidth()==1230 && fresh.editorAppearance().compact &&
+        std::abs(fresh.editorAppearance().brightness-0.35f)<1e-5f,"new instance lost saved UI defaults");
+    // Read the file independently, rather than relying on the shared in-memory
+    // preferences. Closing the editor flushes even without a timer tick.
+    CineolEditorPreferences disk;
+    require(disk.file.getIntValue("editor_width")==1230 && disk.file.getBoolValue("editor_compact"),
+        "UI preferences were not written to disk");
+    auto legacy=p.state.copyState();
+    for(const char* key:{"editor_width","editor_compact","display_brightness","display_emphasis"}) legacy.removeProperty(key,nullptr);
+    juce::MemoryBlock old;juce::AudioProcessor::copyXmlToBinary(*legacy.createXml(),old);
+    fresh.setStateInformation(old.getData(),int(old.getSize()));
+    require(fresh.editorWidth()==1230 && fresh.editorAppearance().compact,"legacy session erased UI defaults");
     const auto count=p.getParameters().size();
     // Exercise every available page/number in both engines, including the
     // XL controls that use scale factors and program-dependent pre-delay ranges.
@@ -144,9 +163,85 @@ static void check_display_controls() {
     }
     for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->removeListener(&events);
     compact->setToggleState(false,juce::dontSendNotification);compact->onClick();
-    require(editor->getWidth()==984 && editor->getHeight()==744 && find(*editor,"dirt")->isVisible(),"full-mode restoration failed");
+    require(editor->getWidth()==1230 && editor->getHeight()==930 && find(*editor,"dirt")->isVisible(),"full-mode restoration failed");
+    editor->setSize(984,744);
+    p.setStateInformation(saved.getData(),int(saved.getSize()));
+    const auto recall_deadline=juce::Time::getMillisecondCounterHiRes()+400;
+    while(juce::Time::getMillisecondCounterHiRes()<recall_deadline) {
+        juce::Thread::sleep(10);juce::Timer::callPendingTimersSynchronously();
+    }
+    require(editor->getWidth()==1230 && editor->getHeight()==315,"session recall into an open editor lost geometry");
     require(p.getParameters().size()==count,"presentation added DAW parameters");
-    std::cout<<"Display: preferences isolated, session restoration, compact layout, bidirectional drag and balanced automation on all available program pages passed\n";
+    std::cout<<"Display: preferences isolated, size/mode on reopen, session and disk restoration, legacy fallback, compact layout, bidirectional drag and balanced automation on all available program pages passed\n";
+}
+
+static void check_parameter_help() {
+    NativeHallProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* help=dynamic_cast<juce::Button*>(find(*editor,"help"));
+    auto* tooltip=dynamic_cast<juce::TooltipWindow*>(find(*editor,"help_tooltip"));
+    auto* panel=find(*editor,"cineol_panel");auto* gear=find(*editor,"settings");
+    require(help && tooltip && !help->getToggleState(),"help toggle/default missing");
+    require(help->getX()+gear->getX()+gear->getWidth()==panel->getWidth() && help->getY()==gear->getY(),
+            "help icon is not opposite the gear");
+    require(tooltip->getTipFor(*find(*editor,"bass")).isEmpty(),"hover help active before enabling it");
+    const auto state=p.state.copyState();
+    help->setToggleState(true,juce::dontSendNotification);help->onClick();
+    require(bool(tooltip->getProperties()["help_enabled"]),"help button did not enable explanations");
+    require(p.state.copyState().isEquivalentTo(state),"help toggle changed processor state");
+    auto validate=[](const juce::String& text) {
+        const int newline=text.indexOfChar('\n');require(newline>0,"parameter explanation has no heading");
+        const auto body=text.substring(newline+1);
+        const int sentences=body.length()-body.removeCharacters(".").length();
+        require(sentences>=2 && sentences<=3 && text.length()<440,"parameter help is not concise");
+        require(!body.contains("drag or use arrow keys"),"old operation-only tooltip retained");
+    };
+    unsigned covered=0,pages=0;
+    for(int program=0;program<p.getNumPrograms();++program) {
+        require(p.programAvailable(program),"help coverage requires both current banks");
+        p.setCurrentProgram(program);
+        for(unsigned page=0;page<p.parameterPages();++page) {
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(page+1)).toRawUTF8()));
+            button->onClick();++pages;
+            for(unsigned slot=0;slot<9;++slot) {
+                auto* value=dynamic_cast<juce::Slider*>(find(*editor,("screen_value_"+juce::String(slot)).toRawUTF8()));
+                auto* caption=dynamic_cast<juce::Label*>(find(*editor,("screen_caption_"+juce::String(slot)).toRawUTF8()));
+                validate(value->getTooltip());require(caption->getTooltip()==value->getTooltip(),"caption help differs from value help");
+                if(slot<6 && p.usesXL()) {
+                    const auto* data=p.xlProgram();
+                    const auto expected=cineol::help::xl(unsigned(program),*data,page,slot);
+                    require(expected.isNotEmpty() && value->getTooltip()==expected,"XL help stale after program/page switch");
+                    auto* fader=dynamic_cast<juce::Slider*>(find(*editor,("xl_slot_"+juce::String(slot+1)).toRawUTF8()));
+                    require(fader->getTooltip()==expected,"XL fader and screen help differ");
+                }
+                if(value->isEnabled()) ++covered;
+                const auto bounds=tooltip->getLookAndFeel().getTooltipBounds(value->getTooltip(),{140,220},{0,0,1640,420});
+                require(juce::Rectangle<int>(0,0,1640,420).contains(bounds),"help does not fit the compact housing");
+                std::cout<<p.getProgramName(program)<<" / page "<<page+1<<" / "<<slot+1<<": "<<value->getTooltip().replace("\n"," | ")<<"\n";
+            }
+        }
+        for(const char* id:{"mode_enh","decay_opt","xl_dynamic_decay","output_l","output_r"})
+            validate(dynamic_cast<juce::Button*>(find(*editor,id))->getTooltip());
+    }
+    for(const char* id:{"low_latency","spillover","spillover_time","display_brightness","display_emphasis","compact_mode"}) {
+        auto* client=dynamic_cast<juce::TooltipClient*>(find(*editor,id));validate(client->getTooltip());
+    }
+    // Exceptions must describe what this implementation does, rather than
+    // promising original-hardware controls that the current UI cannot use.
+    p.setCurrentProgram(17);
+    require(cineol::help::xl(17,*p.xlProgram(),0,0).contains("unavailable"),"CD Plate A falsely claims LF decay control");
+    require(cineol::help::mode(17,p.xlProgram(),true).contains("no feedback-diffusion"),"CD Plate optimization description is inaccurate");
+    p.setCurrentProgram(27);
+    require(cineol::help::xl(27,*p.xlProgram(),1,0).contains("right effect, heard at B/D"),"split help refers to wrong side");
+    auto* compact=dynamic_cast<juce::Button*>(find(*editor,"compact_mode"));
+    compact->setToggleState(true,juce::dontSendNotification);compact->onClick();
+    require(help->isVisible() && help->getY()==gear->getY(),"help lost in compact mode");
+    const auto text=dynamic_cast<juce::Slider*>(find(*editor,"screen_value_7"))->getTooltip();
+    tooltip->displayTip(panel->localPointToGlobal(juce::Point<int>{300,230}),text);
+    require(tooltip->isVisible() && panel->getLocalBounds().contains(tooltip->getBounds()),"help popup is clipped");
+    help->setToggleState(false,juce::dontSendNotification);help->onClick();
+    require(!tooltip->isVisible() && tooltip->getTipFor(*find(*editor,"screen_value_7")).isEmpty(),"turning help off retained a popup");
+    std::cout<<"Help: all 28 programs, "<<pages<<" pages, "<<covered<<" active screen bindings, 2-3 sentences, captions/faders, exceptions, compact bounds and on/off gate passed\n";
 }
 
 static void check_editor() {
@@ -1319,9 +1414,30 @@ static void benchmark_spillover_224() {
 }
 int main(int argc,char** argv) {
     const std::string option=argc>1?argv[1]:"";
+    // Invoke write/read in separate processes against an explicit disposable
+    // directory to verify an application restart, without touching user data.
+    if(argc==3 && (option=="--appearance-write" || option=="--appearance-read")) {
+        juce::ScopedJuceInitialiser_GUI init;
+        set_cache_directory(juce::File(juce::String::fromUTF8(argv[2])));
+        NativeHallProcessor p;
+        if(option=="--appearance-write") {
+            std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+            p.setEditorAppearance({0.9f,1.0f,true});
+            juce::Timer::callPendingTimersSynchronously();
+            editor->setSize(1230,315);
+        } else {
+            require(p.editorWidth()==1230 && p.editorAppearance().compact &&
+                std::abs(p.editorAppearance().brightness-0.9f)<1e-5f &&
+                p.editorAppearance().emphasis==1,"process restart lost appearance defaults");
+            std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+            require(editor->getWidth()==1230 && editor->getHeight()==315,"process restart lost editor geometry");
+        }
+        std::cout<<"Appearance "<<option<<": passed\n";
+        return 0;
+    }
     const bool original_fixture=argc==3 && (option=="--bank" || option=="--spillover-224-check" || option=="--spillover-224-cpu");
     const bool dual_fixture=argc==4 && (option=="--banks" || option=="--preset-check" || option=="--limits-check" ||
-        option=="--spillover-check" || option=="--quick-check" || option=="--focus-check" || option=="--display-check");
+        option=="--spillover-check" || option=="--quick-check" || option=="--focus-check" || option=="--display-check" || option=="--help-check");
     const bool migration_fixture=argc==5 && option=="--xl-cache-migration";
     require(argc==1 || original_fixture || dual_fixture || migration_fixture || (argc==2 && option=="--ui") ||
         (argc>=3 && argc<=6 && option=="--editor"),
@@ -1360,6 +1476,7 @@ int main(int argc,char** argv) {
         return 0;
     }
     if(argc==4 && option=="--display-check") {check_display_controls();return 0;}
+    if(argc==4 && option=="--help-check") {check_parameter_help();return 0;}
     if(argc==4 && std::string(argv[1])=="--focus-check") {check_editor_window_focus();return 0;}
     if(argc==3 && std::string(argv[1])=="--spillover-224-check") {check_spillover(true);return 0;}
     if(argc==3 && std::string(argv[1])=="--spillover-224-cpu") {benchmark_spillover_224();return 0;}
@@ -1408,10 +1525,18 @@ int main(int argc,char** argv) {
         }
         if(argc==5 && std::string(argv[4])=="preset")
             require(p.savePreset(demo.folder.getChildFile("Warm Concert Hall.cineol224")).wasOk(),"preview preset failed");
-        if(argc==5 && (std::string(argv[4])=="compact" || std::string(argv[4])=="compact-settings" || std::string(argv[4])=="compact-presets" || std::string(argv[4])=="compact-dim" || std::string(argv[4])=="compact-save"))
+        if(argc==5 && (std::string(argv[4])=="compact" || std::string(argv[4])=="compact-settings" || std::string(argv[4])=="compact-presets" || std::string(argv[4])=="compact-dim" || std::string(argv[4])=="compact-save" || std::string(argv[4])=="compact-help"))
             p.setEditorAppearance({std::string(argv[4])=="compact-dim"?0.35f:1.0f,0.8f,true});
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
         juce::Component* snapshot=editor.get();
+        if(argc==5 && (std::string(argv[4])=="help" || std::string(argv[4])=="compact-help")) {
+            auto* button=dynamic_cast<juce::Button*>(find(*editor,"help"));
+            button->setToggleState(true,juce::dontSendNotification);button->onClick();
+            auto* panel=find(*editor,"cineol_panel");
+            auto* tooltip=dynamic_cast<juce::TooltipWindow*>(find(*editor,"help_tooltip"));
+            auto* value=dynamic_cast<juce::Slider*>(find(*editor,"screen_value_4"));
+            tooltip->displayTip(panel->localPointToGlobal(juce::Point<int>{860,260}),value->getTooltip());
+        }
         if(argc==6) {
             set(p,argv[4],std::strtof(argv[5],nullptr));
             const auto end=juce::Time::getMillisecondCounterHiRes()+400;

@@ -14,6 +14,33 @@ template<class T> int nearest(const T* table,float value,int start=0) {
 }
 
 }
+CineolEditorPreferences::CineolEditorPreferences()
+    :file(CineolRomBank::cacheFile().getSiblingFile("editor-settings.xml"),[] {
+        juce::PropertiesFile::Options options;
+        options.storageFormat=juce::PropertiesFile::storeAsXML;
+        options.millisecondsBeforeSaving=500;
+        return options;
+    }()) {}
+
+void NativeHallProcessor::setEditorAppearance(EditorAppearance value) {
+    value.brightness=std::isfinite(value.brightness)?std::clamp(value.brightness,0.15f,1.0f):1.0f;
+    value.emphasis=std::isfinite(value.emphasis)?std::clamp(value.emphasis,0.0f,1.0f):0.8f;
+    const juce::ScopedLock lock(preset_write_lock_);
+    state.state.setProperty("display_brightness",value.brightness,nullptr);
+    state.state.setProperty("display_emphasis",value.emphasis,nullptr);
+    state.state.setProperty("editor_compact",value.compact,nullptr);
+    auto& defaults=editor_preferences_->file;
+    defaults.setValue("display_brightness",value.brightness);
+    defaults.setValue("display_emphasis",value.emphasis);
+    defaults.setValue("editor_compact",value.compact);
+}
+void NativeHallProcessor::setEditorWidth(int width) {
+    width=std::clamp(width,984,1640);
+    const juce::ScopedLock lock(preset_write_lock_);
+    state.state.setProperty("editor_width",width,nullptr);
+    editor_preferences_->file.setValue("editor_width",width);
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout() {
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout p;
@@ -74,6 +101,9 @@ NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
     .withInput("Input",juce::AudioChannelSet::stereo(),true).withOutput("Output",juce::AudioChannelSet::stereo(),true)),
     state(*this,nullptr,"NativeHall224",layout()) {
     state.state.setProperty("firmware_id",juce::String(cineol::current_firmware.id.data()),nullptr);
+    const auto& defaults=editor_preferences_->file;
+    for(const char* key:{"display_brightness","display_emphasis","editor_compact","editor_width"})
+        if(defaults.containsKey(key)) state.state.setProperty(key,defaults.getValue(key),nullptr);
     algorithm_parameter_=static_cast<juce::AudioParameterChoice*>(state.getParameter("algorithm"));
     for(unsigned i=0;i<values_.size();++i) {
         values_[i]=state.getRawParameterValue(ids[i]);stable_values_[i]=values_[i]->load();
@@ -342,6 +372,11 @@ void NativeHallProcessor::setStateInformation(const void* data,int size) {
             value.setProperty("value",-1.0f,nullptr);restored.appendChild(value,nullptr);
         }
         const juce::ScopedLock lock(preset_write_lock_);
+        // Sessions written before these preferences existed inherit the user's
+        // current appearance. Explicit session values always take precedence.
+        for(const char* key:{"display_brightness","display_emphasis","editor_compact","editor_width"})
+            if(!restored.hasProperty(key) && state.state.hasProperty(key))
+                restored.setProperty(key,state.state.getProperty(key),nullptr);
         parameter_transaction_.fetch_add(1,std::memory_order_acq_rel);
         preset_recall_revision_.fetch_add(1,std::memory_order_release);
         state.replaceState(restored);
