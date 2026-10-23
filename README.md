@@ -2,23 +2,49 @@
 
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
 the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
-preview of all 22 **224 XL v8.21** programs. The desktop plugin release is **0.99A (alpha)**, with the metal-panel artwork, 21-mark fader scales
-and six page-bound faders beside permanent Dirt, Input and Mix faders.
+preview of all 22 **224 XL v8.21** programs. The desktop release is
+**1.0Alpha**, with SPACE clock control, converter-filter DIRT, optional four
+outputs, a wider high-contrast display and black worn faders/preset keys.
 
-## What's new in 0.99A (alpha)
+## What's new in 1.0Alpha
 
-- The gear's **Settings** panel now contains **Display brightness** (15–100%),
-  **Option illumination** (0–100%) and **Compact display mode**.
-- Compact mode reduces the default editor to **984 x 252**, preserving a complete
-  metal housing with an integrated recessed screen, intact screws and title.
-- Drag numeric screen values up/down in either layout; hold **Shift** for finer
-  adjustment or double-click to reset. Host automation and 224/XL page bindings
-  remain attached to the existing parameters.
-- Display preferences are saved per instance in DAW sessions. The audio engine,
-  plugin identity, parameter IDs and existing sound presets retain compatibility.
-- Public releases now use alphabetic suffixes: **0.99A**, **0.99B**, **0.99C**,
-  **0.99D**, and onward until the user explicitly requests version 1. AU/VST3 use
-  compatible numeric bundle versions; 0.99A corresponds to **0.99.1**.
+- **SPACE** lowers each algorithm's DSP clock continuously from nominal to
+  exactly half. The screen shows the current setting in kHz. The original 224
+  spans 20.48–10.24 kHz; each XL program uses its own nominal rate.
+- **DIRT** now opens the converter filters up to full bypass instead of
+  crossfading filtered and digital signals. Quantization and algorithm-internal
+  filters remain. **Existing sessions with nonzero Dirt intentionally sound
+  different.** Keep the previous binary/session for rollback.
+- **Analog filters follow DSP rate** in Settings chooses whether SPACE scales
+  converter filter frequencies or holds them fixed. Dirt opens them in either mode.
+- Optional **Front 1–2 / Rear 3–4** stereo output buses, with independent A–D
+  routing. Input remains mono/stereo and the default output remains stereo.
+  Enable Rear in a supporting host, such as REAPER with VST3, then route 3–4 to
+  a separate stereo track. **Logic Pro does not expose auxiliary output buses
+  for AU audio effects**; it remains stereo there. No Quad/surround mode or
+  instrument/Side Chain workaround is included.
+- Larger plain-font controller captions, aligned Input/Mix/Space/Dirt columns,
+  balanced display margins, a gap above the fader rails and Help beside Settings.
+- Default editor **1104 x 696**, compact **1104 x 252**, uniformly resizable.
+- Normal latency is fixed across SPACE at **256 samples at 48 kHz**; the existing
+  host bridge brings it to **398 at 44.1 kHz** and **688 at 96 kHz**. Low latency
+  mode retains direct dry monitoring. SPACE transport changes cold-start
+  converter phase relative to the signal; nominal-clock renders are not claimed
+  bit-identical to the previous release.
+- Existing plugin/parameter identities and indices remain stable. New controls
+  are appended; preset schema 5 reads schemas 1–4 with new-control defaults.
+  New presets are intended for 1.0Alpha. Existing prepared caches remain usable.
+
+The public tag is **v1.0Alpha**, the numeric AU/VST3/bundle version is **1.0.0**,
+and the GitHub release is marked **prerelease**. This naming was explicitly
+requested by the project owner after the 0.99A/0.99B series.
+
+## Earlier changes in 0.99B and 0.99A
+
+- macOS AU/VST3 exports are limited to their format entry points to isolate
+  JUCE internals from other plugins in the same process.
+- Editor appearance and size persist between instances/restarts and in sessions.
+- Contextual Help, screen-value dragging, brightness controls and compact mode.
 
 ## Earlier changes in 0.9.8
 
@@ -86,8 +112,8 @@ parameter IDs remain stable. Version 0.9.8 adds the sound and editor refinements
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
-[0.99A alpha release](https://github.com/temaniak/cineolX/releases/tag/v0.99A).
-See the [release notes](docs/releases/v0.99A.md) for installation, compatibility
+[1.0Alpha release](https://github.com/temaniak/cineolX/releases/tag/v1.0Alpha).
+See the [release notes](docs/releases/v1.0Alpha.md) for installation, compatibility
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files
@@ -152,7 +178,7 @@ left/right choices from outputs A–D. Original 224 and regular XL reverbs use
 A/C by default; split algorithms use A/B to include both engines, and Chorus &
 Echo uses C/A to preserve the input orientation. Manual algorithm selection
 recalls the XL factory controls and the appropriate output pair. Original 224
-controls, Input, Mix and Dirt are retained.
+controls, Input and Mix are retained; Dirt now controls filter opening.
 
 Bass/Mid labels use the original discrete time scale; they are not a promise of
 measured T60. Diffusion has no effect in Acoustic Chamber. Small and Large Hall
@@ -166,18 +192,18 @@ Bass, Mid, Crossover, Treble, Depth and Pre-delay; Detail places Diffusion in
 slot five. Unused slots are disabled and their caps park at the bottom, with
 `--` on the display. Parking never writes a parameter minimum. Page changes
 animate the caps over 320 ms but preserve every control and the reverb tail.
-Preset recall also animates Dirt, Input and Mix; Dirt retains its inverted
+Preset recall also animates Input, Mix, Space and Dirt; Dirt retains its inverted
 `analog` parameter mapping without writing parameter events during visual motion.
 All caps and rails retain the same geometry on every page. Inactive caps are
 dark grey rather than translucent. Values appear only on the red display;
 the longer rails occupy the space previously used by the numeric text boxes.
-The three permanent faders on the right are Dirt, Input and Mix. Their display
+The four permanent faders on the right are Input, Mix, Space and Dirt. Their display
 cells use the same text size as the other parameter names; no labels or values
 are repeated on the metal panel. The lower plate extends below the long faders
 to hold eight quick preset keys; the bottom mounting screws sit below that row.
 The faceplate uses one full-size photographic bitmap with uniform grain; its
-lower area is drawn into the new asset rather than stitched from stretched strips. The red display has one shared divider and three right-side
-columns aligned with Dirt, Input and Mix.
+lower area is drawn into the asset rather than stitched from stretched strips.
+Four right-side display columns align with Input, Mix, Space and Dirt.
 
 Internal menus, settings and preset dialogs use a separate, evenly worn metal
 texture with a fixed grain scale, rather than stretched sections of the faceplate.
@@ -213,14 +239,14 @@ do not establish complete hardware equivalence.
 
 Numbered selectors beside the algorithm name jump directly to a parameter page;
 the selected page is bright and other numbers are dim. These numbered buttons
-are the only page selectors in version 0.9.6. The right header uses
-**Left / Right / Model** above **Dyn Decay / Mod Enh / Decay Opt**, aligned with
-the three permanent fader columns. Dynamic Decay replaces the duplicate
-**Page n/n** button, keeping the existing header geometry. Quick preset keys use their LEDs for selection and have
+are the only page selectors. The right header uses **Front L / Front R /
+Rear L / Rear R** above **Model / Mod Enh / Dyn Decay / Decay Opt**, aligned
+with the four permanent fader columns. Dynamic Decay replaces the old duplicate
+**Page n/n** button. Quick preset keys use their LEDs for selection and have
 no hover or selection underline.
 The settings gear uses colour feedback without an enclosing frame.
 
-Preset format 4 records the firmware identity and every parameter,
+Preset format 5 records the firmware identity and every parameter,
 including controls on hidden pages. The shared browser lists presets together
 with their algorithm and model. An unavailable-firmware preset remains listable;
 recalling it reports an error and preserves the current settings.
@@ -272,21 +298,25 @@ changing the selected program clears it unless Spillover is enabled. Moving betw
 B still counts as a program change, even though they share a topology.
 Pre-delay changes retain the existing transient limitation.
 
-The permanent **Dirt** fader continuously blends the existing filtered and
-digital paths. At 0% it retains the former clean endpoint; at 100% it retains
-the former Digital Dirt endpoint. The squared response gives the lower half
-gentler control: 50% Dirt requests a 25% dirty blend. The existing smoothing
-avoids abrupt filter-path changes, without running a second reverb. The
-`analog` parameter keeps its index and clean polarity, but is now continuous
-and named **Clean Amount**; old boolean values still map to the two endpoints.
-Fractional Dirt is stored in presets and DAW state. Plugin IDs
-are retained: AU `aufx/Nh24/Rflx`, bundle ID `net.joelanders.nativehall224`.
+The permanent **Space** fader slows the selected DSP clock from nominal to
+exactly half as it rises. Delays, modulation and controller time advance more
+slowly together. Converter frequencies follow SPACE only when **Analog filters
+follow DSP rate** is checked; otherwise inverse compensation holds them fixed.
+
+**Dirt** opens input/output converter bandwidths together. At 100% the modeled
+converter filters are bypassed, while quantization, DAC holds and the filters
+inside each algorithm remain. Full bypass also removes the DC blocker and can
+retain a small DC residual. This intentionally changes previous Dirt automation
+and presets. The existing `analog` host parameter keeps its index and clean=1
+polarity; the UI shows its inverse. Fractional amounts remain stored in presets
+and DAW state. Plugin IDs remain AU `aufx/Nh24/Rflx` and bundle ID
+`net.joelanders.nativehall224`.
 
 The gear in the top-right corner opens **Settings**. **Low latency** sends the dry input directly at the project sample rate
 and reports **0 samples** of plugin latency at every supported rate. Only the
 wet signal passes through the resamplers and reverb; its filter delay and
 pre-delay remain unchanged. This changes the timing between dry and wet (by
-70 samples, about 1.46 ms, at 48 kHz). At 100% wet the DSP output is unchanged,
+256 samples, about 5.33 ms, at 48 kHz). At 100% wet the DSP output is unchanged,
 but the DAW no longer compensates its delay. Audio-interface/buffer latency is
 independent of this setting.
 

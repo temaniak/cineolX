@@ -25,13 +25,13 @@ def numeric_version():
 def version():
     public = re.search(r'set\(CINEOL_RELEASE_VERSION "([^"\n]+)"\)',
                        (ROOT / 'CMakeLists.txt').read_text())
-    if public and not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+|[A-Z]+)', public.group(1)):
+    if public and not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+|[A-Za-z]+)', public.group(1)):
         raise ValueError('Invalid public release version')
     return public.group(1) if public else numeric_version()
 
 
 def is_prerelease():
-    return bool(re.fullmatch(r'[0-9]+\.[0-9]+[A-Z]+', version()))
+    return bool(re.fullmatch(r'[0-9]+\.[0-9]+[A-Za-z]+', version()))
 
 
 def verify_bundle(bundle, platform):
@@ -120,11 +120,21 @@ def package(platform, build_dir, output_dir):
                     'XL caches, including the 0.9.6 version-4 cache, are retained. Original-224\n'
                     'caches and sound presets remain compatible. No re-import is needed if\n'
                     'the corrected version-5 cache has already been prepared locally.\n'
-                    'The editor opens at 984 x 744; compact display mode is 984 x 252.\n'
+                    'The editor opens at 1104 x 696; compact display mode is 1104 x 252.\n'
                     'The gear contains Display brightness, Option illumination and Compact\n'
                     'display mode. Drag screen values up/down; hold Shift for fine adjustment.\n'
                     'Appearance is saved in the DAW session. A host may restore window size.\n'
                     'See RELEASE-NOTES.md for changes, validation and known limitations.\n')
+        install += ('\nSPACE, DIRT AND OUTPUTS\n'
+                    'Raise SPACE to lower the selected DSP clock to half its nominal rate.\n'
+                    'The display shows DSP kHz. DIRT now opens converter filters up to full\n'
+                    'bypass; old sessions with nonzero DIRT intentionally sound different.\n'
+                    'Normal latency is 256 samples at 48 kHz (398 at 44.1 kHz, 688 at 96 kHz).\n'
+                    'In supporting hosts enable the additional Rear stereo output: Front\n'
+                    'uses channels 1-2 and Rear uses 3-4. Input remains mono/stereo.\n'
+                    'Logic Pro does not expose auxiliary outputs for AU audio effects;\n'
+                    'use the stereo version there. This is not a Quad/surround build.\n'
+                    'Keep the previous plugin binary and session copies for rollback.\n')
         (staging / 'INSTALL.txt').write_text(install, encoding='utf-8')
         if platform == 'macos':
             subprocess.run(['ditto', '-c', '-k', '--keepParent', str(staging), str(archive)], check=True)

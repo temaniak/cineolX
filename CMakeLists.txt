@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 # Numeric plugin/bundle versions remain host-compatible; public releases may use letters.
-project(CineolX224 VERSION 0.99.2 LANGUAGES C CXX)
-set(CINEOL_RELEASE_VERSION "0.99B")
+project(CineolX224 VERSION 1.0.0 LANGUAGES C CXX)
+set(CINEOL_RELEASE_VERSION "1.0Alpha")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)

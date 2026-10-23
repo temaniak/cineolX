@@ -25,7 +25,8 @@ try {
     if ($env:JUCE_DIR) { $TaskArgs += "-DFETCHCONTENT_SOURCE_DIR_JUCE=$env:JUCE_DIR" }
     Invoke-Checked cmake $TaskArgs
     Invoke-Checked cmake @('--build', $TaskBuild, '--config', 'Release', '--parallel',
-        "$Jobs", '--target', 'NativeHall224_VST3', 'NativeHall224_Standalone', 'cineol_rom_import_check')
+        "$Jobs", '--target', 'NativeHall224_VST3', 'NativeHall224_Standalone', 'cineol_rom_import_check', 'cineol_space_clock_check')
+    Invoke-Checked (Join-Path $TaskBuild 'native-hall/Release/cineol_space_clock_check.exe') @()
     $env:CINEOL224_CACHE_DIR = Join-Path $TaskBuild ('check-cache-' + [guid]::NewGuid())
     Invoke-Checked (Join-Path $TaskBuild 'cineol_rom_import_check_artefacts/Release/cineol_rom_import_check.exe') @('--empty')
     Write-Host "Cineol-X 224 VST3: $TaskBuild/NativeHall224_artefacts/Release/VST3/Cineol-X 224.vst3"

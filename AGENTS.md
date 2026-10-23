@@ -39,3 +39,8 @@
 - Do not create version 1 or switch back to numeric public release names until
   the user explicitly requests release 1. Do not create future releases without
   a release request; this rule defines naming, not an automatic schedule.
+- On 2026-10-23 the user explicitly requested **1.0Alpha** for the SPACE/DIRT
+  release. Its tag/archive version is `v1.0Alpha`, numeric CMake/plugin version
+  `1.0.0`, and GitHub status is prerelease. This explicit request supersedes
+  continuing the 0.99 letter series for this release; future names still require
+  a user request.

@@ -63,7 +63,8 @@ jobs:
             -DCINEOL_BUILD_PLUGIN=ON -DNATIVE_HALL_BUILD_TOOLS=OFF \
             '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           cmake --build build/plugin --parallel 3 --target \
-            NativeHall224_AU NativeHall224_VST3 NativeHall224_Standalone cineol_rom_import_check
+            NativeHall224_AU NativeHall224_VST3 NativeHall224_Standalone cineol_rom_import_check cineol_space_clock_check
+          build/plugin/native-hall/cineol_space_clock_check
           CINEOL224_CACHE_DIR="$PWD/build/empty-check-cache" \
             build/plugin/cineol_rom_import_check_artefacts/Release/cineol_rom_import_check --empty
       - name: Package verified binaries

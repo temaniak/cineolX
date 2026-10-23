@@ -67,6 +67,29 @@ static void dry(NativeHallProcessor& processor,bool mono=false) {
         require(block.getSample(1,i)==(mono?float(i)/512:-float(i)/1024),"unimported right input changed");
     }
 }
+struct NominalTransport {
+    std::array<std::array<float,2>,16> input{};
+    std::array<std::array<float,2>,cineol::SpaceClock::latency-native_hall::Engine48::latency_samples-16> output{};
+    unsigned in=0,out=0;
+    template<class Render> std::array<float,2> process(float l,float r,Render&& render) {
+        const auto delayed=input[in];input[in]={l,r};in=(in+1)%input.size();
+        const auto value=output[out];output[out]=render(delayed[0],delayed[1]);out=(out+1)%output.size();return value;
+    }
+};
+static void output_buses(NativeHallProcessor& processor) {
+    const auto stereo=processor.getBusesLayout();auto multi=stereo;
+    require(multi.outputBuses.size()==2 && multi.outputBuses[1].isDisabled(),"default output bus compatibility");
+    multi.outputBuses.set(1,juce::AudioChannelSet::stereo());
+    require(processor.setBusesLayout(multi) && processor.getTotalNumOutputChannels()==4,"Rear bus cannot expose outputs 3-4");
+    processor.prepareToPlay(48000,256);juce::AudioBuffer<float> buffer(4,256);juce::MidiBuffer midi;
+    buffer.clear();buffer.setSample(0,0,.25f);buffer.setSample(1,0,-.125f);
+    for(int c=2;c<4;++c)for(int i=0;i<256;++i)buffer.setSample(c,i,1);
+    audio=true;processor.processBlock(buffer,midi);audio=false;
+    require(buffer.getSample(0,0)==.25f && buffer.getSample(1,0)==-.125f,"unprepared multi-out input pass-through changed");
+    require(buffer.getMagnitude(2,0,256)==0 && buffer.getMagnitude(3,0,256)==0,"unprepared Rear bus not cleared");
+    require(processor.setBusesLayout(stereo),"legacy stereo layout lost");
+    std::cout<<"Front 1-2 + Rear 3-4 bus declaration/activation, empty-cache safety and stereo fallback pass\n";
+}
 static void compare(NativeHallProcessor& processor) {
     juce::MemoryBlock bytes;require(CineolRomBank::cacheFile().loadFileAsData(bytes),"missing saved bank");
     auto bank=std::make_unique<native_hall::ProgramBank>();
@@ -75,12 +98,13 @@ static void compare(NativeHallProcessor& processor) {
     // Do not call prepareToPlay here: this checks publication to an already
     // running dry processor, including its first audio-block initialization.
     native_hall::Parameters params;reference->set_parameters(params);
-    juce::AudioBuffer<float> block(2,256);juce::MidiBuffer midi;
+    NominalTransport transport;juce::AudioBuffer<float> block(2,256);juce::MidiBuffer midi;
     for(int repeat=0;repeat<24;++repeat) {
         std::array<std::array<float,2>,256> wanted{};
         for(int i=0;i<256;++i) {
             const float l=0.12f*std::sin(float(i+repeat*256)*0.1f),r=(i==0 && repeat==0)?0.3f:0;
-            block.setSample(0,i,l);block.setSample(1,i,r);reference->process(l,r,wanted[i][0],wanted[i][1]);
+            block.setSample(0,i,l);block.setSample(1,i,r);
+            wanted[i]=transport.process(l,r,[&](float dl,float dr){std::array<float,2> wet;reference->process(dl,dr,wet[0],wet[1]);return wet;});
         }
         audio=true;processor.processBlock(block,midi);audio=false;
         for(int i=0;i<256;++i) for(int c=0;c<2;++c)
@@ -94,13 +118,16 @@ static void compare_xl(NativeHallProcessor& processor) {
     auto reference=std::make_unique<cineol::xl::Runtime>();reference->select(*bank,0);
     reference->controls(bank->programs[0].controls.factory,true,0,1,1,0,2);
     std::array<std::array<float,2>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> delay{};unsigned position=0;
-    juce::AudioBuffer<float> block(2,256);juce::MidiBuffer midi;
+    NominalTransport transport;juce::AudioBuffer<float> block(2,256);juce::MidiBuffer midi;
     for(int repeat=0;repeat<100;++repeat) {
         std::array<std::array<float,2>,256> wanted{};
         for(int i=0;i<256;++i) {
             const float l=0.12f*std::sin(float(i+repeat*256)*0.1f),r=(i==0 && repeat==0)?0.3f:0;
-            block.setSample(0,i,l);block.setSample(1,i,r);float a,b;reference->process(l,r,a,b,false);
-            wanted[i]=delay[position];delay[position]={a,b};position=(position+1)%delay.size();
+            block.setSample(0,i,l);block.setSample(1,i,r);
+            wanted[i]=transport.process(l,r,[&](float dl,float dr){
+                float a,b;reference->process(dl,dr,a,b,false);
+                const auto wet=delay[position];delay[position]={a,b};position=(position+1)%delay.size();return wet;
+            });
         }
         audio=true;processor.processBlock(block,midi);audio=false;
         for(int i=0;i<256;++i) for(int c=0;c<2;++c)
@@ -217,6 +244,7 @@ int main(int argc,char** argv) {
             compare_xl(processor);
         } else {
             require(!processor.ready(),"test requires a fresh or invalid cache");
+            output_buses(processor);
             dry(processor);dry(processor,true);processor.setPlayConfigDetails(2,2,48000,256);processor.prepareToPlay(48000,256);
             juce::MemoryBlock state;processor.getStateInformation(state);
             require(state.getSize()<10000,"session contains private bank bytes");
@@ -245,7 +273,7 @@ int main(int argc,char** argv) {
             settings->setToggleState(false,juce::sendNotificationSync);
             require(!panel->isVisible(),"Settings did not close");
             processor.setPlayConfigDetails(2,2,48000,256);processor.prepareToPlay(48000,256);
-            require(processor.getLatencySamples()==70,"normal latency not restored");
+            require(processor.getLatencySamples()==int(cineol::SpaceClock::latency),"normal latency not restored");
             if(mode=="--empty") {
                 if(argc==3) {
                     juce::File file(juce::String::fromUTF8(argv[2]));file.getParentDirectory().createDirectory();

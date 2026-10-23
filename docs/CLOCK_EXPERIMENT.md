@@ -1,9 +1,10 @@
 # Clock Experiment
 
 Experimental desktop branch: `codex/clock-experiment`, 2026-10-23.
-This is a local trial, not a new public release. Bundle identities and existing
-parameter IDs/indices are retained. The build does not install over the stable
-plugin. Private ROMs and prepared banks are excluded from trial archives.
+The feature was initially validated as a local trial, then selected by the
+owner for [1.0Alpha](releases/v1.0Alpha.md). Bundle identities and existing
+parameter IDs/indices are retained. Installation is separate from building;
+private ROMs and prepared banks are excluded from archives.
 
 ## Controls and sound
 
@@ -29,6 +30,9 @@ plugin. Private ROMs and prepared banks are excluded from trial archives.
   independent A/B/C/D assignments, initially A/C/B/D. Rear carries the wet
   signal at the Mix amount; dry input appears only in Front. An algorithm's
   available outputs need not all contain independent signals.
+  Logic Pro does not expose auxiliary outputs for AU audio effects and remains
+  stereo with this plugin. No Quad/surround or instrument/Side Chain variant
+  is included. Supporting hosts can activate Rear and route it independently.
 
 Space uses a shared four-channel, bandlimited variable clock domain around
 the existing 48 kHz engine. Nominal clock SRC transport is an exact delayed
