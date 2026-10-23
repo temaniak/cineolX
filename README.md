@@ -5,6 +5,8 @@ the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
 preview of all 22 **224 XL v8.21** programs. The desktop release is
 **1.0Alpha**, with SPACE clock control, converter-filter DIRT, optional four
 outputs, a wider high-contrast display and black worn faders/preset keys.
+The displayed manufacturer is **NK Stuff**, matching Silver-K; existing plugin
+identifiers are retained for DAW-session compatibility.
 
 ## What's new in 1.0Alpha
 

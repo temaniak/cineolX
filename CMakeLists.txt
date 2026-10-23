@@ -49,7 +49,7 @@ juce_add_binary_data(cineol_ui_data HEADER_NAME CineolUIData.h NAMESPACE CineolU
         native-hall/plugin/assets/quick-key.png native-hall/plugin/assets/panel-quick-presets.png
         native-hall/plugin/assets/panel-compact-integrated.png
         native-hall/plugin/assets/fadercap-black.png native-hall/plugin/assets/quick-key-black.png)
-juce_add_plugin(NativeHall224 VERSION ${PROJECT_VERSION} PRODUCT_NAME "Cineol-X 224" COMPANY_NAME "Reflexion224"
+juce_add_plugin(NativeHall224 VERSION ${PROJECT_VERSION} PRODUCT_NAME "Cineol-X 224" COMPANY_NAME "NK Stuff"
     BUNDLE_ID "net.joelanders.nativehall224" PLUGIN_MANUFACTURER_CODE Rflx PLUGIN_CODE Nh24
     FORMATS ${_formats} IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE EDITOR_WANTS_KEYBOARD_FOCUS FALSE AU_MAIN_TYPE kAudioUnitType_Effect
