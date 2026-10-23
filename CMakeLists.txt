@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 # Numeric plugin/bundle versions remain host-compatible; public releases may use letters.
-project(CineolX224 VERSION 0.99.1 LANGUAGES C CXX)
-set(CINEOL_RELEASE_VERSION "0.99A")
+project(CineolX224 VERSION 0.99.2 LANGUAGES C CXX)
+set(CINEOL_RELEASE_VERSION "0.99B")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
@@ -61,6 +61,15 @@ target_link_libraries(NativeHall224 PRIVATE native_hall_core native_224_import n
 target_compile_definitions(NativeHall224 PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_STANDALONE_PLUGIN_AUTO_OPEN_AUDIO_INPUT=1)
 if(APPLE)
+    # JUCE_API declarations override the default hidden visibility. Export only
+    # format entry points so dyld cannot coalesce JUCE var/type descriptors with
+    # another plugin's module-local String storage and cleanup functions.
+    foreach(_format AU VST3)
+        string(TOLOWER "${_format}" _format_lower)
+        set(_exports "${CMAKE_CURRENT_SOURCE_DIR}/native-hall/plugin/macos-${_format_lower}.exports")
+        target_link_options(NativeHall224_${_format} PRIVATE "LINKER:-exported_symbols_list,${_exports}")
+        set_property(TARGET NativeHall224_${_format} APPEND PROPERTY LINK_DEPENDS "${_exports}")
+    endforeach()
     include("${CINEOL_REFLEXION_SOURCE}/juce-plugin/scripts/sign_bundle.cmake")
     lexplug_sign_bundles(NativeHall224)
 endif()
