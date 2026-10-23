@@ -34,12 +34,17 @@ public:
             engine.enable_modulation(enhancement);engine.set_global(gain,mix,clean,left,right);
         });
     }
-    void process(float left,float right,float& l,float& r,bool wet_only) noexcept {
-        visit([&](auto& engine){engine.process(left,right,l,r,wet_only);});
+    void set_clock_factor(float factor) noexcept {visit([&](auto& engine){engine.set_clock_factor(factor);});}
+    void set_dirt(float dirt) noexcept {visit([&](auto& engine){engine.set_dirt(dirt);});}
+    void process(float left,float right,float& l,float& r,bool wet_only,std::array<float,4>* quad=nullptr) noexcept {
+        std::array<float,4> four{};
+        visit([&](auto& engine){engine.process(left,right,l,r,wet_only,quad?&four:nullptr);});
         const unsigned extra=latency_samples-graph_delay(graphs[program_].rows);
-        alignment_[alignment_position_%alignment_.size()]={l,r};
+        if(!quad) four={l,r,0,0};
+        alignment_[alignment_position_%alignment_.size()]=four;
         const auto value=alignment_[(alignment_position_+alignment_.size()-extra)%alignment_.size()];
         ++alignment_position_;l=value[0];r=value[1];
+        if(quad) *quad=value;
     }
 private:
     template<class F> void visit(F&& f) noexcept {
@@ -94,6 +99,6 @@ private:
     const ProgramData* data_=nullptr;
     unsigned program_=0;
     uint64_t alignment_position_=0;
-    std::array<std::array<float,2>,4> alignment_{};
+    std::array<std::array<float,4>,4> alignment_{};
 };
 } // namespace cineol::xl

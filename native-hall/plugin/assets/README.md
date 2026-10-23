@@ -4,7 +4,12 @@
 with the built-in ImageGen tool using `panel.png` as its visual reference.
 The generation brief is saved in [panel-monolithic-prompt.txt](panel-monolithic-prompt.txt).
 `panel.png` supplies the red display bezel; `fadercap.png`
-is the transparent ivory fader cap. These were also generated with ImageGen.
+is the original transparent ivory fader cap. These were also generated with ImageGen.
+The Clock Experiment uses `fadercap-black.png` and `quick-key-black.png`,
+generated with ImageGen on 2026-10-23 from their ivory counterparts. The brief
+preserved their silhouette, perspective and transparent background while
+changing the material to matte black with light edge wear. JUCE draws the
+light position line and preset numbers separately.
 `menu-metal.png` is an independent uniformly worn metal texture for menus,
 settings, ROM setup, preset dialogs and the browser, generated with the built-in
 ImageGen tool. Its [generation brief](menu-metal-prompt.txt) excludes directional
@@ -30,8 +35,8 @@ The red display is extended vertically and horizontally using the existing artwo
 Preset names use the left header area without a large numeric program indicator.
 The algorithm row shares that area with numbered page selectors: the selected
 number is bright and the other numbers are dim, while remaining clickable.
-Six dynamic label/value cells align with the page-bound faders. Three permanent
-cells show Dirt, Input and Mix labels and values above their faders on every page,
+Six dynamic label/value cells align with the page-bound faders. Four permanent
+cells show Input, Mix, Space and Dirt labels and values above their faders on every page,
 using the same text size as the dynamic cells. No labels are repeated on the
 metal panel. Algorithm selection, outputs, modes and page navigation all live
 on the display; long preset names scroll periodically without shrinking.
@@ -42,9 +47,13 @@ screw patches or separately stretched regions. Its texture stays continuous
 across the drawn mechanical seam above the lower plate. The display bezel is
 clipped to its rounded outline to avoid overlaying unrelated metal at its corners.
 The upper and lower display share one vertical divider. Right-side controls use
-three columns aligned with Dirt, Input and Mix; header captions and values use
-the same spacing and LED sizes as the parameter cells. The top row contains
-Left, Right and Model; the lower row contains Page, Mod Enh and Decay Opt.
+four evenly spaced columns aligned with Input, Mix, Space and Dirt. The top
+row contains Front L/R and Rear L/R; the lower row contains Model, Mod Enh,
+Dynamic Decay and Decay Opt. Small labels and values use plain Arial with no
+glow; the large preset and algorithm names retain crisp dot-matrix lettering.
+Space shows the selected algorithm's DSP rate in kHz. The full display and
+compact display use the same dark glass fill. Fader rails start below the
+bezel with a visible gap. Help sits immediately left of the gear.
 The gear has only colour feedback, without a frame or focus backdrop.
 Internal menus, settings and preset dialogs use the same
 metal style using the separate menu material, dark frames and red header/input surfaces. The faceplate scales

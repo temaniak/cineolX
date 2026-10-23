@@ -19,6 +19,8 @@ public:
     static constexpr unsigned numerator=640/divisor,denominator=9*graph_info(graph).rows/divisor;
     void prepare() noexcept {adc_.prepare(graph_info(graph).rows);}
     void reset() noexcept {adc_.reset();}
+    void set_clock_factor(float factor) noexcept {adc_.set_clock_factor(factor);}
+    void set_dirt(float dirt) noexcept {adc_.set_dirt(dirt);}
     template<class Emit> void process(const float* raw,Emit&& emit) noexcept {
         adc_.process_capture(raw,[&](const double* input,const float* held) noexcept {
             InputFrame frame;

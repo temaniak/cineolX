@@ -16,6 +16,8 @@ public:
     void reset() noexcept {dac_.reset();delay_.fill({});position_=0;}
     void select_network(unsigned network) noexcept {dac_.select_network(network);delay_.fill({});position_=0;}
     void push(const float* values) noexcept {dac_.push(values);}
+    void set_clock_factor(float factor) noexcept {dac_.set_clock_factor(factor);}
+    void set_dirt(float dirt) noexcept {dac_.set_dirt(dirt);}
     std::array<float,4> sample() noexcept {
         auto result=delay_[position_];delay_[position_]=dac_.sample();
         position_=(position_+1)%delay_.size();return result;

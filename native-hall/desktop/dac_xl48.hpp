@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include "circuit_control.hpp"
 #include <utility>
 
 namespace cineol::xl {
@@ -20,7 +21,9 @@ public:
     static constexpr int32_t converter_origin=351483,propagation_ticks=34560;
     static constexpr int32_t capture_origin=converter_origin+propagation_ticks;
     struct Frame {std::array<float,4> analog{},raw{};};
-    void prepare() noexcept {kernels_=&kernels();reset();}
+        void set_dirt(float dirt) noexcept {circuit_.set_dirt(dirt);}
+    void set_clock_factor(float factor) noexcept {circuit_.set_clock_factor(factor);}
+    void prepare() noexcept {circuit_.prepare();reset();}
     void reset(int32_t clock_origin=0) noexcept {
         assert(clock_origin>=0 && clock_origin%grid_ticks==0);
         channels_={};events_={};read_=count_=0;pending_=false;clock_base_=0;
@@ -67,6 +70,7 @@ public:
                 result.analog[c]=(sum+float(2.741597927047747e-09)*channel.held)*float(1.5941996081501124);
             }
             result.raw[c]=channel.held;
+            if(circuit_.dirt()>=1) result.analog[c]=float(1.000666939955189)*channel.held;
             channel.time-=frame_ticks;
         }
         clock_base_=end;
@@ -92,13 +96,8 @@ private:
         // frames; dormant channels advance one whole frame to retain that bound.
         std::array<std::array<std::array<Complex,modes>,phases>,3> delta{};
         std::array<Complex,modes> weights{};
-        Kernels() noexcept;
+        Kernels(double factor) noexcept;
     };
-    static const Kernels& kernels() noexcept {
-        // Called only by prepare(), outside processing. The immutable table
-        // is shared by all 22 graphs and Runtime objects.
-        static const Kernels value;return value;
-    }
     void advance(int32_t until) noexcept {
         if(!pending_ || pending_start_>until) return;
         if(pending_channels_) {
@@ -108,13 +107,19 @@ private:
         }
         available_=pending_start_+23*row_ticks;pending_=false;
     }
-    const std::array<Complex,modes>& interval(int32_t ticks) const noexcept {
-        assert(ticks>=0 && ticks<=2*frame_ticks && kernels_);
+    std::array<Complex,modes> interval(int32_t ticks) const noexcept {
+        assert(ticks>=0 && ticks<=2*frame_ticks);
         const int32_t remainder=ticks%grid_ticks;
         const unsigned family=remainder==0?0:remainder==event_remainder?1:2;
         assert(remainder==0 || remainder==event_remainder || remainder==grid_ticks-event_remainder);
         const unsigned phase=unsigned(ticks/grid_ticks);assert(phase<phases);
-        return kernels_->delta[family][phase];
+        std::array<Complex,modes> out;
+        for(unsigned k=0;k<modes;++k) {
+            out[k]={circuit_.value([&](const Kernels& x){return x.delta[family][phase][k].re;}),
+                    circuit_.value([&](const Kernels& x){return x.delta[family][phase][k].im;})};
+        }
+        if(!circuit_.original_low()) out[5]={circuit_.low_delta(-2.0328722602013864,double(ticks)/576000000000.0),0};
+        return out;
     }
     void advance_to(Channel& channel,int32_t time) noexcept {
         const int32_t ticks=time-channel.time;
@@ -140,12 +145,12 @@ private:
         }
     }
     template<unsigned K> float contribution(const Channel& channel,Complex a) const noexcept {
-        const auto& w=kernels_->weights[K];const auto& s=channel.state[K];
+        const auto w=Complex{circuit_.value([](const Kernels& x){return x.weights[K].re;}),circuit_.value([](const Kernels& x){return x.weights[K].im;})};const auto& s=channel.state[K];
         const float re=s.re+a.re*(s.re+channel.held);
-        if constexpr(K==0 || K>=4) return w.re*re;
+        if constexpr(K==0 || K>=4) return w.re*re*(K==5?1-circuit_.terminal():1);
         else return w.re*(re-a.im*s.im)-w.im*(s.im+a.im*(s.re+channel.held)+a.re*s.im);
     }
-    const Kernels* kernels_=nullptr;
+    cineol::CircuitControl<Kernels> circuit_;
     std::array<Channel,4> channels_{};
     // Include the existing output compatibility transport in event times.
     // At most four requests per pass, 25 host frames ahead: <80 queued captures.
@@ -154,7 +159,7 @@ private:
     int32_t available_=0,pending_start_=0,clock_base_=0;
     float pending_value_=0;bool pending_=false;
 };
-inline EventDac48::Kernels::Kernels() noexcept {
+inline EventDac48::Kernels::Kernels(double factor) noexcept {
     using C=std::complex<double>;
     const double rows[modes][4]={
         {-499999.9196412927,0,-0.014290779565073639,0},
@@ -165,7 +170,8 @@ inline EventDac48::Kernels::Kernels() noexcept {
         {-2.0328722602013864,0,-1.2762189938663815,0},
         {-19841.28472220363,0,23093.899981653653,0}};
     for(unsigned k=0;k<modes;++k) {
-        const C p(rows[k][0],rows[k][1]),r(rows[k][2],rows[k][3]);
+        const double f=k==5?1:factor;
+        const C p(f*rows[k][0],f*rows[k][1]),r(f*rows[k][2],f*rows[k][3]);
         const C weight=r/p*(p.imag()==0?1.0:2.0);weights[k]={float(weight.real()),float(weight.imag())};
         for(unsigned family=0;family<3;++family) for(unsigned phase=0;phase<phases;++phase) {
             const int32_t remainder=family==0?0:family==1?event_remainder:grid_ticks-event_remainder;

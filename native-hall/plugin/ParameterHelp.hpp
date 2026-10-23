@@ -12,7 +12,9 @@ inline juce::String unavailable(const juce::String& title) {
 inline juce::String global(const juce::String& id) {
     if(id=="input_db") return tip("Input","Sets the level feeding the effect. More gain drives the reverb or delay harder and can change its level-dependent response.");
     if(id=="mix") return tip("Dry / Wet","Blends the original signal with the effect. Use 100% wet when the plugin is on an auxiliary return.");
-    if(id=="analog" || id=="dirt") return tip("Dirt","Blends from the modeled converter filtering at 0% toward the unfiltered digital path at 100%. The lower half changes the blend more gently.");
+    if(id=="analog" || id=="dirt") return tip("Dirt","Opens the input and output filter bandwidths. At 100% the modeled filters are bypassed while converter quantization remains. The final part of the range removes the input reconstruction filter.");
+    if(id=="space") return tip("Space","Raise Space to slow the selected algorithm's DSP clock from its nominal rate to exactly half. Delays and modulation periods grow. The screen shows the actual DSP rate in kHz.");
+    if(id=="filters_follow_clock") return tip("Analog filters follow DSP rate","On: Space scales analog filter frequencies with the DSP clock. Off: analog frequencies stay fixed as Space changes. Dirt opens the filters independently in either mode.");
     if(id=="low_latency") return tip("Low latency","Uses a direct dry path and reports zero plugin latency. The wet effect keeps its own processing delay and pre-delay.");
     if(id=="spillover") return tip("Spillover","Keeps the previous program's tail when switching algorithms. That tail fades out while the new program receives the input.");
     if(id=="spillover_time") return tip("Spillover time","Sets how long the previous program's tail fades during a switch. The new duration applies to the next transition.");

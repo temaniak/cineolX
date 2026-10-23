@@ -18,6 +18,8 @@ public:
     // causal frame is included in the existing graph's compatibility delay.
     static constexpr unsigned transport_frames=latency_samples-32;
     void prepare() noexcept {dac_.prepare();reset();}
+    void set_clock_factor(float factor) noexcept {dac_.set_clock_factor(factor);}
+    void set_dirt(float dirt) noexcept {dac_.set_dirt(dirt);}
     void reset() noexcept {
         dac_.reset(int32_t(transport_frames)*EventDac48::frame_ticks);raw_.fill(0);next_pass_=0;
     }

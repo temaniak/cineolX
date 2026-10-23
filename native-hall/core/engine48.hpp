@@ -112,7 +112,7 @@ public:
     }
     // Desktop low-latency mode mixes the direct input at the host rate.
     // The default path (including Daisy) retains its original dry delay/mix.
-    void process(float left,float right,float& out_left,float& out_right,bool wet_only=false) noexcept {
+    void process(float left,float right,float& out_left,float& out_right,bool wet_only=false,std::array<float,4>* quad=nullptr) noexcept {
         if(!std::isfinite(left)) left=0;
         if(!std::isfinite(right)) right=0;
         gain_+=0.002f*(gain_target_-gain_);mix_+=0.002f*(params_.mix-mix_);
@@ -140,6 +140,7 @@ public:
         // Zero-order DAC holds preserve the images that make the reference's
         // bypass sound digital. Keep the advertised host delay in both modes.
         for(unsigned c=0;c<4;++c) wet[c]=bare[c]+analog_blend_*(wet[c]-bare[c]);
+        if(quad) *quad=wet;
         dry_[dry_position_%dry_.size()]={left,right};
         // Preserve the dry signal exactly with the reported integer latency.
         // Averaging adjacent samples for fractional delay would dull dry HF.
@@ -149,6 +150,12 @@ public:
         out_right=wet_only?wet[params_.output_right]:dry[1]*(1-mix_)+wet[params_.output_right]*mix_;
     }
     Core& hall() noexcept {return hall_;}
+    void set_clock_factor(float factor) noexcept {
+        clock_factor(input_,factor,0);clock_factor(output_,factor,0);
+    }
+    void set_dirt(float dirt) noexcept {
+        filter_dirt(input_,dirt,0);filter_dirt(output_,dirt,0);
+    }
     unsigned active_program() const noexcept {return current_program_;}
     // Original comparator thresholds and 12-bit mantissa + 6 dB gain steps.
     static int16_t adc(float sample,bool gain_ranging=true) noexcept {
@@ -166,6 +173,10 @@ public:
         return int16_t(code*int(1u<<(4-range)));
     }
 private:
+    template<class T> static auto clock_factor(T& value,float factor,int) noexcept -> decltype(value.set_clock_factor(factor),void()) {value.set_clock_factor(factor);}
+    template<class T> static void clock_factor(T&,float,...) noexcept {}
+    template<class T> static auto filter_dirt(T& value,float dirt,int) noexcept -> decltype(value.set_dirt(dirt),void()) {value.set_dirt(dirt);}
+    template<class T> static void filter_dirt(T&,float,...) noexcept {}
     static bool same_controls(const Controls& a,const Controls& b) noexcept {
         return a.bass==b.bass && a.mid==b.mid && a.crossover==b.crossover
             && a.treble==b.treble && a.depth==b.depth && a.predelay_ms==b.predelay_ms

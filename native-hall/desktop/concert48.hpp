@@ -67,7 +67,9 @@ public:
         mix_target_=std::clamp(mix,0.0f,1.0f);analog_target_=std::clamp(clean,0.0f,1.0f);
         left_=std::clamp(left,0,3);right_=std::clamp(right,0,3);
     }
-    void process(float left,float right,float& out_left,float& out_right,bool wet_only=false) noexcept {
+    void set_clock_factor(float factor) noexcept {input_.set_clock_factor(factor);output_.set_clock_factor(factor);}
+    void set_dirt(float dirt) noexcept {input_.set_dirt(dirt);output_.set_dirt(dirt);}
+    void process(float left,float right,float& out_left,float& out_right,bool wet_only=false,std::array<float,4>* quad=nullptr) noexcept {
         if(!std::isfinite(left)) left=0;if(!std::isfinite(right)) right=0;
         gain_+=0.002f*(gain_target_-gain_);mix_+=0.002f*(mix_target_-mix_);
         analog_+=0.002f*(analog_target_-analog_);
@@ -100,11 +102,12 @@ public:
             }
             output_.finish_pass();
         });
-        auto wet=output_.sample((1u<<left_)|(1u<<right_));
+        auto wet=output_.sample(quad?15:((1u<<left_)|(1u<<right_)));
         raw_delay_[position_%raw_delay_.size()]=output_.raw_sample();
         const auto& bare=raw_delay_[(position_+raw_delay_.size()-Output48<graph>::raw_delay_samples)%raw_delay_.size()];
         wet_fade_=std::min(1.0f,wet_fade_+1.0f/128);
         for(unsigned c=0;c<4;++c) wet[c]=(bare[c]+analog_*(wet[c]-bare[c]))*wet_fade_;
+        if(quad) *quad=wet;
         dry_[position_%dry_.size()]={left,right};
         const auto dry=dry_[(position_+dry_.size()-latency_samples)%dry_.size()];++position_;
         out_left=wet_only?wet[left_]:dry[0]*(1-mix_)+wet[left_]*mix_;

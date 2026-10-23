@@ -3,6 +3,7 @@
 #include "RomBank.hpp"
 #include "Firmware.hpp"
 #include "../desktop/runtime.hpp"
+#include "../desktop/space_clock.hpp"
 #include <juce-plugin/plugin/rate_bridge.hpp>
 #include <juce_audio_utils/juce_audio_utils.h>
 
@@ -40,6 +41,8 @@ public:
     bool usesXL() const noexcept;
     const cineol::xl::ProgramData* xlProgram() const noexcept;
     unsigned parameterPages() const noexcept;
+    double nominalDspRate() const noexcept;
+    double dspRate() const noexcept;
     uint8_t xlControl(unsigned cell) const noexcept;
     juce::String firmwareId() const;
     bool programAvailable(int program) const noexcept {return isXL(program)?rom_bank_->xlReady():rom_bank_->ready();}
@@ -80,7 +83,7 @@ public:
                 bool(state.state.getProperty("editor_compact",false))};
     }
     void setEditorAppearance(EditorAppearance);
-    int editorWidth() {const juce::ScopedLock lock(preset_write_lock_);return std::clamp(int(state.state.getProperty("editor_width",984)),984,1640);}
+    int editorWidth() {const juce::ScopedLock lock(preset_write_lock_);return std::clamp(int(state.state.getProperty("editor_width",1104)),1104,1840);}
     void setEditorWidth(int);
     void flushEditorPreferences() {editor_preferences_->file.saveIfNeeded();}
     unsigned presetRecallRevision() const noexcept {return preset_recall_revision_.load(std::memory_order_acquire);}
@@ -88,8 +91,10 @@ public:
     juce::AudioProcessorValueTreeState state;
     static constexpr const char* ids[]={"bass","mid","crossover","treble","depth","predelay","diffusion",
         "input_db","mix","analog","mode_enh","decay_opt","output_l","output_r","algorithm","xl_chorus","xl_diffusion",
-        "xl_00", "xl_01", "xl_02", "xl_03", "xl_04", "xl_05", "xl_06", "xl_07", "xl_08", "xl_09", "xl_10", "xl_11", "xl_12", "xl_13", "xl_14", "xl_15", "xl_16", "xl_17", "xl_18", "xl_19", "xl_20", "xl_21", "xl_22", "xl_23", "xl_24", "xl_25", "xl_26", "xl_27", "xl_28", "xl_29", "xl_30", "xl_31", "xl_32", "xl_33", "xl_34", "xl_35", "xl_36", "xl_37", "xl_38", "xl_39", "xl_40", "xl_41", "xl_42", "xl_43", "xl_44", "xl_45", "xl_46", "xl_47"};
+        "xl_00", "xl_01", "xl_02", "xl_03", "xl_04", "xl_05", "xl_06", "xl_07", "xl_08", "xl_09", "xl_10", "xl_11", "xl_12", "xl_13", "xl_14", "xl_15", "xl_16", "xl_17", "xl_18", "xl_19", "xl_20", "xl_21", "xl_22", "xl_23", "xl_24", "xl_25", "xl_26", "xl_27", "xl_28", "xl_29", "xl_30", "xl_31", "xl_32", "xl_33", "xl_34", "xl_35", "xl_36", "xl_37", "xl_38", "xl_39", "xl_40", "xl_41", "xl_42", "xl_43", "xl_44", "xl_45", "xl_46", "xl_47",
+        "space","filters_follow_clock","output_rear_l","output_rear_r"};
     static constexpr unsigned xl_parameter_begin=17;
+    static constexpr unsigned legacy_parameter_count=65,space_index=65,filter_link_index=66,rear_left_index=67,rear_right_index=68;
     static constexpr unsigned parameter_count=std::size(ids);
 private:
     juce::SharedResourcePointer<CineolEditorPreferences> editor_preferences_;
@@ -103,10 +108,15 @@ private:
     struct AudioSlot {
         native_hall::DesktopEngine48 engine;
         cineol::xl::Runtime xl_engine;
-        std::array<std::array<float,2>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> alignment{};
+        std::array<std::array<float,4>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> alignment{};
         unsigned alignment_position=0;
+        cineol::SpaceClock clock;
+        std::array<unsigned,4> routes{0,2,1,3};
+        float ratio_target=1,dirt_target=0,dirt=0,clock_factor=1;
+        bool filters_follow=false;
+        unsigned filter_tick=0;
         int program=-1;
-        void process(float,float,float&,float&,bool) noexcept;
+        std::array<float,4> process(float,float) noexcept;
     };
     std::array<AudioSlot,2> slots_;
     unsigned active_slot_=0;
@@ -119,12 +129,12 @@ private:
     void shortenTail() noexcept;
     void selectProgram(int,const std::array<float,parameter_count>&,bool);
     void applyControls(const std::array<float,parameter_count>&);
-    std::array<std::array<float,2>,native_hall::Engine48::latency_samples> transition_dry_{};
+    std::array<std::array<float,2>,cineol::SpaceClock::latency> transition_dry_{};
     unsigned transition_dry_position_=0;
     float transition_mix_=1;
     bool transition_mixing_=false;
     int active_program_=-1;
-    lexplug::RateBridge bridge_;
+    lexplug::RateBridge bridge_,rear_bridge_;
     juce::AudioParameterChoice* algorithm_parameter_=nullptr;
     std::array<std::atomic<float>*,parameter_count> values_{};
     std::array<float,parameter_count> previous_{};
@@ -136,7 +146,7 @@ private:
     std::atomic<float>* spillover_time_value_=nullptr;
     std::atomic<bool> low_latency_active_{false};
     std::atomic<int> normal_latency_{native_hall::Engine48::latency_samples};
-    juce::AudioBuffer<float> direct_input_;
+    juce::AudioBuffer<float> direct_input_,rear_internal_,rear_host_;
     float host_mix_=1,host_mix_coefficient_=0.002f;
     bool engine_initialized_=false; // Owned only by prepareToPlay/processBlock.
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NativeHallProcessor)

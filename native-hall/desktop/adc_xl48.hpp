@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include "circuit_control.hpp"
 
 namespace cineol::xl {
 // Exact linear boundary of the X/XL AIN: 4x sinc interpolation,
@@ -38,8 +39,10 @@ public:
     }
     void prepare(unsigned rows) noexcept {
         assert(rows>=100 && rows<=109);rows_=rows;pass_ticks_=int32_t(rows)*row_ticks;
-        kernels_=&kernels();reset();
+        circuit_.prepare();reset();
     }
+    void set_dirt(float dirt) noexcept {circuit_.set_dirt(dirt);}
+    void set_clock_factor(float factor) noexcept {circuit_.set_clock_factor(factor);}
     void reset() noexcept {raw_={};states_={};raw_slot_=state_slot_=seen_=0;next_pass_=0;}
     template<class Emit> void process(const float* input,Emit&& emit) noexcept {
         process_capture(input,[&](const double* circuit,const float*) noexcept {emit(circuit);});
@@ -50,14 +53,14 @@ public:
         const auto& previous=states_[(state_slot_+states_.size()-1)%states_.size()];
         auto& current=states_[state_slot_];
         for(unsigned c=0;c<2;++c)for(unsigned k=0;k<modes;++k) {
-            const auto p=previous[c][k],a=kernels_->whole_[k],b=kernels_->tail_[k];
+            const auto p=previous[c][k],a=mode(k,0),b=mode(k,1);
             current[c][k]={a.re*p.re-a.im*p.im+b.re*delayed[c],
                            a.im*p.re+a.re*p.im+b.im*delayed[c]};
             // At power-up the reference starts at point zero, without the
             // preceding FOH ramp that ordinary later input impulses have.
             if(seen_==0) {
-                current[c][k].re-=kernels_->startup_[k].re*input[c];
-                current[c][k].im-=kernels_->startup_[k].im*input[c];
+                current[c][k].re-=mode(k,2).re*input[c];
+                current[c][k].im-=mode(k,2).im*input[c];
             }
         }
         if(next_pass_+right_load_ticks<frame_ticks) {
@@ -96,12 +99,12 @@ private:
         const unsigned phase=unsigned((fraction-remainder_ticks)/grid_ticks);
         assert(phase<phases);
         double result=0;
-        const auto& weights=kernels_->fir_[phase];
+        const float terminal=circuit_.terminal();
         for(unsigned j=0;j<taps;++j)
-            result+=weights[j]*raw_[(raw_slot_+raw_.size()-ago+1-j)%raw_.size()][channel];
+            result+=((1-terminal)*circuit_.value([&](const Kernels& x){return x.fir_[phase][j];})+(j==17?-0.9996489004533257*terminal:0))*raw_[(raw_slot_+raw_.size()-ago+1-j)%raw_.size()][channel];
         const auto& state=states_[(state_slot_+states_.size()-ago)%states_.size()][channel];
         for(unsigned k=0;k<modes;++k) {
-            const auto a=kernels_->fractional_[phase][k],p=state[k];result+=a.re*p.re-a.im*p.im;
+            const auto a=kernel_fraction(phase,k),p=state[k];result+=(1-terminal)*(a.re*p.re-a.im*p.im);
         }
         return result;
     }
@@ -109,16 +112,24 @@ private:
         std::array<std::array<double,taps>,phases> fir_{};
         std::array<std::array<Complex,modes>,phases> fractional_{};
         std::array<Complex,modes> whole_{},tail_{},startup_{};
-        Kernels() noexcept;
+        Kernels(double factor) noexcept;
     };
-    static const Kernels& kernels() noexcept {static const Kernels value;return value;}
-    const Kernels* kernels_=nullptr;
+    Complex mode(unsigned k,unsigned field) const noexcept {
+        return {circuit_.value([&](const Kernels& x){return field==0?x.whole_[k].re:field==1?x.tail_[k].re:x.startup_[k].re;}),
+                circuit_.value([&](const Kernels& x){return field==0?x.whole_[k].im:field==1?x.tail_[k].im:x.startup_[k].im;})};
+    }
+    Complex kernel_fraction(unsigned phase,unsigned k) const noexcept {
+        return {circuit_.value([&](const Kernels& x){return x.fractional_[phase][k].re;}),
+                circuit_.value([&](const Kernels& x){return x.fractional_[phase][k].im;})};
+    }
+    cineol::CircuitControl<Kernels> circuit_;
+
     std::array<std::array<float,2>,64> raw_{};
     std::array<std::array<std::array<Complex,modes>,2>,20> states_{};
     unsigned raw_slot_=0,state_slot_=0,seen_=0;
     int32_t next_pass_=0,pass_ticks_=0;unsigned rows_=105;
 };
-inline EventAdc48::Kernels::Kernels() noexcept {
+inline EventAdc48::Kernels::Kernels(double factor) noexcept {
     using C=std::complex<double>;
     constexpr double pi=3.14159265358979323846,scale=0.6768697179710966;
     constexpr double direct=2.4950753693704976e-10,tick_seconds=1.0/576000000000.0;
@@ -153,7 +164,7 @@ inline EventAdc48::Kernels::Kernels() noexcept {
     std::array<std::array<C,modes>,129> z{};
     constexpr double step_seconds=1.0/192000.0;
     for(unsigned k=0;k<modes;++k) {
-        C p(rows[k][0],rows[k][1]),r(rows[k][2],rows[k][3]);
+        C p(factor*rows[k][0],factor*rows[k][1]),r(factor*rows[k][2],factor*rows[k][3]);
         poles[k]=p;residues[k]=r*(p.imag()==0?1.0:2.0)*scale;
         const auto a=coefficients(p,step_seconds);
         z[0][k]=h[0]/step_seconds*a.ramp;

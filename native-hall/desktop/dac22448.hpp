@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include "circuit_control.hpp"
 
 namespace native_hall {
 // Original 224 output: independently timed DAC holds through the continuous
@@ -21,6 +22,8 @@ public:
     inline static constexpr unsigned capture_rows[4][4]={
         {62,39,112,89}, {57,109,109,57}, {78,32,109,55}, {62,39,112,89}};
 
+    void set_dirt(float dirt) noexcept {circuit_.set_dirt(dirt);}
+    void set_clock_factor(float factor) noexcept {circuit_.set_clock_factor(factor);}
     void prepare() noexcept;
     void reset() noexcept {next_pass_=0;clear();}
     // A hard program switch clears the old output circuit/queued captures but
@@ -54,12 +57,13 @@ public:
                 assert(phase<phases);
                 float sum=0;
                 for(unsigned k=0;k<modes;++k) {
-                    const auto& a=fractional_[phase][k];const auto& state=channel.state[k];
+                    auto a=coefficient(phase,k,false);const auto& state=channel.state[k];
                     float re=state.re+a.re*(state.re+channel.held)-a.im*state.im;
                     float im=state.im+a.im*(state.re+channel.held)+a.re*state.im;
-                    sum+=weights_[k].re*re-weights_[k].im*im;
+                    sum+=(weight(k).re*re-weight(k).im*im)*(k==5?1-circuit_.terminal():1);
                 }
                 output[c]=(sum+float(3.5966000160032862e-12)*channel.held)*scale;
+                if(circuit_.dirt()>=1) output[c]=channel.held;
                 channel.age+=frame_ticks;
             }
             for(unsigned n=0;n<channel.count;++n)
@@ -86,18 +90,32 @@ private:
         // step to subtraction of two floats close to one. w=p*z is normalized
         // circuit state: w' = p*w+p*u, w_next=w+(exp(p*T)-1)*(w+u).
         for(unsigned k=0;k<modes;++k) {
-            const auto a=whole_[k];auto& state=channel.state[k];
+            const auto a=coefficient(0,k,true);auto& state=channel.state[k];
             float re=state.re+a.re*(state.re+channel.held)-a.im*state.im;
             float im=state.im+a.im*(state.re+channel.held)+a.re*state.im;
             state={re,im};
         }
     }
+    struct Kernels {
     std::array<std::array<Complex,modes>,phases> fractional_{};
     std::array<Complex,modes> whole_{},weights_{};
+        Kernels(double factor) noexcept;
+    };
+    Complex weight(unsigned k) const noexcept {
+        return {circuit_.value([&](const Kernels& x){return x.weights_[k].re;}),circuit_.value([&](const Kernels& x){return x.weights_[k].im;})};
+    }
+    Complex coefficient(unsigned phase,unsigned k,bool whole) const noexcept {
+        if(k==5 && !circuit_.original_low())
+            return {circuit_.low_delta(-2.0328722285876513,double(whole?pass_ticks:remainder_ticks+int32_t(phase)*grid_ticks)/576000000000.0),0};
+        return {circuit_.value([&](const Kernels& x){return whole?x.whole_[k].re:x.fractional_[phase][k].re;}),
+                circuit_.value([&](const Kernels& x){return whole?x.whole_[k].im:x.fractional_[phase][k].im;})};
+    }
+    cineol::CircuitControl<Kernels> circuit_;
     std::array<Channel,4> channels_{};
     int32_t next_pass_=0;unsigned network_=0;
 };
-inline void Dac48::prepare() noexcept {
+inline void Dac48::prepare() noexcept {circuit_.prepare();reset();}
+inline Dac48::Kernels::Kernels(double factor) noexcept {
     using C=std::complex<double>;
     // Circuit modes from the pinned original-224 AOUT, including its tiny fast
     // pole. Conjugate pairs are represented once; weights contain their factor 2.
@@ -110,7 +128,8 @@ inline void Dac48::prepare() noexcept {
         {-2.0328722285876513,0,-1.274430980922891,0},
         {-12550.2093589853,0,16073.03221843225,0}};
     for(unsigned k=0;k<modes;++k) {
-        C p(rows[k][0],rows[k][1]),r(rows[k][2],rows[k][3]);
+        const double f=k==5?1:factor;
+        C p(f*rows[k][0],f*rows[k][1]),r(f*rows[k][2],f*rows[k][3]);
         C weight=r/p*(p.imag()==0?1.0:2.0);
         weights_[k]={float(weight.real()),float(weight.imag())};
         const auto coefficient=[&](int32_t ticks) {
@@ -121,6 +140,5 @@ inline void Dac48::prepare() noexcept {
         for(unsigned phase=0;phase<phases;++phase)
             fractional_[phase][k]=coefficient(remainder_ticks+int32_t(phase)*grid_ticks);
     }
-    reset();
 }
 } // namespace native_hall
