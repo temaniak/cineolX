@@ -28,6 +28,7 @@ add_subdirectory(native-hall)
 if(NOT CINEOL_BUILD_PLUGIN)
     add_subdirectory(native-hall/float)
     add_subdirectory(native-hall/clean-ab)
+    add_subdirectory(native-hall/dual-hall)
     return()
 endif()
 if(APPLE)
@@ -89,3 +90,4 @@ target_link_libraries(cineol_rom_import_check PRIVATE NativeHall224 juce::juce_a
 add_subdirectory(native-hall/float)
 
 add_subdirectory(native-hall/clean-ab)
+add_subdirectory(native-hall/dual-hall)
