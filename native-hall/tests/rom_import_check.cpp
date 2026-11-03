@@ -3,6 +3,7 @@
 #include <exception>
 #include <iostream>
 #include <new>
+#include <typeinfo>
 #ifdef _WIN32
 #include <malloc.h>
 #endif
@@ -213,10 +214,57 @@ static void invalid_imports() {
     }
     require(cache.deleteFile() && folder.deleteRecursively(),"could not remove synthetic fixtures");
 }
+static void graphics_snapshots(const juce::File& output) {
+    // Public UI fixtures contain synthetic coefficients only, never ROM data.
+    struct Scratch {
+        juce::File folder=juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getChildFile("cineol-graphics-"+juce::Uuid().toString());
+        ~Scratch(){if(folder.isDirectory()) folder.deleteRecursively();}
+    } scratch;
+    require(scratch.folder.createDirectory().wasOk() && output.createDirectory().wasOk(),"graphics fixture folders");
+   #if JUCE_WINDOWS
+    require(_putenv_s("CINEOL224_CACHE_DIR",scratch.folder.getFullPathName().toRawUTF8())==0,"graphics cache override");
+   #else
+    require(setenv("CINEOL224_CACHE_DIR",scratch.folder.getFullPathName().toRawUTF8(),1)==0,"graphics cache override");
+   #endif
+    {
+        auto bank=std::make_unique<native_hall::ProgramBank>();
+        for(unsigned i=0;i<native_hall::program_count;++i) {
+            auto& p=bank->programs[i];p.identity=native_hall::program_identities[i];p.network=native_hall::program_networks[i];
+            p.level_rate_tenths.fill(100);p.modulation_rate_tenths.fill(1000);require(p.valid(i),"graphics synthetic profile");
+        }
+        native_hall::BankHeader header;header.checksum=native_hall::profile_checksum(bank.get(),sizeof(*bank));
+        juce::FileOutputStream stream(CineolRomBank::cacheFile());
+        require(stream.openedOk()&&stream.write(&header,sizeof header)&&stream.write(bank.get(),sizeof(*bank)),"graphics synthetic cache");
+    }
+    NativeHallProcessor p;require(p.ready(),"graphics fixture not ready");p.setEditorAppearance({1,.8f,false});
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* fader=find(*editor,"bass");auto* key=find(*editor,"quick_preset_1");auto* panel=find(*editor,"cineol_panel");
+    require(fader&&key&&panel,"graphics controls missing");
+    for(bool clean:{false,true}) {
+        auto* parameter=p.state.getParameter("clean_mode");parameter->setValueNotifyingHost(clean?1.f:0.f);
+        require(bool(panel->getProperties()["clean_skin"])==clean,"graphics skin switch");
+        for(int width:{1104,1840}) {
+            editor->setSize(width,int(std::lround(width*1160.0/1840)));
+            require(fader->isVisible()&&key->isVisible(),"graphics controls hidden");
+            for(float dpi:{1.f,1.25f,1.5f,2.f}) {
+                const auto image=editor->createComponentSnapshot(editor->getLocalBounds(),true,dpi);
+                require(image.isValid()&&image.getWidth()==juce::roundToInt(width*dpi),"graphics DPI dimensions");
+                const auto name=juce::String(clean?"clean-":"original-")+juce::String(width)+"-dpi"+juce::String(juce::roundToInt(dpi*100));
+                auto stream=output.getChildFile(name+".png").createOutputStream();juce::PNGImageFormat png;
+                require(stream&&stream->setPosition(0)&&stream->truncate().wasOk()&&png.writeImageToStream(image,*stream),"graphics snapshot write");
+                const auto* pixel_data=image.getPixelData().get();
+                std::cout<<name<<": "<<image.getWidth()<<'x'<<image.getHeight()<<" backend="<<typeid(*pixel_data).name()<<'\n';
+            }
+        }
+    }
+    std::cout<<"Graphics: two skins, two editor widths, 100/125/150/200% DPI, synthetic cache only; 16 native-renderer snapshots passed\n";
+}
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
     require(argc>=2,"usage: rom_import_check --runtime-check|--empty|--cached|--reject SOURCE|--cancel SOURCE|--import SOURCE BANK");
     const std::string mode=argv[1];
+    if(mode=="--graphics") {require(argc==3,"--graphics requires an output folder");graphics_snapshots(juce::File(juce::String::fromUTF8(argv[2])));return 0;}
     if(mode=="--empty" || mode=="--runtime-check") preparation_runtime();
     if(mode=="--runtime-check") return 0;
     if(mode=="--invalid-check") {

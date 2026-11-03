@@ -29,6 +29,7 @@ try {
     Invoke-Checked (Join-Path $TaskBuild 'native-hall/Release/cineol_space_clock_check.exe') @()
     $env:CINEOL224_CACHE_DIR = Join-Path $TaskBuild ('check-cache-' + [guid]::NewGuid())
     Invoke-Checked (Join-Path $TaskBuild 'cineol_rom_import_check_artefacts/Release/cineol_rom_import_check.exe') @('--empty')
+    Invoke-Checked (Join-Path $TaskBuild 'cineol_rom_import_check_artefacts/Release/cineol_rom_import_check.exe') @('--graphics', (Join-Path $TaskBuild 'graphics-check'))
     Write-Host "Cineol-X 224 VST3: $TaskBuild/NativeHall224_artefacts/Release/VST3/Cineol-X 224.vst3"
 } finally {
     if ($env:CINEOL224_CACHE_DIR -and $env:CINEOL224_CACHE_DIR -ne $TaskOldCache -and

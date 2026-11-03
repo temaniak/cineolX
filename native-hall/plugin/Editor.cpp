@@ -285,6 +285,10 @@ public:
         juce::Path shadow;shadow.addRoundedRectangle(cap,3);
         juce::DropShadow(juce::Colours::black.withAlpha(0.6f),9,{4,6}).drawForPath(g,shadow);
         g.setOpacity(1.0f);
+       #if JUCE_WINDOWS
+        // Direct2D's default linear sampler aliases these heavily reduced PNGs.
+        g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+       #endif
         g.drawImage(s.isEnabled()?cap_:inactive_cap_,cap,juce::RectanglePlacement::stretchToFit);
     }
     void drawComboBox(juce::Graphics& g,int width,int height,bool down,int,int,int,int,juce::ComboBox& c) override {
@@ -760,6 +764,9 @@ public:
         g.setColour(active_?juce::Colour(0xffed3226):juce::Colour(0xff5e2e28));g.fillEllipse(centre-4.5f,6.5f,9,9);
         if(active_) {g.setColour(juce::Colour(0xffffb498));g.fillEllipse(centre-2,7.5f,3,3);}
         const juce::Rectangle<float> cap(centre-62,30+(down?3.0f:0.0f),124,124-(down?3.0f:0.0f));
+       #if JUCE_WINDOWS
+        g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+       #endif
         g.drawImage(cap_,cap,juce::RectanglePlacement::centred);
         g.setColour(juce::Colour(0xffdedbd3).withAlpha(preset_.isEmpty()?0.8f:1.0f));g.setFont(font(35,true));
         g.drawText(juce::String(slot_+1),cap.translated(0,-8),juce::Justification::centred);

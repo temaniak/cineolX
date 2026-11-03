@@ -69,6 +69,14 @@ jobs:
             build/plugin/cineol_rom_import_check_artefacts/Release/cineol_rom_import_check --empty
       - name: Package verified binaries
         run: python script/package_release.py --platform ${{ matrix.package_platform }} --build-dir ${{ matrix.build_dir }}
+      - name: Upload Windows graphics checks
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Windows-graphics-check
+          path: build/windows/graphics-check/*.png
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload release archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
