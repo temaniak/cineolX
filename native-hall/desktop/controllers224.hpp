@@ -39,6 +39,8 @@ public:
     }
     void set_controls(const Controls& controls) noexcept {
         const bool recompile=bank_ && controls.mode_enhancement!=controls_.mode_enhancement;
+        const bool hidden_changed=controls.modulation_period!=controls_.modulation_period ||
+            controls.modulation_step!=controls_.modulation_step || controls.optimization_response!=controls_.optimization_response;
         controls_=controls;Hall::set_controls(controls);
         if(recompile) {
             // The physical Mod key reloads the program in both directions.
@@ -53,6 +55,11 @@ public:
                 for(unsigned j=0;j<2;++j){state.coefficients[2*tap+j]=p.coefficients[row+j];state.offsets[2*tap+j]=p.offsets[row+j];}
             }
             restore_modulation(state);
+            scan_clock_.reset(program_networks[program_],cycles_);control_writes_.reset();
+        }
+        else if(bank_ && hidden_changed) {
+            // Retain tap/global/decay state, discard predictions made with the
+            // previous effective settings at this native control boundary.
             scan_clock_.reset(program_networks[program_],cycles_);control_writes_.reset();
         }
     }

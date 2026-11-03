@@ -3,6 +3,7 @@
 #include "diffusion.hpp"
 #include "controls.hpp"
 #include "dynamics.hpp"
+#include "rich_chorus_timing.hpp"
 #include "../core/profile.hpp"
 #include <cstring>
 #include <cstdio>
@@ -42,11 +43,29 @@ struct ProgramData {
         if(ms>=1180) return 255;
         return ms<50?ms:ms<150?50+(ms-50)/2:ms<350?100+(ms-150)/4:150+(ms-350)/8;
     }
+    uint64_t frequency_controls() const noexcept {
+        uint64_t cells=0;
+        for(const auto& control:controls.slots) if(control.kind==ControlKind::filter)
+            cells|=uint64_t(1)<<control.cell;
+        return cells;
+    }
+    unsigned control_maximum(unsigned page_index,unsigned slot,const std::array<uint8_t,48>& raw) const noexcept {
+        const auto& page=pages[page_index];
+        const unsigned maximum=page.variable_predelay[slot]?predelay_maximum(raw):page.maximum[slot];
+        // Physical LARC frequency faders stop at 254. The logical record's
+        // 255 is a mute sentinel, not the open-filter endpoint (253/254).
+        // Resolve old automation/presets too, without changing the bank ABI
+        // or the host's shared XL parameter ranges.
+        if(page.cells[slot]<48 && (frequency_controls()&(uint64_t(1)<<page.cells[slot])))return std::min(254u,maximum);
+        return maximum;
+    }
     void resolve_controls(std::array<uint8_t,48>& raw) const noexcept {
         const unsigned variable_limit=predelay_maximum(raw);
+        const uint64_t frequencies=frequency_controls();
         for(unsigned p=0;p<page_count;++p) for(unsigned slot=0;slot<6;++slot) {
             const auto& page=pages[p];const unsigned cell=page.cells[slot];if(cell>=48) continue;
-            const unsigned maximum=page.variable_predelay[slot]?variable_limit:page.maximum[slot];
+            const unsigned limit=page.variable_predelay[slot]?variable_limit:page.maximum[slot];
+            const unsigned maximum=(frequencies&(uint64_t(1)<<cell))?std::min(254u,limit):limit;
             raw[cell]=uint8_t(std::min(unsigned(raw[cell]),maximum));
         }
     }
@@ -75,16 +94,30 @@ struct ProgramData {
         }
         return result;
     }
-    bool control_active(unsigned cell) const noexcept {
+    bool mode_enhancement_active(Graph graph) const noexcept {
+        return (modulation.flags&15)!=0 || rich_chorus_graph(graph);
+    }
+    bool control_active(unsigned cell,Graph graph) const noexcept {
         if(cell>=48) return false;
         if(cell==45) return dynamics.enabled;
-        if((dynamics.shared_stop && (cell==6 || cell==7)) ||
-            (!dynamics.shared_stop && (cell==12 || cell==13))) return dynamics.enabled;
+        // Non-reverb effects reuse cells 6/7 for voices 1/2. Only a
+        // dynamics-capable program gives these addresses stop-decay meaning.
+        if(dynamics.enabled && ((dynamics.shared_stop && (cell==6 || cell==7)) ||
+            (!dynamics.shared_stop && (cell==12 || cell==13)))) return true;
         if(size_cell(cell)) return controls.size.enabled;
-        for(const auto& slot:controls.slots) if(slot.cell==cell) {
-            if(slot.kind==ControlKind::chorus) return (modulation.flags&15)!=0;
-            if(slot.kind==ControlKind::definition && controls.feedback.count) return true;
-            for(unsigned g=0;g<slot.groups;++g) if(slot.group[g].count) return true;
+        for(const auto& slot:controls.slots) {
+            if(slot.cell==cell) {
+                if(slot.kind==ControlKind::chorus) return mode_enhancement_active(graph);
+                if(slot.kind==ControlKind::definition && controls.feedback.count) return true;
+                for(unsigned g=0;g<slot.groups;++g) if(slot.group[g].count) return true;
+            }
+            // A decay value can feed another slot's compiler without owning
+            // a coefficient row: Inverse Mid feeds LF, CD Plate LF feeds the
+            // paired Mid coefficient. These are functional user controls.
+            if(slot.kind==ControlKind::low_decay && unsigned(slot.cell)+1==cell && slot.group[0].count) return true;
+            if(slot.kind==ControlKind::mid_decay && slot.cell==cell+1)
+                for(unsigned t=0;t<slot.group[0].count;++t)
+                    if(slot.group[0].targets[t].meta&64) return true;
         }
         return false;
     }

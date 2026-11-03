@@ -17,7 +17,7 @@ static bool static_kind(ControlKind kind) {
         kind==ControlKind::diffusion || kind==ControlKind::definition;
 }
 template<Graph graph>
-static void check_static(Engine& engine,Machine& machine,LarcOperator& op,const Bank& bank) {
+static void check_static(Engine& engine,Machine& machine,LarcOperator& op,const Bank& bank,bool endpoints=false) {
     constexpr auto info=graph_info(graph);const auto& data=bank.programs[unsigned(graph)];
     auto result=machine.run_task([&]{return xl_test::select(machine,op,info.bank,info.program);});
     require(!result.failed,"control program selection failed");
@@ -25,9 +25,12 @@ static void check_static(Engine& engine,Machine& machine,LarcOperator& op,const 
     for(unsigned page=0;page<data.page_count;++page) for(unsigned slider=0;slider<6;++slider) {
         const unsigned cell=data.pages[page].column*6+slider;
         bool active=false;
-        for(const auto& slot:data.controls.slots) if(slot.cell==cell && static_kind(slot.kind) && slot.groups && (slot.group[0].count || (slot.kind==ControlKind::definition && data.controls.feedback.count))) active=true;
+        for(const auto& slot:data.controls.slots) if(slot.cell==cell &&
+            (endpoints?slot.kind==ControlKind::filter:static_kind(slot.kind)) &&
+            data.control_active(cell,graph)) active=true;
         if(!active) continue;
-        for(unsigned raw:{2u,66u,130u,250u}) {
+        const auto positions=endpoints?std::array<unsigned,4>{252,253,254,255}:std::array<unsigned,4>{2,66,130,250};
+        for(unsigned raw:positions) {
             result=machine.run_task([&]{return xl_test::move_slider(machine,op,page+1,slider,raw,0.1);});
             require(!result.failed,"control fixture failed");
             NetworkSettings<128> predicted;
@@ -36,6 +39,10 @@ static void check_static(Engine& engine,Machine& machine,LarcOperator& op,const 
                 predicted.offsets[row]=data.offsets[row];
             }
             std::array<uint8_t,48> values;std::copy_n(host.memory.begin()+0x3ca3,values.size(),values.begin());
+            if(endpoints) {
+                auto native=values;native[cell]=uint8_t(raw);data.resolve_controls(native);
+                require(native[cell]==values[cell],"native endpoint differs from physical fader calibration");
+            }
             tracking=true;data.controls.apply_size(predicted,values);data.controls.apply_static(predicted,values);tracking=false;
             for(unsigned row=0;row<info.rows;++row) {
                 bool interpolation=false;
@@ -131,14 +138,19 @@ static void check_size(Engine& engine,Machine& machine,LarcOperator& op,const Ba
     std::cout<<info.name<<" native Size: "<<cases<<" memory layout/address fixtures exact\n"<<std::flush;
 }
 int main(int argc,char** argv) {
-    require(argc==3 || argc==4,"usage: cineol_xl_controls_check ROM_DIRECTORY PREPARED_BANK [PROGRAM_INDEX]");
+    require(argc>=3 && argc<=5,"usage: cineol_xl_controls_check ROM_DIRECTORY PREPARED_BANK [PROGRAM_INDEX] [--endpoints]");
+    const bool endpoints=std::string(argv[argc-1])=="--endpoints";
+    if(endpoints)--argc;
     std::ifstream input(argv[2],std::ios::binary);std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)),{});
     auto bank=std::make_unique<Bank>();require(read_bank(bytes.data(),bytes.size(),*bank),"invalid controls bank");
     auto engine=std::make_unique<Engine>(0);xl_test::load(*engine,argv[1]);
     auto machine=std::make_unique<Machine>(*engine);LarcOperator op(*machine);
     auto result=machine->run_task([&]{return xl_test::boot(*machine,op);});require(!result.failed,"boot failed");
     const int selected=argc==4?std::atoi(argv[3]):-1;
-    each_graph([&]<Graph graph>() {if(selected<0 || selected==int(graph)) {check_static<graph>(*engine,*machine,op,*bank);check_size<graph>(*engine,*machine,op,*bank);}});
+    each_graph([&]<Graph graph>() {if(selected<0 || selected==int(graph)) {
+        check_static<graph>(*engine,*machine,op,*bank,endpoints);
+        if(!endpoints)check_size<graph>(*engine,*machine,op,*bank);
+    }});
     require(allocations==0 && releases==0,"native controls allocated/released memory");
     std::cout<<"Native control compiler allocation/release=0\n";
 }

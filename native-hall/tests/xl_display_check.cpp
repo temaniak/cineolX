@@ -10,7 +10,7 @@ static double numeric(const char* text) {
     if(std::strstr(text,"kHz")) value*=1000;
     return value;
 }
-static void check_page_values(Engine& engine,Machine& machine,LarcOperator& op,const ProgramData& data,unsigned& cases) {
+static void check_page_values(Engine& engine,Machine& machine,LarcOperator& op,const ProgramData& data,Graph graph,unsigned& cases) {
     auto& host=engine.host();
     std::array<uint8_t,48> raw;std::copy_n(host.memory.begin()+0x3ca3,raw.size(),raw.begin());
     auto resolved=raw;data.resolve_controls(resolved);
@@ -19,7 +19,7 @@ static void check_page_values(Engine& engine,Machine& machine,LarcOperator& op,c
         require(!result.failed,"display page fixture failed");
         for(unsigned slot=0;slot<6;++slot) {
             const unsigned cell=data.pages[page].cells[slot];
-            if(cell>=48 || !data.control_active(cell)) continue;
+            if(cell>=48 || !data.control_active(cell,graph)) continue;
             require(resolved[cell]==raw[cell],"native logical bounds changed a calibrated firmware value");
             const auto actual=data.display_value(page,slot,resolved);
             const auto expected=cineol::xl::import::display_value(host.memory,slot,cell,raw[cell]);
@@ -45,12 +45,12 @@ int main(int argc,char** argv) {
         if(selected>=0 && selected!=int(g)) continue;
         const auto& data=bank->programs[g];const auto info=graphs[g];unsigned cases=0;
         result=machine->run_task([&]{return xl_test::select(*machine,op,info.bank,info.program);});require(!result.failed,"display program selection failed");
-        check_page_values(*engine,*machine,op,data,cases);
+        check_page_values(*engine,*machine,op,data,Graph(g),cases);
         if(data.controls.size.enabled) for(unsigned page=0;page<data.page_count;++page) for(unsigned slot=0;slot<6;++slot) {
             if(data.pages[page].cells[slot]!=43 && data.pages[page].cells[slot]!=44) continue;
             for(unsigned raw:{2u,66u,130u,250u}) {
                 result=machine->run_task([&]()->Task<void>{co_await op.moveSlider(int(page+1),slot,raw);co_await machine->sleep(1);});
-                require(!result.failed,"display Size fixture failed");check_page_values(*engine,*machine,op,data,cases);
+                require(!result.failed,"display Size fixture failed");check_page_values(*engine,*machine,op,data,Graph(g),cases);
             }
         }
         std::cout<<info.name<<" native display/bounds: "<<cases<<" logical values exact\n"<<std::flush;

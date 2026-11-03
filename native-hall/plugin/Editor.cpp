@@ -12,6 +12,9 @@ constexpr int fader_y=360,fader_height=480;
 constexpr int display_global_x=global_fader_x-variable_fader_x,display_divider_x=display_global_x-30;
 constexpr const char* captions[]={"BASS","MID","CROSSOVER","TREBLE","DEPTH","PRE-DELAY",
     "DIFFUSION","INPUT","MIX"};
+constexpr const char* hidden_captions[]={"MOD RATE","MOD DEPTH","OPT RESP"};
+const char* caption(unsigned index) {return index>=NativeHallProcessor::mod_rate_index?
+    hidden_captions[index-NativeHallProcessor::mod_rate_index]:captions[index];}
 constexpr int display_width=panel_width-2*variable_fader_x;
 constexpr int faderX(unsigned slot) {return slot<6?variable_fader_x+int(slot)*fader_step:global_fader_x+int(slot-6)*global_fader_step;}
 constexpr unsigned route_indices[]={12,13,NativeHallProcessor::rear_left_index,NativeHallProcessor::rear_right_index};
@@ -169,6 +172,12 @@ public:
         juce::Image::BitmapData pixels(inactive_cap_,juce::Image::BitmapData::readWrite);
         for(int y=0;y<pixels.height;++y) for(int x=0;x<pixels.width;++x)
             pixels.setPixelColour(x,y,pixels.getPixelColour(x,y).withSaturation(0).withMultipliedBrightness(0.58f));
+        original_cap_=cap_;original_inactive_=inactive_cap_;original_material_=material_;
+        clean_cap_=trimTransparentPadding(loadImage("fadercapclean_png"));
+        clean_material_=loadImage("menuclean_png");clean_inactive_=clean_cap_.createCopy();
+        juce::Image::BitmapData clean_pixels(clean_inactive_,juce::Image::BitmapData::readWrite);
+        for(int y=0;y<clean_pixels.height;++y) for(int x=0;x<clean_pixels.width;++x)
+            clean_pixels.setPixelColour(x,y,clean_pixels.getPixelColour(x,y).withSaturation(0).withMultipliedBrightness(0.58f));
         setColour(juce::ComboBox::textColourId,juce::Colour(0xfff1ece0));
         // JUCE uses this colour's alpha to choose a transparent native menu
         // window. The rounded metal surface itself is painted fully opaque.
@@ -315,6 +324,12 @@ private:
     juce::Point<int> help_anchor_;
     bool has_help_anchor_=false;
     juce::Image cap_,inactive_cap_,material_;
+    juce::Image original_cap_,original_inactive_,original_material_,clean_cap_,clean_inactive_,clean_material_;
+public:
+    void setClean(bool clean) {
+        cap_=clean?clean_cap_:original_cap_;inactive_cap_=clean?clean_inactive_:original_inactive_;
+        material_=clean?clean_material_:original_material_;
+    }
 };
 class HelpTooltipWindow final : public juce::TooltipWindow {
 public:
@@ -674,6 +689,10 @@ public:
         compact_.setComponentID("compact_mode");compact_.setButtonText("Compact display mode");
         compact_.setTooltip(cineol::help::global("compact_mode"));
         compact_.onClick=[this]{commit();};addAndMakeVisible(compact_);sync();
+        clean_.setComponentID("clean_mode");clean_.setButtonText("Clean");clean_.setTitle("Clean mode");
+        clean_.setTooltip(cineol::help::global("clean_mode"));
+        addAndMakeVisible(clean_);
+        clean_attachment_=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state,"clean_mode",clean_);
     }
     std::function<void()> onAppearanceChanged;
     void sync() {
@@ -704,8 +723,9 @@ public:
         spillover_.setBounds(28,wide?166:235,245,wide?56:64);duration_.setBounds(280,wide?170:243,170,48);
         brightness_.setBounds(column,wide?101:448,490,40);
         emphasis_.setBounds(column,wide?180:539,490,40);
-        compact_.setBounds(column,wide?224:590,510,wide?58:64);
+        compact_.setBounds(column+(wide?180:0),wide?224:590,wide?370:510,wide?58:64);
         filter_link_.setBounds(28,wide?260:662,510,52);
+        clean_.setBounds(column,wide?224:727,wide?170:510,52);
     }
 private:
     void commit() {
@@ -714,9 +734,10 @@ private:
     }
     NativeHallProcessor& processor_;
     juce::Slider brightness_,emphasis_;
-    juce::ToggleButton compact_,low_latency_,spillover_,filter_link_;
+    juce::ToggleButton compact_,low_latency_,spillover_,filter_link_,clean_;
     juce::ComboBox duration_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment_,spillover_attachment_,filter_attachment_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> clean_attachment_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> duration_attachment_;
 
 };
@@ -1076,13 +1097,16 @@ private:
 }
 
 struct CineolEditor::Panel final : public juce::Component,private juce::Timer,private juce::FocusChangeListener {
-    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panelquickpresets_png")),compact_background_(loadImage("panelcompactintegrated_png").getClippedImage({0,128,2062,488})),bezel_(loadImage("panel_png")),rom_setup_(processor),settings_panel_(processor),preset_browser_(processor) {
+    explicit Panel(NativeHallProcessor& processor):processor_(processor),background_(loadImage("panelquickpresets_png")),compact_background_(loadImage("panelcompactintegrated_png").getClippedImage({0,128,2062,488})),bezel_(loadImage("panel_png")),
+        clean_background_(loadImage("panelclean_png")),clean_compact_(loadImage("panelcompactclean_png").getClippedImage({0,128,2062,488})),clean_bezel_(loadImage("bezelclean_png")),
+        original_quick_(trimTransparentPadding(loadImage("quickkeyblack_png"))),clean_quick_(trimTransparentPadding(loadImage("quickkeyclean_png"))),
+        rom_setup_(processor),settings_panel_(processor),preset_browser_(processor) {
         setComponentID("cineol_panel");setLookAndFeel(&look_);setSize(panel_width,panel_height);addAndMakeVisible(display_);
         display_.setBounds(variable_fader_x,92,display_width,224);
         settings_panel_.onAppearanceChanged=[this]{applyAppearance();};
         for(unsigned slot=0;slot<display_.values.size();++slot) {
             auto& value=display_.values[slot];
-            value.onDragStart=[this,slot]{if(slot<6) {if(displayed_xl_) focused_xl_slot_=slot;else focused_=page_==0?slot:6;}if(value_attachments_[slot]) {value_dragging_[slot]=true;value_attachments_[slot]->beginGesture();}};
+            value.onDragStart=[this,slot]{if(slot<6) {if(displayed_xl_) focused_xl_slot_=slot;else focused_=page_==0?slot:page_==2?NativeHallProcessor::mod_rate_index+std::min(slot,2u):6;}if(value_attachments_[slot]) {value_dragging_[slot]=true;value_attachments_[slot]->beginGesture();}};
             value.onDragEnd=[this,slot]{endValueGesture(slot);};
             value.onValueChange=[this,slot]{
                 if(binding_values_ || !value_attachments_[slot]) return;
@@ -1112,12 +1136,23 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
             slider.setSliderSnapsToMousePosition(false);
             slider.setTooltip(param->getName(40)+": drag or use arrow keys. Double-click resets.");
             addAndMakeVisible(slider);
-            const int slot=i<6?int(i):i==6?4:int(i);
+            const int slot=i<6?int(i):i==6?0:int(i);
             slider.setBounds(i<7?variable_fader_x+slot*fader_step:faderX(i-1),fader_y,140,fader_height);
             slider_attachments_[i]=std::make_unique<SliderAttachment>(processor_.state,NativeHallProcessor::ids[i],slider);
             slider.connect(processor_);
             slider.onDragStart=[this,i]{focused_=i;refreshDisplay();};
             slider.onValueChange=[this,i]{focused_=i;refreshDisplay();};
+        }
+        for(unsigned field=0;field<hidden_sliders_.size();++field) {
+            auto& slider=hidden_sliders_[field];const auto* id=NativeHallProcessor::ids[NativeHallProcessor::mod_rate_index+field];
+            slider.setLookAndFeel(&look_);slider.setComponentID(id);slider.setName(processor_.state.getParameter(id)->getName(40));
+            slider.setTitle(slider.getName());slider.setSliderStyle(juce::Slider::LinearVertical);
+            slider.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);slider.setSliderSnapsToMousePosition(false);
+            slider.setBounds(variable_fader_x+int(field)*fader_step,fader_y,140,fader_height);
+            slider.setTooltip(cineol::help::original(0,id));addChildComponent(slider);
+            hidden_attachments_[field]=std::make_unique<SliderAttachment>(processor_.state,id,slider);slider.connect(processor_);
+            slider.onDragStart=[this,field]{focused_=NativeHallProcessor::mod_rate_index+field;refreshDisplay();};
+            slider.onValueChange=[this,field]{focused_=NativeHallProcessor::mod_rate_index+field;refreshDisplay();};
         }
         for(unsigned slot=0;slot<xl_sliders_.size();++slot) {
             auto& slider=xl_sliders_[slot];
@@ -1126,7 +1161,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
             slider.setSliderSnapsToMousePosition(false);slider.setBounds(variable_fader_x+int(slot)*fader_step,fader_y,140,fader_height);
             addChildComponent(slider);slider.connect(processor_);
             slider.onDragStart=[this,slot]{xl_dragging_[slot]=true;focused_xl_slot_=slot;if(xl_attachments_[slot]) xl_attachments_[slot]->beginGesture();};
-            slider.onDragEnd=[this,slot]{xl_dragging_[slot]=false;if(xl_attachments_[slot]) xl_attachments_[slot]->endGesture();};
+            slider.onDragEnd=[this,slot]{if(xl_dragging_[slot] && xl_attachments_[slot]) xl_attachments_[slot]->endGesture();xl_dragging_[slot]=false;};
             slider.onValueChange=[this,slot]{
                 if(!binding_xl_ && xl_attachments_[slot]) {
                     focused_xl_slot_=slot;
@@ -1193,9 +1228,11 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
         space_.setTooltip(cineol::help::global("space"));
         space_attachment_=std::make_unique<SliderAttachment>(processor_.state,"space",space_);
         space_.onValueChange=[this]{refreshDisplay();};
+        clean_attachment_=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("clean_mode"),[this](float value){applyClean(value);});
+        clean_attachment_->sendInitialUpdate();
         algorithm_attachment_=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("algorithm"),[this](float){refreshProgram();});
         algorithm_attachment_->sendInitialUpdate();
-        const auto quick_cap=trimTransparentPadding(loadImage("quickkeyblack_png"));
+        const auto quick_cap=clean_skin_?clean_quick_:original_quick_;
         for(unsigned slot=0;slot<quick_keys_.size();++slot) {
             auto& key=quick_keys_[slot];key.setComponentID("quick_preset_"+juce::String(slot+1));
             key.setImage(quick_cap);
@@ -1203,7 +1240,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
             key.onClick=[this,slot]{reportPresetResult(processor_.loadQuickPreset(slot));};
         }
         addChildComponent(rom_setup_);rom_setup_.setBounds(0,0,panel_width,panel_height);
-        addChildComponent(settings_panel_);settings_panel_.setBounds(990,76,550,720);
+        addChildComponent(settings_panel_);settings_panel_.setBounds(990,76,550,800);
         addChildComponent(preset_browser_);preset_browser_.setBounds(0,0,panel_width,panel_height);
         preset_browser_.onClose=[this]{display_.preset.grabKeyboardFocus();};
         preset_browser_.onSave=[this]{namePreset();};preset_browser_.onLoad=[this]{refreshProgram();};
@@ -1225,9 +1262,9 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
     }
     void paint(juce::Graphics& g) override {
         // Each mode retains a complete faceplate at a uniform scale.
-        if(compact_) drawCompactHousing(g,compact_background_);
-        else g.drawImage(background_,getLocalBounds().toFloat(),juce::RectanglePlacement::stretchToFit);
-        if(!compact_) drawBezel(g,bezel_,{60,65,1354,178},{52,72,panel_width-104,256},12);
+        if(compact_) drawCompactHousing(g,clean_skin_?clean_compact_:compact_background_);
+        else g.drawImage(clean_skin_?clean_background_:background_,getLocalBounds().toFloat(),juce::RectanglePlacement::stretchToFit);
+        if(!compact_) drawBezel(g,clean_skin_?clean_bezel_:bezel_,{60,65,1354,178},{52,72,panel_width-104,256},12);
         if(!compact_) {g.setColour(juce::Colour(0xff110202));g.fillRect(variable_fader_x,84,display_width,232);}
         g.setColour(ink);g.setFont(font(40,true));g.drawText("Cineol-X 224",compact_?140:84,compact_?30:17,800,44,juce::Justification::centredLeft);
         if(compact_) {g.setFont(font(18));g.drawText("DRAG VALUES UP / DOWN     SHIFT: FINE ADJUST",150,355,1100,27,juce::Justification::centredLeft);return;}
@@ -1244,6 +1281,15 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
     std::function<void(bool)> onCompactChanged;
     bool isCompact() const {return compact_;}
 private:
+    // Native-only variation occupies the first unused fader after Size and
+    // Stop Delay on Dark Hall page 5. Firmware cells/host IDs never move.
+    bool darkVariation(unsigned slot) const {return processor_.getCurrentProgram()==8 && page_==4 && slot==2;}
+    void applyClean(float value) {
+        clean_skin_=value>=.5f;
+        look_.setClean(clean_skin_);getProperties().set("clean_skin",clean_skin_);
+        for(auto& key:quick_keys_) key.setImage(clean_skin_?clean_quick_:original_quick_);
+        repaint();for(auto* child:getChildren())child->repaint();
+    }
     void endValueGesture(unsigned slot) {
         if(value_dragging_[slot] && value_attachments_[slot]) value_attachments_[slot]->endGesture();
         value_dragging_[slot]=false;
@@ -1258,9 +1304,9 @@ private:
             display_.setCompact(compact_);
             display_.setTopLeftPosition(compact_?164:variable_fader_x,compact_?116:92);
             display_.setTransform(compact_?juce::AffineTransform::scale(0.9f):juce::AffineTransform());
-            settings_button_.setTopLeftPosition(panel_width-160,compact_?28:12);
-            help_button_.setTopLeftPosition(panel_width-232,compact_?28:12);
-            settings_panel_.setBounds(compact_?juce::Rectangle<int>(440,94,1160,318):juce::Rectangle<int>(990,76,550,720));
+            settings_button_.setTopLeftPosition(panel_width-(compact_?200:160),compact_?28:12);
+            help_button_.setTopLeftPosition(panel_width-(compact_?272:232),compact_?28:12);
+            settings_panel_.setBounds(compact_?juce::Rectangle<int>(440,94,1160,318):juce::Rectangle<int>(990,76,550,800));
             rom_setup_.setBounds(getLocalBounds());preset_browser_.setBounds(getLocalBounds());
             for(auto& key:quick_keys_) key.setVisible(!compact_);
             if(onCompactChanged) onCompactChanged(compact_);
@@ -1275,6 +1321,7 @@ private:
             juce::String id=source.isEnabled()?(slot==9?juce::String("analog"):source.getComponentID()):juce::String{};
             if(displayed_xl_ && slot<6 && source.isEnabled()) id=source.getProperties()["parameter_id"].toString();
             value.setEnabled(source.isEnabled());
+            value.getProperties().set("source_slot",displayed_xl_ && slot<6 && !darkVariation(slot)?int(xl_source_slots_[slot]):-1);
             if(id==value_ids_[slot]) continue;
             endValueGesture(slot);value_attachments_[slot].reset();value_ids_[slot]=id;
             value.getProperties().set("parameter_id",id);
@@ -1298,7 +1345,8 @@ private:
     MotorFader& slotFader(unsigned slot) {
         if(displayed_xl_) return xl_sliders_[slot];
         if(page_==0) return sliders_[slot];
-        return slot==4?sliders_[6]:parked_[slot];
+        if(page_==2) return slot<3?hidden_sliders_[slot]:parked_[slot];
+        return slot==0?sliders_[6]:parked_[slot];
     }
     void changePage(int next) {
         if(next==page_) return;
@@ -1400,21 +1448,43 @@ private:
     }
     void bindXL() {
         const auto* data=processor_.xlProgram();binding_xl_=true;
+        const auto graph=cineol::xl::Graph(processor_.getCurrentProgram()-6);
+        // Presentation order only: active firmware slots first, preserving
+        // their relative order. Host IDs and bank/ROM cells never move.
+        unsigned count=0,active_count=0;
+        for(bool active:{true,false}) for(unsigned source=0;source<6;++source) {
+            const bool available=data && data->control_active(data->pages[unsigned(page_)].cells[source],graph);
+            if(available==active) {xl_source_slots_[count++]=source;if(active)++active_count;}
+        }
+        if(darkVariation(2)) ++active_count;
+        if(focused_xl_slot_>=active_count)focused_xl_slot_=0;
         for(unsigned slot=0;slot<6;++slot) {
-            xl_attachments_[slot].reset();auto& slider=xl_sliders_[slot];
-            const unsigned cell=data?data->pages[unsigned(page_)].cells[slot]:255;
-            const bool active=cell<48 && data->control_active(cell);
+            if(xl_dragging_[slot] && xl_attachments_[slot])xl_attachments_[slot]->endGesture();
+            xl_dragging_[slot]=false;xl_attachments_[slot].reset();auto& slider=xl_sliders_[slot];
+            const unsigned source=xl_source_slots_[slot];
+            const bool variation=darkVariation(slot);
+            slider.getProperties().set("source_slot",variation?-1:int(source));
+            const unsigned cell=data?data->pages[unsigned(page_)].cells[source]:255;
+            const bool active=variation || (cell<48 && data->control_active(cell,cineol::xl::Graph(processor_.getCurrentProgram()-6)));
             slider.setParked(!active);slider.setEnabled(active && processor_.ready());
-            if(!active) {slider.setRange(0,1);slider.setValue(0,juce::dontSendNotification);slider.setTitle("Inactive fader");continue;}
+            if(!active) {slider.getProperties().set("parameter_id",juce::String{});slider.setName("Inactive fader");slider.setRange(0,1);slider.setValue(0,juce::dontSendNotification);slider.setTitle("Inactive fader");continue;}
+            if(variation) {
+                slider.setName("Variation");slider.setTitle("Dark Hall: Stable / Original");slider.setTooltip(cineol::help::global("dark_stability"));
+                slider.getProperties().set("parameter_id","dark_stability");xl_scales_[slot]=1;
+                slider.setRange(0,1,.001);slider.setDoubleClickReturnValue(true,1);
+                xl_attachments_[slot]=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("dark_stability"),[this,slot](float value){
+                    const juce::ScopedValueSetter<bool> binding(binding_xl_,true);xl_sliders_[slot].setValue(value,juce::sendNotificationSync);refreshDisplay();
+                });xl_attachments_[slot]->sendInitialUpdate();continue;
+            }
             const auto& page=data->pages[unsigned(page_)];
-            slider.setName(juce::String(page.names[slot].data()));slider.setTitle(slider.getName());
+            slider.setName(juce::String(page.names[source].data()));slider.setTitle(slider.getName());
             slider.setTooltip(slider.getName()+": drag or use arrow keys. Double-click restores the factory value.");
             unsigned parameter_index=NativeHallProcessor::xl_parameter_begin+cell;xl_scales_[slot]=1;
             if(data->chorus_page && data->pages[data->chorus_page-1].cells[data->chorus_slot]==cell) {parameter_index=15;xl_scales_[slot]=8;}
             if(data->diffusion_page && data->pages[data->diffusion_page-1].cells[data->diffusion_slot]==cell) {parameter_index=16;xl_scales_[slot]=4;}
             slider.getProperties().set("parameter_id",NativeHallProcessor::ids[parameter_index]);
             auto raw=data->controls.factory;for(unsigned i=0;i<raw.size();++i) raw[i]=processor_.xlControl(i);
-            const unsigned maximum=page.variable_predelay[slot]?data->predelay_maximum(raw):page.maximum[slot];
+            const unsigned maximum=data->control_maximum(unsigned(page_),source,raw);
             slider.setRange(0,std::max(xl_scales_[slot],maximum/xl_scales_[slot]*xl_scales_[slot]),xl_scales_[slot]);
             slider.setDoubleClickReturnValue(true,data->controls.factory[cell]);
             xl_attachments_[slot]=std::make_unique<juce::ParameterAttachment>(
@@ -1434,9 +1504,11 @@ private:
         data.resolve_controls(raw);binding_xl_=true;
         const auto& page=data.pages[unsigned(page_)];
         for(unsigned slot=0;slot<6;++slot) {
-            const unsigned cell=page.cells[slot];if(cell>=48 || !data.control_active(cell)) continue;
+            if(darkVariation(slot)) continue;
+            const unsigned source=xl_source_slots_[slot],cell=page.cells[source];
+            if(cell>=48 || !data.control_active(cell,cineol::xl::Graph(processor_.getCurrentProgram()-6))) continue;
             auto& slider=xl_sliders_[slot];const auto position=slider.visualProportion();
-            const unsigned maximum=page.variable_predelay[slot]?data.predelay_maximum(raw):page.maximum[slot];
+            const unsigned maximum=data.control_maximum(unsigned(page_),source,raw);
             const double range=std::max(xl_scales_[slot],maximum/xl_scales_[slot]*xl_scales_[slot]);
             const bool changed=range!=slider.getMaximum();
             if(changed) slider.setRange(0,range,xl_scales_[slot]);
@@ -1449,10 +1521,14 @@ private:
         const int program=processor_.getCurrentProgram();
         const bool xl=processor_.usesXL();
         const unsigned focus=focused_;
+        if(!xl) for(unsigned field=0;field<hidden_sliders_.size();++field) {
+            const auto* parameter=processor_.state.getParameter(NativeHallProcessor::ids[NativeHallProcessor::mod_rate_index+field]);
+            hidden_sliders_[field].setValue(parameter->convertFrom0to1(parameter->getValue()),juce::dontSendNotification);
+        }
         auto* focused=processor_.state.getParameter(NativeHallProcessor::ids[focus]);
         auto value=focused->getText(focused->getValue(),0);
         if(focused->getLabel().isNotEmpty()) value+=" "+focused->getLabel();
-        if(!xl) display_.update(program,processor_.getProgramName(program),captions[focus],value);
+        if(!xl) display_.update(program,processor_.getProgramName(program),caption(focus),value);
         display_.firmware.setButtonText(xl?"224 XL":"224");
         display_.updatePreset(processor_.presetName(),processor_.presetModified());
         std::array<juce::String,10> names,values;
@@ -1460,23 +1536,28 @@ private:
             if(slot==9) {names[slot]="DIRT";values[slot]=juce::String((1-processor_.state.getParameter("analog")->getValue())*100,1)+" %";continue;}
             if(slot==8) {names[slot]="SPACE";values[slot]=juce::String(processor_.dspRate()/1000,2)+" kHz";continue;}
             if(xl && slot<6) {
+                if(darkVariation(slot)) {
+                    auto* parameter=processor_.state.getParameter("dark_stability");const float amount=parameter->convertFrom0to1(parameter->getValue());
+                    names[slot]="VARIATION";values[slot]=amount<=0?"Stable":amount>=1?"Original":juce::String(amount*100,1)+" %";continue;
+                }
                 const auto* data=processor_.xlProgram();const auto* page=data?&data->pages[unsigned(page_)]:nullptr;
-                const unsigned cell=page?page->cells[slot]:255;
-                if(cell>=48 || !data->control_active(cell)) {names[slot]="--";values[slot]="--";continue;}
-                names[slot]=juce::String(page->names[slot].data());
+                const unsigned source=xl_source_slots_[slot],cell=page?page->cells[source]:255;
+                if(cell>=48 || !data->control_active(cell,cineol::xl::Graph(processor_.getCurrentProgram()-6))) {names[slot]="--";values[slot]="--";continue;}
+                names[slot]=juce::String(page->names[source].data());
                 auto raw=data->controls.factory;
                 for(unsigned i=0;i<raw.size();++i) raw[i]=processor_.xlControl(i);
                 data->resolve_controls(raw);
-                const auto text=data->display_value(unsigned(page_),slot,raw);
+                const auto text=data->display_value(unsigned(page_),source,raw);
                 const auto formatted=juce::String(text.data());
                 // XL's formatter uses dashes for its unbounded upper values.
                 // Keep that distinct from a parked/unavailable fader in the UI.
                 values[slot]=formatted.startsWith("--")?"INF"+formatted.substring(2):formatted;continue;
             }
-            const int index=slot>=6?int(slot+1):page_==0?int(slot):slot==4?6:-1;
+            const int index=slot>=6?int(slot+1):page_==0?int(slot):page_==2?
+                (slot<3?int(NativeHallProcessor::mod_rate_index+slot):-1):slot==0?6:-1;
             if(index<0 || (index==6 && program==3)) {names[slot]="--";values[slot]="--";continue;}
             auto* param=processor_.state.getParameter(NativeHallProcessor::ids[index]);
-            names[slot]=index==15?"CHORUS":index==16?"DIFFUSION":captions[index];values[slot]=param->getText(param->getValue(),0);
+            names[slot]=index==15?"CHORUS":index==16?"DIFFUSION":caption(unsigned(index));values[slot]=param->getText(param->getValue(),0);
             if(param->getLabel().isNotEmpty()) values[slot]+=" "+param->getLabel();
         }
         display_.updateSlots(names,values);syncValues();
@@ -1484,7 +1565,7 @@ private:
             auto& source=valueSource(slot);
             if(slot<6 && xl) {
                 const auto* data=processor_.xlProgram();
-                display_.setHelp(slot,data?cineol::help::xl(unsigned(program),*data,unsigned(page_),slot):cineol::help::unavailable("Parameter"));
+                display_.setHelp(slot,darkVariation(slot)?cineol::help::global("dark_stability"):data?cineol::help::xl(unsigned(program),*data,unsigned(page_),xl_source_slots_[slot]):cineol::help::unavailable("Parameter"));
             } else display_.setHelp(slot,source.getTooltip().isEmpty()?cineol::help::unavailable("Unused slot"):source.getTooltip());
         }
         if(xl) display_.update(program,processor_.getProgramName(program),names[focused_xl_slot_],values[focused_xl_slot_]);
@@ -1495,7 +1576,7 @@ private:
             display_.outputs[i].setButtonText(juce::String(route_names[i])+" "+juce::String::charToString(char('A'+int(parameter->convertFrom0to1(parameter->getValue())))));
             if(i>=2) continue;
             const auto* data=processor_.xlProgram();
-            const bool unavailable=xl && (!data || (i==0?!(data->modulation.flags&15):!data->dynamics.enabled));
+            const bool unavailable=xl && (!data || (i==0?!data->mode_enhancement_active(cineol::xl::Graph(program-6)):!data->dynamics.enabled));
             display_.modes[i].setButtonText(juce::String(i==0?"MOD ENH ":"DECAY OPT ")+(unavailable?juce::String("--"):display_.modes[i].getToggleState()?juce::String("ON"):juce::String("OFF")));
         }
         display_.dynamic.setToggleState((processor_.xlControl(42)&1)!=0,juce::dontSendNotification);
@@ -1516,16 +1597,17 @@ private:
         rom_setup_.setVisible(rom_setup_.shouldBeVisible());
         display_.firmware.setTooltip(ready?"Engine used by the selected algorithm. Click to import ROMs.":processor_.romStatus()+" Click to import ROMs.");
         for(unsigned i=0;i<sliders_.size();++i) {
-            auto& slider=sliders_[i];slider.setVisible(!compact_ && (i>=7 || (!xl && (page_==0?i<6:i==6))));
+            auto& slider=sliders_[i];slider.setVisible(!compact_ && (i>=7 || (!xl && (page_==0?i<6:page_==1 && i==6))));
             slider.setEnabled(ready && (i!=6 || program!=3));slider.setParked(i==6 && program==3);
             slider.setTooltip(cineol::help::original(unsigned(program),NativeHallProcessor::ids[i]));
         }
         for(auto& slider:xl_sliders_) slider.setVisible(xl && !compact_);
+        for(auto& slider:hidden_sliders_) {slider.setVisible(!xl && page_==2 && !compact_);slider.setEnabled(ready);}
         if(rebind) {bindXL();bound_program_=program;bound_page_=page_;bound_ready_=ready;}
         if(const auto* data=processor_.xlProgram())
-            for(unsigned slot=0;slot<6;++slot) xl_sliders_[slot].setTooltip(cineol::help::xl(unsigned(program),*data,unsigned(page_),slot));
+            for(unsigned slot=0;slot<6;++slot) xl_sliders_[slot].setTooltip(darkVariation(slot)?cineol::help::global("dark_stability"):cineol::help::xl(unsigned(program),*data,unsigned(page_),xl_source_slots_[slot]));
         if(const auto* data=processor_.xlProgram()) synchronizeXL(*data);
-        for(unsigned slot=0;slot<6;++slot) parked_[slot].setVisible(!compact_ && !xl && page_==1 && slot!=4);
+        for(unsigned slot=0;slot<6;++slot) parked_[slot].setVisible(!compact_ && !xl && ((page_==1 && slot!=0) || (page_==2 && slot>=3)));
         if(engine_changed) for(unsigned slot=0;slot<6;++slot) slotFader(slot).animateFrom(positions[slot]);
         // The unified list remains accessible so a missing bank cannot trap the UI.
         display_.algorithm.setEnabled(processor_.programAvailable(0) || processor_.programAvailable(6));
@@ -1534,7 +1616,7 @@ private:
         for(auto& output:display_.outputs) output.setEnabled(ready);
         dirt_.setEnabled(ready);dirt_.setVisible(!compact_);space_.setEnabled(ready);space_.setVisible(!compact_);
         const auto* data=processor_.xlProgram();
-        for(unsigned i=0;i<display_.modes.size();++i) display_.modes[i].setEnabled(ready && (!xl || (data && (i==0?(data->modulation.flags&15):data->dynamics.enabled))));
+        for(unsigned i=0;i<display_.modes.size();++i) display_.modes[i].setEnabled(ready && (!xl || (data && (i==0?data->mode_enhancement_active(cineol::xl::Graph(program-6)):data->dynamics.enabled))));
         for(unsigned i=0;i<2;++i) {
             display_.modes[i].setTooltip(cineol::help::mode(unsigned(program),data,i==1));
             display_.outputs[i].setTooltip(cineol::help::output(unsigned(program),i==0));
@@ -1570,6 +1652,8 @@ private:
         if((was_showing_ && !showing) || (was_focused_ && !focused)) cancelTransientUi();
         was_showing_=showing;was_focused_=focused;
         const auto appearance=processor_.editorAppearance();
+        const float clean=processor_.state.getRawParameterValue("clean_mode")->load();
+        if(clean_skin_!=(clean>=.5f))applyClean(clean);
         if(appearance.brightness!=appearance_.brightness || appearance.emphasis!=appearance_.emphasis || appearance.compact!=compact_) applyAppearance();
         if(auto* editor=findParentComponentOfClass<CineolEditor>();editor && editor->getWidth()!=processor_.editorWidth())
             editor->setCompact(compact_);
@@ -1578,6 +1662,8 @@ private:
     }
     NativeHallProcessor& processor_;
     juce::Image background_,compact_background_,bezel_;
+    juce::Image clean_background_,clean_compact_,clean_bezel_,original_quick_,clean_quick_;
+    bool clean_skin_=false;
     NativeHallProcessor::EditorAppearance appearance_;
     bool compact_=false,binding_values_=false;
     std::array<juce::String,10> value_ids_;
@@ -1589,16 +1675,20 @@ private:
     std::array<MotorFader,9> sliders_;
     std::array<MotorFader,6> parked_;
     std::array<MotorFader,6> xl_sliders_;
+    std::array<MotorFader,3> hidden_sliders_;
+    std::array<std::unique_ptr<SliderAttachment>,3> hidden_attachments_;
     std::unique_ptr<juce::ParameterAttachment> dynamic_attachment_;
     std::array<std::unique_ptr<juce::ParameterAttachment>,6> xl_attachments_;
     bool binding_xl_=false,bound_ready_=false;
     std::array<bool,6> xl_dragging_{};
     std::array<unsigned,6> xl_scales_{};
+    std::array<unsigned,6> xl_source_slots_{0,1,2,3,4,5};
     unsigned focused_xl_slot_=0;
     int bound_program_=-1,bound_page_=-1;
     bool displayed_xl_=false;
     int page_=0;
     MotorFader dirt_,space_;
+    std::unique_ptr<juce::ParameterAttachment> clean_attachment_;
     std::array<QuickPresetKey,NativeHallProcessor::quick_preset_count> quick_keys_;
     bool binding_dirt_=false,dragging_dirt_=false;
     RomSetup rom_setup_;
@@ -1625,8 +1715,20 @@ CineolEditor::CineolEditor(NativeHallProcessor& processor):AudioProcessorEditor(
     panel_->onCompactChanged=[this](bool compact){setCompact(compact);};
     setCompact(panel_->isCompact());
     initialising_=false;
+#if JUCE_MAC
+    // Logic's remote AU view can stop forwarding mouse events after an idle
+    // paint interval (also reported with Apple's own AUs on macOS 26+).
+    // Keep a tiny region live without stealing focus or redrawing the panel.
+    // Apply to macOS AUs rather than relying on host/OS detection in the XPC
+    // service; older JUCE versions report unknown future macOS releases.
+    if(processor_.wrapperType==juce::AudioProcessor::wrapperType_AudioUnit)
+        startTimer(200);
+#endif
 }
-CineolEditor::~CineolEditor() {processor_.flushEditorPreferences();}
+CineolEditor::~CineolEditor() {stopTimer();processor_.flushEditorPreferences();}
+void CineolEditor::timerCallback() {
+    if(isShowing() && getPeer()!=nullptr) repaint(8,8,1,1);
+}
 void CineolEditor::setCompact(bool compact) {
     const juce::ScopedValueSetter<bool> restoring(initialising_,true);
     const int width=processor_.editorWidth();

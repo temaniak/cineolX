@@ -1,5 +1,11 @@
 # Parameter help audit
 
+November 2 addition: original-224 page 3 exposes Mod Rate, Mod Depth and
+Optimization Response, with help for their order-dependent changes, inverse
+response scale and Mod-key reset rules. See
+[the implementation report](HIDDEN_CONTROLS_FIX_2026-11-02.md). The historical
+inventory below predates these additional bindings.
+
 The question-mark button opposite Settings enables hover explanations. It is
 off when an editor opens; clicking it again hides the current popup immediately.
 The button is present in both full and compact layouts. Help is a local editor
@@ -49,8 +55,10 @@ Implementation sources:
 The original [Lexicon owner manual scan](https://therackofages.com/Lexicon/224x%20digital%20reverborator/Lexicon-224X-owner-manual.pdf)
 was visually inspected, particularly sections 3.3.1–3.3.2, 4.2.3, 4.3.2,
 4.4.1–4.4.3 and 4.5. The scan contains 224X material and a 224XL errata sheet.
-It is supporting terminology, not the authority for present-day control
-availability: current native metadata takes precedence. Manual-only settings,
+This audit describes current native availability; it does not establish
+hardware unavailability from missing native metadata. The
+[November 2 manual audit](MANUAL_CONTROL_AUDIT_2026-11-02.md) records the
+Rich Plate/Rich Split Chorus and Mode Enhancement behavior. Manual-only settings,
 unimplemented hardware operations, precise measured RT60 promises and inferred
 musical-note labels are not presented as plugin capabilities.
 
@@ -83,11 +91,11 @@ for every screen binding are retained in `help-check.log` in that directory.
 | XL Small Room | Depth, four preechoes, fine pre-delays, no Size page |
 | XL Chamber | Attack, four preechoes, no Definition or Size page |
 | XL Dark Chamber | Attack, four active preechoes, unused extra taps, Size |
-| XL Inverse Room | Decay Slope, Size, indirect stopped Mid reference; unavailable running Mid and Chorus |
+| XL Inverse Room | Decay Slope, Size, indirect running/stopped Mid references; Chorus unavailable |
 | XL Small Plate | Attack, six preechoes, Size, stopped decay |
-| XL CD Plate A | Unavailable running LF, constant-density Diffusion, no optimization diffusion targets |
+| XL CD Plate A | Paired running LF, constant-density Diffusion, no optimization diffusion targets |
 | XL CD Plate B | Same exceptions, its own four-page layout and modulation descriptors |
-| XL Rich Plate | Attack, six preechoes, Size; Chorus unavailable |
+| XL Rich Plate | Attack, six preechoes, Size; Chorus/Mod active with ROM-derived controller timing, no interpolation targets |
 | XL Chorus & Echo | Voice levels/delays, signed feedback, output-group panning; no reverb dynamics |
 | XL Resonant Chords | Loop delay determines pitch, signed resonance, onset delay, panning, own/opposite crossfeed, feedback HF cutoff |
 | XL Multiband Delay | Band levels/times, low/high band edges, panning, common-input feedback, transient diffusion |
@@ -95,15 +103,13 @@ for every screen binding are retained in `help-check.log` in that directory.
 | XL Plate / Plate | Independent left/right Attack and running controls; shared LR options, split preecho routes |
 | XL Plate / Hall | Left Attack versus right Depth, independent running controls, split preecho routes |
 | XL Plate / Chorus | Left reverb and stopped decay versus right chorus voices, feedback and panning; Size |
-| XL Rich Split | Independent left/right running controls and Size; shared LR options; Chorus unavailable |
+| XL Rich Split | Independent left/right running controls and Size; shared LR options; Chorus/Mod active with ROM-derived controller timing, no interpolation targets |
 
-Existing `control_active()` exclusions are described accurately instead of
-quietly enabling controls. In particular, cells 6/7 are reserved by that helper
-for dynamic-decay availability, so some controls occupying them in the three
-effects remain disabled in the current UI. This pre-existing behavior is outside
-the help change. CD Plate running LF controls are also disabled even though LF
-values participate indirectly in the prepared Mid compiler; their stopped LF
-controls remain available. Inverse Room, CD Plate A and CD Plate B have no
+The original October 11 help change retained the then-existing
+`control_active()` exclusions. The October 26 GitHub fixes restore effect
+voices in cells 6/7, CD Plate running LF values used by the paired Mid compiler,
+and Inverse Room's dependent running Mid reference. The help table above now
+reflects these corrections. Inverse Room, CD Plate A and CD Plate B have no
 optimization feedback-diffusion targets; the help states that limitation without
 changing their existing switches or dynamic-controller behavior.
 
@@ -148,3 +154,9 @@ build/plugin/native_hall_plugin_check_artefacts/Release/native_hall_plugin_check
 The correction changes presentation and explanations only. It does not establish
 a new sound-accuracy result, and no DSP/audio callback or plugin parameter ID
 was changed.
+
+November 2 Rich Chorus correction: both rich Chorus faders and Mod Enhancement
+are available. Help describes their observed controller cadence effect and
+the unchanged upper half for this zero-target ROM path. See
+[RICH_CHORUS_FIX_2026-11-02.md](RICH_CHORUS_FIX_2026-11-02.md) for validation
+and the retained general XL clock approximation.

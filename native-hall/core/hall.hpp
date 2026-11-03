@@ -8,6 +8,9 @@ namespace native_hall {
 struct Controls {
     int bass=17, mid=14, crossover=5, treble=23, depth=21, predelay_ms=24, diffusion=1;
     bool mode_enhancement=true, decay_optimization=true;
+    // Effective hidden settings; zero retains the prepared profile default.
+    // Event ordering and hardware recall rules belong to the logical controls.
+    uint8_t modulation_period=0,modulation_step=0,optimization_response=0;
 };
 
 // In-memory diagnostic snapshot only; not a bank, plugin parameter or session ABI.
@@ -42,7 +45,7 @@ public:
     void poll_decay() noexcept {
         if(!profile_ && !algorithm_)return;
         if(decay_.poll(uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,
-                       algorithm_?algorithm_->decay_amount:profile_->decay_amount))
+                       optimization_response()))
             set_loop_diffusion(decay_.state().amount);
     }
     uint64_t saturation_count() const noexcept {return saturations_;}
@@ -60,6 +63,9 @@ public:
     // Diagnostic/control-rate entry, also usable by an external deterministic
     // control scheduler. Normal process() supplies the prototype's clock.
     void advance_modulation() noexcept {update_modulation();}
+    uint8_t modulation_period() const noexcept {return controls_.modulation_period?controls_.modulation_period:algorithm_?algorithm_->modulation_period:profile_?profile_->modulation_period:1;}
+    uint8_t modulation_step() const noexcept {return controls_.modulation_step?controls_.modulation_step:algorithm_?algorithm_->modulation_step:profile_?profile_->modulation_step:4;}
+    uint8_t optimization_response() const noexcept {return controls_.optimization_response?controls_.optimization_response:algorithm_?algorithm_->decay_amount:profile_?profile_->decay_amount:5;}
     ModulationState modulation_state() const noexcept;
     void restore_modulation(const ModulationState&) noexcept;
     const DecayState& decay_state() const noexcept {return decay_.state();}
@@ -67,7 +73,7 @@ public:
         decay_.reset(state);level_clock_=0;set_loop_diffusion(state.amount);
     }
     void advance_decay(uint8_t level) noexcept {
-        if(decay_.step(level,uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,(algorithm_?algorithm_->decay_amount:profile_->decay_amount)))
+        if(decay_.step(level,uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,optimization_response()))
             set_loop_diffusion(decay_.state().amount);
     }
 private:

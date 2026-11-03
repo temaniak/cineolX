@@ -3,10 +3,13 @@
 #include "input_xl48.hpp"
 #include "output_xl48.hpp"
 #include "dynamics.hpp"
+#include "rich_chorus_timing.hpp"
+#include "rich_controller_xl.hpp"
 #include "../core/engine48.hpp"
 #include <numeric>
 
 namespace cineol::xl {
+struct NoRichControllerXL {};
 // Desktop-only native XL audio path. It accepts prepared control snapshots;
 // it never loads ROMs, interprets opcodes, or executes an 8080 in audio.
 template<Graph graph> class Native48 {
@@ -29,9 +32,12 @@ public:
         left_=0;right_=2;wet_fade_=1;return true;
     }
     bool set_settings(const Settings& settings) noexcept {return concert_.set_settings(settings);}
+    void set_dark_stability(float original) noexcept {concert_.set_dark_stability(original);}
+    uint32_t dark_stability_gain() const noexcept {return concert_.dark_stability_gain();}
     // Kernel/circuit setup happens once outside audio; program recall clears
     // only state and fixed delay storage, retaining the precomputed kernels.
     bool activate(const Settings& settings) noexcept {
+        concert_.set_dark_stability(1);
         if(!concert_.prepare(settings)) return false;
         control_profile_=nullptr;
         input_.reset();output_.reset();
@@ -44,6 +50,13 @@ public:
     }
     void set_native_controls(const Settings& base,const ControlProfile& controls,const std::array<uint8_t,48>& raw,
         bool optimization) noexcept {
+        if constexpr(rich_chorus_graph(graph)) {
+            if(control_profile_) {
+                control_profile_=&controls;control_base_=base;control_values_=raw;
+                dynamic_enabled_=(raw[42]&1)!=0;optimization_enabled_=optimization;
+                rich_.request(raw,optimization);return;
+            }
+        }
         const bool rebuild_size=controls.size.enabled && (!control_profile_ ||
             raw[43]!=control_values_[43] || raw[44]!=control_values_[44]);
         const bool dynamic=(raw[42]&1)!=0;
@@ -53,13 +66,29 @@ public:
         dynamic_enabled_=dynamic;optimization_enabled_=optimization;
         dynamics_.parameters(dynamics_profile_,controls,raw,dynamic_enabled_,optimization,update_decay);
         compile_dynamics();
+        if constexpr(rich_chorus_graph(graph))
+            rich_.reset(dynamics_profile_,controls,raw,dynamics_.state(),concert_.settings(),0,dynamic_enabled_,optimization);
         if(rebuild_size) concert_.recompile_modulation();
     }
-    const DynamicsState& dynamics_state() const noexcept {return dynamics_.state();}
-    void set_chorus(uint8_t raw) noexcept {concert_.set_chorus(raw);}
-    void enable_modulation(bool enabled) noexcept {concert_.enable_modulation(enabled);}
+    const DynamicsState& dynamics_state() const noexcept {
+        if constexpr(rich_chorus_graph(graph))return rich_.state();
+        else return dynamics_.state();
+    }
+    const auto& rich_controller() const noexcept {return rich_;}
+    void set_chorus_reference(uint8_t raw) noexcept {
+        if constexpr(rich_chorus_graph(graph))rich_.chorus(raw);
+    }
+    void set_chorus(uint8_t raw) noexcept {
+        concert_.set_chorus(raw);
+        if constexpr(rich_chorus_graph(graph))rich_.chorus(raw);
+    }
+    void enable_modulation(bool enabled) noexcept {
+        concert_.enable_modulation(enabled);
+        if constexpr(rich_chorus_graph(graph))rich_.enhancement(enabled);
+    }
     void set_diffusion(const DiffusionProfile& profile,uint8_t index) noexcept {concert_.set_diffusion(profile,index);}
     bool set_modulation(const ModulationProfile& profile,const ModulationState& state,bool enabled) noexcept {
+        if constexpr(rich_chorus_graph(graph)){rich_.modulation(profile,state);rich_.enhancement(enabled);}
         return concert_.set_modulation(profile,state,enabled);
     }
     void set_global(float input_db,float mix,float clean,int left,int right) noexcept {
@@ -86,6 +115,9 @@ public:
                 output_.template request<Row,Channels>(native_hall::Engine48::dac(bus)/32768.0f);
             });
             if(control_profile_ && dynamics_profile_.enabled) {
+                if constexpr(rich_chorus_graph(graph)) {
+                    if(rich_.process(input,concert_.control_output()))concert_.set_controls(rich_.settings());
+                } else {
                 dynamics_.observe_detectors(input.detectors,concert_.control_output());
                 bool changed=false;
                 fast_clock_+=dynamics_profile_.fast_rate_tenths*Core::rate_denominator;
@@ -99,6 +131,7 @@ public:
                     changed|=dynamics_.slow_poll(dynamics_profile_,*control_profile_,control_values_,dynamic_enabled_,optimization_enabled_);
                 }
                 if(changed) compile_dynamics();
+                }
             }
             output_.finish_pass();
         });
@@ -124,6 +157,7 @@ private:
         effective[1]=dynamics_.state().feedback_mid;
         control_profile_->apply_feedback(settings,effective,dynamics_.state().feedback_amount);concert_.set_controls(settings);
     }
+    std::conditional_t<rich_chorus_graph(graph),RichControllerXL<graph>,NoRichControllerXL> rich_;
     DynamicsProfile dynamics_profile_{};
     Dynamics dynamics_;
     const ControlProfile* control_profile_=nullptr;

@@ -35,7 +35,7 @@ public:
                         const auto duration=bus_.write(entry+at);
                         // The commit precedes grant+1's fetch by about 5 ns.
                         writes(entry+at+duration-3,payload);return duration;
-                    });
+                    },hall.modulation_step());
                 stage_=first?Stage::FirstDone:Stage::SecondDone;break;
             }
             case Stage::FirstDone:
@@ -85,7 +85,7 @@ public:
                 observe(Event::LevelWord,next_,level_word_);
                 level_mean_=uint8_t((controls.bass+controls.mid)/2);
                 level_enabled_=controls.decay_optimization;
-                level_period_=bank.programs[program].decay_amount;
+                level_period_=hall.optimization_response();
                 const unsigned duration=level_cycles224(bank,program,hall.decay_state(),level_word_,
                     level_mean_,level_enabled_,level_period_,display_check_,false,
                     [&](unsigned at,ControlWrite224 payload){

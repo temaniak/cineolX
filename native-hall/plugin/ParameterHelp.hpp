@@ -12,7 +12,9 @@ inline juce::String unavailable(const juce::String& title) {
 inline juce::String global(const juce::String& id) {
     if(id=="input_db") return tip("Input","Sets the level feeding the effect. More gain drives the reverb or delay harder and can change its level-dependent response.");
     if(id=="mix") return tip("Dry / Wet","Blends the original signal with the effect. Use 100% wet when the plugin is on an auxiliary return.");
-    if(id=="analog" || id=="dirt") return tip("Dirt","Opens the input and output filter bandwidths. At 100% the modeled filters are bypassed while converter quantization remains. The final part of the range removes the input reconstruction filter.");
+    if(id=="analog" || id=="dirt") return tip("Dirt","Opens the input and output filter bandwidths. At 100% the modeled filters are bypassed; the final part of the range removes the input reconstruction filter. Original retains converter quantization; Clean uses higher precision.");
+    if(id=="clean_mode") return tip("Clean","Uses higher signal precision in every algorithm to reduce quantization noise. Keeps the original delay network, coefficients, modulation, DSP clock and filter response. Also switches the panel and controls to their clean textures.");
+    if(id=="dark_stability") return tip("Dark Hall: Stable / Original","Stable limits excessive internal feedback at long decays. Move toward Original to gradually restore the original resonance and self-oscillation; double-click restores Original. The control never sets feedback to zero and is independent of Clean.");
     if(id=="space") return tip("Space","Raise Space to slow the selected algorithm's DSP clock from its nominal rate to exactly half. Delays and modulation periods grow. The screen shows the actual DSP rate in kHz.");
     if(id=="filters_follow_clock") return tip("Analog filters follow DSP rate","On: Space scales analog filter frequencies with the DSP clock. Off: analog frequencies stay fixed as Space changes. Dirt opens the filters independently in either mode.");
     if(id=="low_latency") return tip("Low latency","Uses a direct dry path and reports zero plugin latency. The wet effect keeps its own processing delay and pre-delay.");
@@ -33,6 +35,9 @@ inline juce::String original(unsigned program,const juce::String& id) {
     if(id=="predelay") return tip("Pre-delay","Sets the delay before the reverberation starts. The minimum delay depends on the selected 224 program.");
     if(id=="diffusion") return program==3?unavailable("Diffusion"):
         tip("Diffusion","Changes how the reflections build into a continuous reverb texture. Its response varies with the program, so the highest value is not always the smoothest setting.");
+    if(id=="mod_rate") return tip("Modulation rate","Lower values give faster movement. Changing Rate resets Modulation Depth to 1, or 2 at Rate 1; a later Depth change replaces that step. Mode Enhancement must be on to hear modulation.");
+    if(id=="mod_depth") return tip("Modulation depth","Sets the size of each modulation step, from 1 to 16. This differs from the main Depth distance control and Diffusion. Changing Rate overwrites this setting.");
+    if(id=="optimization_response") return tip("Optimization response","Lower values change feedback diffusion more quickly, making the stopped tail less colored but potentially less even. This is a 1 to 16 response setting, not a level threshold; enable Decay Optimization to hear its effect.");
     return {};
 }
 inline juce::String route(const juce::String& name) {
@@ -50,7 +55,7 @@ inline juce::String xl(unsigned program,const cineol::xl::ProgramData& data,unsi
     const auto& page=data.pages[page_index];const unsigned cell=page.cells[slot_index];
     if(cell>=48) return unavailable("Unused slot");
     const juce::String title(page.names[slot_index].data());
-    if(!data.control_active(cell)) return unavailable(title);
+    if(!data.control_active(cell,cineol::xl::Graph(program-6))) return unavailable(title);
     auto name=title.toUpperCase().removeCharacters(" ");
     juce::String body;
     const bool split=program>=23;
@@ -64,7 +69,8 @@ inline juce::String xl(unsigned program,const cineol::xl::ProgramData& data,unsi
         "Adjusts low-frequency feedback in the inverse envelope. Use it together with Decay Slope and Size to shape the effect.":
         "Sets the decay of frequencies below Crossover. Longer values keep more low-frequency energy in the reverb.";
     else if(name.startsWith("MIDDECAY"))
-        body="Sets the main reverb decay above Crossover. Treble Decay controls how quickly the highest frequencies fade.";
+        body=inverse?"Sets the running mid-decay reference used by the inverse envelope's low-frequency feedback. Use it together with LF Decay, Decay Slope and Size.":
+            "Sets the main reverb decay above Crossover. Treble Decay controls how quickly the highest frequencies fade.";
     else if(name.startsWith("CROSSOVER"))
         body="Sets the transition frequency in the reverb's low-frequency feedback filtering. Where LF Decay is available, it separates the LF and Mid decay regions.";
     else if(name.startsWith("TREBLEDECAY") || name.startsWith("TREBDECAY"))
@@ -76,8 +82,10 @@ inline juce::String xl(unsigned program,const cineol::xl::ProgramData& data,unsi
     else if(name.startsWith("PREDELAY")) body=page.variable_predelay[slot_index]?
         "Delays the start of the reverberation. Changing Size also changes its available range and the displayed minimum delay.":
         "Delays the start of the reverberation. Longer values separate the effect from the initial sound.";
-    else if(name.startsWith("CHORUS"))
-        body="Sets the speed of the program's delay modulation. Higher values produce faster movement; Mode Enhancement must be on to hear it.";
+    else if(name.contains("CHORUS"))
+        body=cineol::xl::rich_chorus_graph(cineol::xl::Graph(program-6))?
+            "Changes controller timing when Mode Enhancement is on, affecting Dynamic Decay and Decay Optimization. This ROM has no moving delay taps here; the upper half changes no timing.":
+            "Controls delay modulation with Mode Enhancement on. The lower half changes its interval; the upper half increases the modulation step.";
     else if(name.startsWith("HFBANDWIDTH") || name.startsWith("HFBNDWTH"))
         body="Sets the high-frequency limit of the signal entering the effect. Lower values soften both early reflections and the reverberation.";
     else if(name.startsWith("DIFFUSION")) {
@@ -138,12 +146,14 @@ inline juce::String xl(unsigned program,const cineol::xl::ProgramData& data,unsi
 }
 inline juce::String mode(unsigned program,const cineol::xl::ProgramData* data,bool optimization) {
     const auto title=optimization?"Decay optimization":"Mode enhancement";
-    if(program>=6 && (!data || (optimization?!data->dynamics.enabled:!(data->modulation.flags&15)))) return unavailable(title);
+    if(program>=6 && (!data || (optimization?!data->dynamics.enabled:!data->mode_enhancement_active(cineol::xl::Graph(program-6))))) return unavailable(title);
     if(program>=6 && optimization && data->controls.feedback.count==0)
         return tip(title,"This program has no feedback-diffusion stage for Decay Optimization. The switch is stored, but it does not apply diffusion changes here.");
+    if(!optimization && program>=6 && cineol::xl::rich_chorus_graph(cineol::xl::Graph(program-6)))
+        return tip(title,"Enables the Chorus-dependent controller timing. In this ROM the program has no moving delay taps, but Chorus can change the timing of Dynamic Decay and Decay Optimization.");
     if(optimization) return tip(title,"Adapts feedback diffusion as the input level changes and the tail fades. It can change the tail's texture and coloration.");
     return tip(title,program>=6?"Enables the program's delay modulation. Use the Chorus control to change its speed and the amount of audible movement.":
-        "Enables moving delay taps in the reverb. This breaks up stationary resonances and can add gentle motion to the tail.");
+        "Enables moving delay taps in the reverb. Switching it in either direction restores the hidden Rate, Modulation Depth and Optimization Response defaults. Preset recall restores saved settings together.");
 }
 inline juce::String dynamic(const cineol::xl::ProgramData* data) {
     if(!data || !data->dynamics.enabled) return unavailable("Dynamic decay");

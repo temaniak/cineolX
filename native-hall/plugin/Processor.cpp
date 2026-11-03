@@ -46,7 +46,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout(
     AudioProcessorValueTreeState::ParameterLayout p;
     StringArray names;for(const char* name:algorithm_names) names.add(name);
     for(const auto& graph:cineol::xl::graphs) names.add(juce::String(graph.name));
-    auto algorithm=std::make_unique<AudioParameterChoice>(ParameterID{"algorithm",2},"Algorithm",names,2);
+    auto hidden=std::make_shared<CineolOriginal224Parameters>();
+    auto algorithm=std::make_unique<CineolAlgorithmParameter>(names,hidden);
     auto* selection=algorithm.get();
     auto timeAttributes=AudioParameterIntAttributes{}.withStringFromValueFunction([](int v,int){return String(times[v],1)+" s";});
     p.add(std::make_unique<AudioParameterInt>(ParameterID{"bass",1},"Bass",1,31,17,
@@ -76,7 +77,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout(
     // Keep the original clean=1 polarity and parameter index. Dirt's UI
     // presents the inverse, with continuous intermediate positions.
     p.add(std::make_unique<AudioParameterFloat>(ParameterID{"analog",1},"Clean Amount",NormalisableRange<float>(0,1,0.001f),1));
-    p.add(std::make_unique<AudioParameterBool>(ParameterID{"mode_enh",1},"Mode Enhancement",true));
+    p.add(std::make_unique<CineolMode224Parameter>(hidden));
     p.add(std::make_unique<AudioParameterBool>(ParameterID{"decay_opt",1},"Decay Optimization",true));
     p.add(std::make_unique<AudioParameterChoice>(ParameterID{"output_l",1},"Left Output",StringArray{"A","B","C","D"},0));
     p.add(std::make_unique<AudioParameterChoice>(ParameterID{"output_r",1},"Right Output",StringArray{"A","B","C","D"},2));
@@ -101,6 +102,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout(
         AudioParameterBoolAttributes{}.withAutomatable(false)));
     p.add(std::make_unique<AudioParameterChoice>(ParameterID{"output_rear_l",7},"Rear Left Output",StringArray{"A","B","C","D"},1));
     p.add(std::make_unique<AudioParameterChoice>(ParameterID{"output_rear_r",7},"Rear Right Output",StringArray{"A","B","C","D"},3));
+    p.add(std::make_unique<CineolHidden224Parameter>("mod_rate","Modulation Rate",CineolOriginal224Parameters::Rate,hidden));
+    p.add(std::make_unique<CineolHidden224Parameter>("mod_depth","Modulation Depth",CineolOriginal224Parameters::Depth,hidden));
+    p.add(std::make_unique<CineolHidden224Parameter>("optimization_response","Optimization Response",CineolOriginal224Parameters::Optimization,hidden));
+    p.add(std::make_unique<AudioParameterBool>(ParameterID{"clean_mode",9},"Clean",false));
+    p.add(std::make_unique<AudioParameterFloat>(ParameterID{"dark_stability",9},"Dark Hall: Stable / Original",
+        NormalisableRange<float>(0,1,0.001f),1,
+        AudioParameterFloatAttributes{}.withStringFromValueFunction([](float v,int) {
+            return v<=0?String("Stable"):v>=1?String("Original"):String(v*100,1)+" % Original";
+        }).withValueFromStringFunction([](const String& s) {
+            return s.containsIgnoreCase("stable")?0.f:s.trim().equalsIgnoreCase("original")?1.f:s.getFloatValue()/100;
+        })));
     return p;
 }
 NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
@@ -112,6 +124,7 @@ NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
     for(const char* key:{"display_brightness","display_emphasis","editor_compact","editor_width"})
         if(defaults.containsKey(key)) state.state.setProperty(key,defaults.getValue(key),nullptr);
     algorithm_parameter_=static_cast<juce::AudioParameterChoice*>(state.getParameter("algorithm"));
+    original_controls_=&static_cast<CineolHidden224Parameter*>(state.getParameter("mod_rate"))->controls();
     for(unsigned i=0;i<values_.size();++i) {
         values_[i]=state.getRawParameterValue(ids[i]);stable_values_[i]=values_[i]->load();
     }
@@ -124,6 +137,20 @@ NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
     startTimerHz(30);
 }
 NativeHallProcessor::~NativeHallProcessor() {stopTimer();}
+void NativeHallProcessor::timerCallback() {
+    updateLatency();
+    if(!presetRecallInProgress()) {
+        // Coupled changes already exist atomically. Publish their host/APVTS/UI
+        // mirrors here, never from the audio or parameter-setter path. Sending
+        // listeners does not call setValue or replay the Rate/Depth rule.
+        for(unsigned i=mod_rate_index;i<hidden_parameter_count;++i) {
+            auto* parameter=state.getParameter(ids[i]);
+            const float normalized=parameter->getValue();
+            if(values_[i]->load(std::memory_order_relaxed)!=parameter->convertFrom0to1(normalized))
+                parameter->sendValueChangedMessageToListeners(normalized);
+        }
+    }
+}
 void NativeHallProcessor::updateLatency() {
     const bool low=low_latency_value_->load(std::memory_order_relaxed)>=0.5f;
     setLatencySamples(low?0:normal_latency_.load(std::memory_order_relaxed));
@@ -135,7 +162,7 @@ bool NativeHallProcessor::isBusesLayoutSupported(const BusesLayout& l) const {
         (l.getMainInputChannelSet()==juce::AudioChannelSet::stereo() || l.getMainInputChannelSet()==juce::AudioChannelSet::mono());
 }
 void NativeHallProcessor::prepareToPlay(double rate,int block) {
-    for(auto& slot:slots_) {slot.engine.prepare_audio();slot.clock.prepare();slot.program=-1;slot.alignment.fill({});slot.alignment_position=0;slot.filter_tick=0;}
+    for(auto& slot:slots_) {slot.engine.prepare_audio();slot.clean_engine.prepare_audio();slot.clock.prepare();slot.program=-1;slot.alignment.fill({});slot.clean_alignment.fill({});slot.alignment_position=0;slot.filter_tick=0;}
     engine_initialized_=false;active_program_=-1;active_slot_=0;tail_slot_=-1;
     tail_length_=tail_position_=tail_input_remaining_=0;tail_shortened_=false;
     transition_dry_.fill({});transition_dry_position_=0;
@@ -149,6 +176,9 @@ void NativeHallProcessor::prepareToPlay(double rate,int block) {
     host_mix_coefficient_=float(1-std::pow(0.998,48000/rate));
     normal_latency_.store(bridge_.latency()+int(std::lround(cineol::SpaceClock::latency*rate/48000)),
         std::memory_order_relaxed);
+    bypass_delay_.setSize(2,std::max(1,normal_latency_.load(std::memory_order_relaxed)));
+    bypass_delay_.clear();bypass_position_=0;
+    bypass_wet_.reset(rate,.010);bypass_initialized_=false;
     updateLatency();
     previous_.fill(std::numeric_limits<float>::quiet_NaN());
 }
@@ -157,17 +187,33 @@ std::array<float,4> NativeHallProcessor::AudioSlot::process(float l,float r) noe
     const float desired=filters_follow?1:1/clock.ratio();
     clock_factor+=.002f*(desired-clock_factor);if(std::abs(desired-clock_factor)<1e-5f)clock_factor=desired;
     if((filter_tick++&31u)==0) {
-        if(NativeHallProcessor::isXL(program)) {xl_engine.set_dirt(dirt);xl_engine.set_clock_factor(clock_factor);}
-        else {engine.set_dirt(dirt);engine.set_clock_factor(clock_factor);}
+        if(NativeHallProcessor::isXL(program)) {
+            xl_engine.set_dirt(dirt);xl_engine.set_clock_factor(clock_factor);
+            clean_xl_engine.set_dirt(dirt);clean_xl_engine.set_clock_factor(clock_factor);
+        } else {
+            engine.set_dirt(dirt);engine.set_clock_factor(clock_factor);
+            clean_engine.set_dirt(dirt);clean_engine.set_clock_factor(clock_factor);
+        }
     }
     const auto wet=clock.process(l,r,ratio_target,[&](float left,float right) noexcept {
-        std::array<float,4> four;float a,c;
-        if(!NativeHallProcessor::isXL(program)) engine.process(left,right,a,c,true,&four);
+        std::array<float,4> four,clean_four;float a,c;
+        if(!NativeHallProcessor::isXL(program)) {
+            engine.process(left,right,a,c,true,&four);
+            clean_engine.process(left,right,a,c,true,&clean_four);
+        }
         else {
             xl_engine.process(left,right,a,c,true,&four);
+            clean_xl_engine.process(left,right,a,c,true,&clean_four);
             auto& delayed=alignment[alignment_position];const auto value=delayed;delayed=four;four=value;
+            auto& clean_delayed=clean_alignment[alignment_position];const auto clean_value=clean_delayed;clean_delayed=clean_four;clean_four=clean_value;
             alignment_position=(alignment_position+1)%alignment.size();
         }
+        // Keep both histories warm so changing precision preserves a ringing
+        // tail. One common Space/rate path keeps the two branches aligned.
+        clean_mix+=std::clamp(clean_target-clean_mix,-1.f/480,1.f/480);
+        if(clean_mix==1) return clean_four;
+        if(clean_mix!=0) for(unsigned channel=0;channel<4;++channel)
+            four[channel]+=clean_mix*(clean_four[channel]-four[channel]);
         return four;
     });
     return {wet[routes[0]],wet[routes[1]],wet[routes[2]],wet[routes[3]]};
@@ -200,9 +246,15 @@ void NativeHallProcessor::selectProgram(int requested,const std::array<float,par
     }
     auto& slot=slots_[active_slot_];
     if(!engine_initialized_ || (requested!=active_program_ && (isXL(requested) || isXL(active_program_)))) {
-        if(isXL(requested)) slot.xl_engine.select(rom_bank_->xlBank(),unsigned(requested-native_hall::program_count));
-        else slot.engine.activate(rom_bank_->bank(),unsigned(requested));
-        slot.alignment.fill({});slot.alignment_position=0;
+        if(isXL(requested)) {
+            slot.xl_engine.select(rom_bank_->xlBank(),unsigned(requested-native_hall::program_count));
+            slot.clean_xl_engine.select(rom_bank_->cleanXLBank(),unsigned(requested-native_hall::program_count));
+        } else {
+            slot.engine.activate(rom_bank_->bank(),unsigned(requested));
+            slot.clean_engine.activate(rom_bank_->cleanBank(),unsigned(requested));
+        }
+        slot.alignment.fill({});slot.clean_alignment.fill({});slot.alignment_position=0;
+        slot.clean_mix=slot.clean_target=v[clean_mode_index]>=.5f?1:0;
         slot.ratio_target=1-.5f*v[space_index];slot.clock.reset(slot.ratio_target);
         slot.dirt=slot.dirt_target=1-v[9];slot.clock_factor=v[filter_link_index]>=.5f?1:1/slot.ratio_target;slot.filter_tick=0;
         previous_.fill(std::numeric_limits<float>::quiet_NaN());engine_initialized_=true;
@@ -214,6 +266,7 @@ void NativeHallProcessor::selectProgram(int requested,const std::array<float,par
 void NativeHallProcessor::applyControls(const std::array<float,parameter_count>& v) {
     const float dirt=1-v[9];constexpr float clean=1;
     auto& slot=slots_[active_slot_];slot.dirt_target=dirt;slot.ratio_target=1-.5f*v[space_index];slot.filters_follow=v[filter_link_index]>=.5f;
+    for(auto& precision_slot:slots_) precision_slot.clean_target=v[clean_mode_index]>=.5f?1:0;
     slot.routes={unsigned(v[12]),unsigned(v[13]),unsigned(v[rear_left_index]),unsigned(v[rear_right_index])};
     if(isXL(active_program_)) {
         const auto& data=rom_bank_->xlBank().programs[unsigned(active_program_)-native_hall::program_count];
@@ -224,6 +277,9 @@ void NativeHallProcessor::applyControls(const std::array<float,parameter_count>&
         if(data.diffusion_page) controls[data.pages[data.diffusion_page-1].cells[data.diffusion_slot]]=uint8_t(unsigned(v[16])*4);
         data.resolve_controls(controls);
         slots_[active_slot_].xl_engine.controls(controls,v[10]>=0.5f,v[7],v[8],clean,int(v[12]),int(v[13]),v[11]>=0.5f);
+        slots_[active_slot_].clean_xl_engine.controls(controls,v[10]>=0.5f,v[7],v[8],clean,int(v[12]),int(v[13]),v[11]>=0.5f);
+        slot.xl_engine.set_dark_stability(v[dark_stability_index]);
+        slot.clean_xl_engine.set_dark_stability(v[dark_stability_index]);
     }
     else {
         native_hall::Parameters p;
@@ -233,18 +289,34 @@ void NativeHallProcessor::applyControls(const std::array<float,parameter_count>&
         p.hall.diffusion=int(v[6]);
         p.input_db=v[7];p.mix=v[8];p.analog=true;p.dirt=0;p.hall.mode_enhancement=v[10]>=0.5f;
         p.hall.decay_optimization=v[11]>=0.5f;p.output_left=int(v[12]);p.output_right=int(v[13]);
+        p.hall.modulation_period=uint8_t(std::max(1,int(v[mod_rate_index])-1));
+        p.hall.modulation_step=uint8_t(4*int(v[mod_depth_index]));
+        p.hall.optimization_response=uint8_t(v[optimization_response_index]);
         slots_[active_slot_].engine.set_parameters(p);
+        clean_native_hall::Parameters precision;
+        static_assert(sizeof(precision)==sizeof(p) && std::is_trivially_copyable_v<clean_native_hall::Parameters>);
+        std::memcpy(&precision,&p,sizeof(p));slot.clean_engine.set_parameters(precision);
     }
 }
-void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) {
+void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) {processAudio(b,false);}
+void NativeHallProcessor::processBlockBypassed(juce::AudioBuffer<float>& b,juce::MidiBuffer&) {processAudio(b,true);}
+void NativeHallProcessor::processAudio(juce::AudioBuffer<float>& b,bool bypassed) {
     juce::ScopedNoDenormals noDenormals;
+    if(!bypass_initialized_) {
+        bypass_wet_.setCurrentAndTargetValue(bypassed?0.f:1.f);bypass_initialized_=true;
+    } else bypass_wet_.setTargetValue(bypassed?0.f:1.f);
     auto v=stable_values_;
     const unsigned transaction=parameter_transaction_.load(std::memory_order_acquire);
     if((transaction&1u)==0) {
         std::array<float,parameter_count> candidate;
         for(unsigned i=0;i<candidate.size();++i) candidate[i]=values_[i]->load(std::memory_order_relaxed);
+        const auto hidden=original_controls_->snapshot();
+        for(unsigned field=0;field<3;++field)
+            candidate[mod_rate_index+field]=float(CineolOriginal224Parameters::get(hidden,CineolOriginal224Parameters::Field(field)));
         std::atomic_thread_fence(std::memory_order_acquire);
-        if(parameter_transaction_.load(std::memory_order_acquire)==transaction) stable_values_=v=candidate;
+        if(parameter_transaction_.load(std::memory_order_acquire)==transaction && !(hidden&CineolOriginal224Parameters::restore_bit) &&
+            ((hidden&CineolOriginal224Parameters::program_mask)>>12)==unsigned(candidate[14]) &&
+            bool(hidden&CineolOriginal224Parameters::mode_bit)==(candidate[10]>=.5f)) stable_values_=v=candidate;
     }
     const int requested=std::clamp(int(v[14]),0,int(program_count)-1);
     const bool rear_enabled=getTotalNumOutputChannels()==4;
@@ -302,13 +374,27 @@ void NativeHallProcessor::processBlock(juce::AudioBuffer<float>& b,juce::MidiBuf
                 std::fill(ol+valid,ol+n,0);std::fill(ore+valid,ore+n,0);
             });
         if(rear_enabled) {b.copyFrom(2,offset,rear_host_,0,0,count);b.copyFrom(3,offset,rear_host_,1,0,count);}
+        auto* bypass_l=bypass_delay_.getWritePointer(0);auto* bypass_r=bypass_delay_.getWritePointer(1);
         for(int i=0;i<count;++i) {
             host_mix_+=host_mix_coefficient_*(v[8]-host_mix_);
             if(std::abs(host_mix_-v[8])<1e-5f) host_mix_=v[8];
+            const float dl=direct_input_.getSample(0,i),dr=direct_input_.getSample(1,i);
+            const float il=std::isfinite(dl)?dl:0,ir=std::isfinite(dr)?dr:0;
             if(low) {
-                const float dl=direct_input_.getSample(0,i),dr=direct_input_.getSample(1,i);
-                left[i]=(std::isfinite(dl)?dl:0)*(1-host_mix_)+left[i]*host_mix_;
-                right[i]=(std::isfinite(dr)?dr:0)*(1-host_mix_)+right[i]*host_mix_;
+                left[i]=il*(1-host_mix_)+left[i]*host_mix_;
+                right[i]=ir*(1-host_mix_)+right[i]*host_mix_;
+            }
+            // Keep a host-rate dry delay warm even while active. DSP continues
+            // normally during host bypass, so returning cannot resurrect a
+            // frozen tail or stale converter history. No parameter IDs change.
+            const float dry_l=low?il:bypass_l[bypass_position_],dry_r=low?ir:bypass_r[bypass_position_];
+            bypass_l[bypass_position_]=il;bypass_r[bypass_position_]=ir;
+            if(++bypass_position_==unsigned(bypass_delay_.getNumSamples()))bypass_position_=0;
+            const float wet=bypass_wet_.getNextValue();
+            if(wet!=1) {
+                left[i]=dry_l*(1-wet)+left[i]*wet;
+                right[i]=dry_r*(1-wet)+right[i]*wet;
+                if(rear_enabled)for(int c=2;c<4;++c)b.getWritePointer(c,offset)[i]*=wet;
             }
         }
         offset+=count;
@@ -360,7 +446,7 @@ const cineol::xl::ProgramData* NativeHallProcessor::xlProgram() const noexcept {
     const int program=algorithm_parameter_->getIndex();
     return isXL(program) && rom_bank_->xlReady()?&rom_bank_->xlBank().programs[unsigned(program)-native_hall::program_count]:nullptr;
 }
-unsigned NativeHallProcessor::parameterPages() const noexcept {if(const auto* data=xlProgram()) return data->page_count;return 2;}
+unsigned NativeHallProcessor::parameterPages() const noexcept {if(const auto* data=xlProgram()) return data->page_count;return 3;}
 uint8_t NativeHallProcessor::xlControl(unsigned cell) const noexcept {
     if(cell>=48) return 0;
     if(const auto* data=xlProgram()) {
@@ -377,7 +463,14 @@ juce::String NativeHallProcessor::firmwareId() const {return usesXL()?"224xl-v8.
 void NativeHallProcessor::getStateInformation(juce::MemoryBlock& block) {
     const juce::ScopedLock lock(preset_write_lock_);
     state.state.setProperty("firmware_id",firmwareId(),nullptr);
-    if(auto xml=state.copyState().createXml()) copyXmlToBinary(*xml,block);
+    auto snapshot=state.copyState();
+    // Coupled parameter mirrors may await the message-thread timer. Save the
+    // canonical values now, including an immediate save after automation.
+    const auto hidden=original_controls_->snapshot();
+    for(unsigned field=0;field<3;++field)
+        snapshot.getChildWithProperty("id",ids[mod_rate_index+field]).setProperty("value",
+            CineolOriginal224Parameters::get(hidden,CineolOriginal224Parameters::Field(field)),nullptr);
+    if(auto xml=snapshot.createXml()) copyXmlToBinary(*xml,block);
 }
 void NativeHallProcessor::setStateInformation(const void* data,int size) {
     if(auto xml=getXmlFromBinary(data,size)) if(xml->hasTagName(state.state.getType())) {
@@ -422,7 +515,14 @@ void NativeHallProcessor::setStateInformation(const void* data,int size) {
                 restored.setProperty(key,state.state.getProperty(key),nullptr);
         parameter_transaction_.fetch_add(1,std::memory_order_acq_rel);
         preset_recall_revision_.fetch_add(1,std::memory_order_release);
+        original_controls_->beginRestore();
         state.replaceState(restored);
+        // replaceState can skip an adapter whose raw mirror already equals
+        // the requested value, even when a coupled canonical value changed.
+        for(unsigned field=0;field<3;++field)
+            original_controls_->set(CineolOriginal224Parameters::Field(field),
+                int(restored.getChildWithProperty("id",ids[mod_rate_index+field]).getProperty("value")));
+        original_controls_->endRestore();
         parameter_transaction_.fetch_add(1,std::memory_order_release);
     }
 }

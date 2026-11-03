@@ -22,6 +22,7 @@ public:
             std::copy_n(data_->offsets.begin(),settings.rows,settings.offsets.begin());
             engine.activate(settings);engine.set_modulation(data_->modulation,data_->initial_modulation,true);
             engine.set_dynamics(data_->dynamics,data_->initial_dynamics);
+            engine.set_chorus_reference(uint8_t(data_->chorus*8));
         });
         alignment_.fill({});alignment_position_=0;
     }
@@ -35,6 +36,7 @@ public:
         });
     }
     void set_clock_factor(float factor) noexcept {visit([&](auto& engine){engine.set_clock_factor(factor);});}
+    void set_dark_stability(float original) noexcept {visit([&](auto& engine){engine.set_dark_stability(original);});}
     void set_dirt(float dirt) noexcept {visit([&](auto& engine){engine.set_dirt(dirt);});}
     void process(float left,float right,float& l,float& r,bool wet_only,std::array<float,4>* quad=nullptr) noexcept {
         std::array<float,4> four{};

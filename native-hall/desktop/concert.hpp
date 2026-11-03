@@ -6,6 +6,7 @@
 #include "modulation.hpp"
 #include "graphs.hpp"
 #include "diffusion.hpp"
+#include "dark_hall_stability.hpp"
 
 // Keep the row-emission adapter transparent to the optimizer. Outlining this
 // small proxy doubled Resonant Chords' calls per pass on AppleClang 21.
@@ -45,7 +46,9 @@ public:
     // change must explicitly reset the instance instead.
     bool set_settings(const Settings& settings) noexcept {
         if(!settings.valid()) return false;
-        settings_=base_settings_=settings;return true;
+        settings_=base_settings_=settings;
+        if constexpr(graph==Graph::dark_hall) stability_.update(settings_);
+        return true;
     }
     void set_controls(Settings settings) noexcept {
         compiler_settings_=settings;
@@ -90,6 +93,10 @@ public:
         profile.apply(compiler_settings_,index,0,0);
     }
     const Settings& settings() const noexcept {return settings_;}
+    void set_dark_stability(float original) noexcept {
+        if constexpr(graph==Graph::dark_hall) {stability_.amount(original);stability_.update(settings_);}
+    }
+    uint32_t dark_stability_gain() const noexcept {return stability_.gain();}
     void reset() noexcept {
         settings_=base_settings_;
         memory_.fill(0);registers_.fill(0);output_.fill(0);
@@ -97,6 +104,7 @@ public:
         xreg_to_control_=xreg_from_control_=0;
         previous_magnitude_=0;previous_negative_=false;first_=true;saturations_=0;
         modulation_clock_=0;modulator_.reset(initial_modulation_);
+        if constexpr(graph==Graph::dark_hall) {stability_.update(settings_);stability_.reset();}
     }
     void process(int16_t left,int16_t right,int16_t outputs[4]) noexcept {
         NoOutput emit;process(left,right,outputs,emit);
@@ -109,6 +117,7 @@ public:
     // copy is unnecessary. Keep the ordinary output API for offline checks.
     template<class Emit> void process_stream(int16_t left,int16_t right,Emit&& emit) noexcept {
         if(first_) first_=false;else ++position_;
+        if constexpr(graph==Graph::dark_hall) stability_.advance(rate_numerator,rate_denominator);
         GraphExecutor<std::remove_reference_t<Emit>>{*this,emit}.run(left,right);
         if(modulation_enabled_) {
             modulation_clock_+=modulation_.rate_tenths*rate_denominator;
@@ -162,7 +171,10 @@ private:
         for(unsigned c=0;c<4;++c) if(Outputs&(1u<<c)) output_[c]=bus;
         if constexpr(WriteX) xreg_to_control_=bus;
         registers_[WA]=bus;
-        edge(previous_magnitude_&3,previous_negative_,!Shift,int32_t(registers_[RA])*8,false);
+        auto operand=int32_t(registers_[RA])*8;
+        if constexpr(graph==Graph::dark_hall && (Row==41 || Row==42 || Row==94 || Row==95))
+            operand=decltype(operand)(stability_.apply(operand));
+        edge(previous_magnitude_&3,previous_negative_,!Shift,operand,false);
         if constexpr(Transfer) result_=int16_t(sum()>>3);
         const int coefficient=settings_.coefficients[Row];
         const unsigned magnitude=unsigned(coefficient<0?-coefficient:coefficient);
@@ -171,6 +183,7 @@ private:
         return bus;
     }
     Settings settings_{},base_settings_{},compiler_settings_{};
+    DarkHallStability stability_;
     ModulationProfile modulation_{};
     ModulationState initial_modulation_{};
     Modulator modulator_;

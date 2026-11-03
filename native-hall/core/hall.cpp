@@ -44,6 +44,9 @@ void Hall::set_controls(const Controls& next) noexcept {
     controls_.crossover=std::clamp(next.crossover,0,31); controls_.treble=std::clamp(next.treble,0,31);
     controls_.depth=std::clamp(next.depth,0,71); controls_.predelay_ms=std::clamp(requested_predelay,24,152);
     controls_.diffusion=std::clamp(next.diffusion,1,63);
+    controls_.modulation_period=std::min<uint8_t>(next.modulation_period,15);
+    controls_.modulation_step=std::min<uint8_t>(next.modulation_step,64);
+    controls_.optimization_response=std::min<uint8_t>(next.optimization_response,16);
     if(algorithm_) {
         const auto& p=*algorithm_;
         p.tail.apply(unsigned(controls_.bass*32+controls_.mid),c_);
@@ -102,7 +105,7 @@ void Hall::update_modulation() noexcept {
         if(--random_hold_==0) {random_hold_=algorithm_?algorithm_->modulation_hold:profile_->modulation_hold; mod_index_=(mod_index_+1)&4095;}
     }
     if(--mod_divider_!=0) return;
-    mod_divider_=algorithm_?algorithm_->modulation_period:profile_->modulation_period;
+    mod_divider_=modulation_period();
     uint8_t random=bank_?bank_->modulation_sequence[mod_index_]:profile_->modulation_sequence[mod_index_];
     // v4.4's 0x82 descriptor: the second tap walks in the opposite direction.
     const unsigned flags=algorithm_?algorithm_->modulation_flags:0x82;
@@ -120,7 +123,7 @@ void Hall::update_modulation() noexcept {
         bool up=(random&1)!=0;
         int value=int(phase);
         bool advance=false; int delta=0;
-        const int step=algorithm_?algorithm_->modulation_step:profile_->modulation_step;
+        const int step=modulation_step();
         if(up && !(phase&1)) {value+=step; advance=value>255; delta=2;}
         if(up && (phase&1)) {value-=step; advance=uint8_t(value)<cap; delta=1;}
         if(!up && (phase&1)) {value+=step; advance=value>255; delta=-2;}
@@ -188,7 +191,7 @@ void Hall::update_decay() noexcept {
     level_clock_+=algorithm_?algorithm_->level_rate_tenths[mode]:profile_->level_rate_tenths[mode];
     if(level_clock_<sample_rate*10) return;
     level_clock_-=sample_rate*10;
-    if(decay_.poll(uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,algorithm_?algorithm_->decay_amount:profile_->decay_amount))
+    if(decay_.poll(uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,optimization_response()))
         set_loop_diffusion(decay_.state().amount);
 }
 } // namespace native_hall

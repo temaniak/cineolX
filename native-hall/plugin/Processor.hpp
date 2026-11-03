@@ -2,8 +2,11 @@
 #include "../desktop/engine22448.hpp"
 #include "RomBank.hpp"
 #include "Firmware.hpp"
+#include "Original224Parameters.hpp"
 #include "../desktop/runtime.hpp"
 #include "../desktop/space_clock.hpp"
+#include <clean/desktop/engine22448.hpp>
+#include <clean/desktop/runtime.hpp>
 #include <juce-plugin/plugin/rate_bridge.hpp>
 #include <juce_audio_utils/juce_audio_utils.h>
 
@@ -22,6 +25,7 @@ public:
     void releaseResources() override {}
     bool isBusesLayoutSupported(const BusesLayout&) const override;
     void processBlock(juce::AudioBuffer<float>&,juce::MidiBuffer&) override;
+    void processBlockBypassed(juce::AudioBuffer<float>&,juce::MidiBuffer&) override;
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override {return true;}
     const juce::String getName() const override {return "Cineol-X 224";}
@@ -45,6 +49,12 @@ public:
     double dspRate() const noexcept;
     uint8_t xlControl(unsigned cell) const noexcept;
     juce::String firmwareId() const;
+    std::array<int,3> originalHiddenValues() const noexcept {
+        const auto snapshot=original_controls_->snapshot();
+        return {CineolOriginal224Parameters::get(snapshot,CineolOriginal224Parameters::Rate),
+            CineolOriginal224Parameters::get(snapshot,CineolOriginal224Parameters::Depth),
+            CineolOriginal224Parameters::get(snapshot,CineolOriginal224Parameters::Optimization)};
+    }
     bool programAvailable(int program) const noexcept {return isXL(program)?rom_bank_->xlReady():rom_bank_->ready();}
     bool ready() const noexcept {return programAvailable(algorithm_parameter_->getIndex());}
     bool importingRoms() const noexcept {return rom_bank_->importing();}
@@ -92,24 +102,33 @@ public:
     static constexpr const char* ids[]={"bass","mid","crossover","treble","depth","predelay","diffusion",
         "input_db","mix","analog","mode_enh","decay_opt","output_l","output_r","algorithm","xl_chorus","xl_diffusion",
         "xl_00", "xl_01", "xl_02", "xl_03", "xl_04", "xl_05", "xl_06", "xl_07", "xl_08", "xl_09", "xl_10", "xl_11", "xl_12", "xl_13", "xl_14", "xl_15", "xl_16", "xl_17", "xl_18", "xl_19", "xl_20", "xl_21", "xl_22", "xl_23", "xl_24", "xl_25", "xl_26", "xl_27", "xl_28", "xl_29", "xl_30", "xl_31", "xl_32", "xl_33", "xl_34", "xl_35", "xl_36", "xl_37", "xl_38", "xl_39", "xl_40", "xl_41", "xl_42", "xl_43", "xl_44", "xl_45", "xl_46", "xl_47",
-        "space","filters_follow_clock","output_rear_l","output_rear_r"};
+        "space","filters_follow_clock","output_rear_l","output_rear_r","mod_rate","mod_depth","optimization_response",
+        "clean_mode","dark_stability"};
     static constexpr unsigned xl_parameter_begin=17;
     static constexpr unsigned legacy_parameter_count=65,space_index=65,filter_link_index=66,rear_left_index=67,rear_right_index=68;
+    static constexpr unsigned space_parameter_count=69,mod_rate_index=69,mod_depth_index=70,optimization_response_index=71;
+    static constexpr unsigned hidden_parameter_count=72,clean_mode_index=72,dark_stability_index=73;
     static constexpr unsigned parameter_count=std::size(ids);
 private:
     juce::SharedResourcePointer<CineolEditorPreferences> editor_preferences_;
     juce::Result applyPreset(const juce::ValueTree&,const juce::String&);
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
+    void processAudio(juce::AudioBuffer<float>&,bool bypassed);
     void updateLatency();
-    void timerCallback() override {updateLatency();}
+    void timerCallback() override;
+    CineolOriginal224Parameters* original_controls_=nullptr; // Owned by the parameters.
     juce::SharedResourcePointer<CineolRomBank> rom_bank_;
     // Desktop-only double buffering. Both complete runtimes are constructed
     // before audio starts; transitions exchange indices, never DSP storage.
     struct AudioSlot {
         native_hall::DesktopEngine48 engine;
         cineol::xl::Runtime xl_engine;
+        clean_native_hall::DesktopEngine48 clean_engine;
+        clean_cineol::xl::Runtime clean_xl_engine;
         std::array<std::array<float,4>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> alignment{};
         unsigned alignment_position=0;
+        std::array<std::array<float,4>,native_hall::Engine48::latency_samples-cineol::xl::Runtime::latency_samples> clean_alignment{};
+        float clean_mix=0,clean_target=0;
         cineol::SpaceClock clock;
         std::array<unsigned,4> routes{0,2,1,3};
         float ratio_target=1,dirt_target=0,dirt=0,clock_factor=1;
@@ -147,6 +166,10 @@ private:
     std::atomic<bool> low_latency_active_{false};
     std::atomic<int> normal_latency_{native_hall::Engine48::latency_samples};
     juce::AudioBuffer<float> direct_input_,rear_internal_,rear_host_;
+    juce::AudioBuffer<float> bypass_delay_; // Allocated only in prepareToPlay.
+    unsigned bypass_position_=0;
+    juce::LinearSmoothedValue<float> bypass_wet_{1};
+    bool bypass_initialized_=false;
     float host_mix_=1,host_mix_coefficient_=0.002f;
     bool engine_initialized_=false; // Owned only by prepareToPlay/processBlock.
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NativeHallProcessor)

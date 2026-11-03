@@ -187,7 +187,7 @@ int main(int argc,char** argv) try {
         const unsigned stop=data.dynamics.shared_stop?6:12;
         for(unsigned cell:{stop,stop+1,45u}) if(!overridden[cell]) {physical[cell]=uint8_t(cell==45?10:18);overridden[cell]=true;}
     }
-    for(unsigned cell=0;cell<48;++cell) if(overridden[cell]) check(data.control_active(cell),"Physical override targets inactive control");
+    for(unsigned cell=0;cell<48;++cell) if(overridden[cell]) check(data.control_active(cell,Graph(index)),"Physical override targets inactive control");
     const bool custom=std::any_of(overridden.begin(),overridden.end(),[](bool v){return v;});
     const auto output=std::filesystem::path(argv[3]);check(!std::filesystem::exists(output/"fixture.csv"),"Output already contains a fixture; choose a new directory");
     std::filesystem::create_directories(output);
@@ -204,9 +204,9 @@ int main(int argc,char** argv) try {
     std::ofstream controls(output/"controls.csv");controls<<"cell,native,reference,active,physical_override\n";
     for(unsigned cell=0;cell<48;++cell) {
         const unsigned wanted=machine->peek(uint16_t(op.recordBase()+cell));
-        controls<<cell<<','<<unsigned(raw[cell])<<','<<wanted<<','<<data.control_active(cell)<<',';
+        controls<<cell<<','<<unsigned(raw[cell])<<','<<wanted<<','<<data.control_active(cell,Graph(index))<<',';
         if(overridden[cell]) controls<<unsigned(physical[cell]);controls<<'\n';
-        if(data.control_active(cell)) check(raw[cell]==wanted,"Active XL factory control differs from firmware");
+        if(data.control_active(cell,Graph(index))) check(raw[cell]==wanted,"Active XL factory control differs from firmware");
     }
     check((host.memory[op.recordBase()+42]&0xc1)==(raw[42]&0xc1),"Firmware switch record differs from requested mode");
     auto native=std::make_unique<Runtime>();native->select(*bank,index);

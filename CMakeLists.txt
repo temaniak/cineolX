@@ -27,6 +27,7 @@ endif()
 add_subdirectory(native-hall)
 if(NOT CINEOL_BUILD_PLUGIN)
     add_subdirectory(native-hall/float)
+    add_subdirectory(native-hall/clean-ab)
     return()
 endif()
 if(APPLE)
@@ -36,6 +37,7 @@ if(APPLE)
     endif()
 endif()
 include(FetchContent)
+include(native-hall/cmake/PrecisionEngine.cmake)
 FetchContent_Declare(JUCE GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG 8.0.14 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
@@ -48,7 +50,10 @@ juce_add_binary_data(cineol_ui_data HEADER_NAME CineolUIData.h NAMESPACE CineolU
         native-hall/plugin/assets/panel-monolithic.png native-hall/plugin/assets/menu-metal.png
         native-hall/plugin/assets/quick-key.png native-hall/plugin/assets/panel-quick-presets.png
         native-hall/plugin/assets/panel-compact-integrated.png
-        native-hall/plugin/assets/fadercap-black.png native-hall/plugin/assets/quick-key-black.png)
+        native-hall/plugin/assets/fadercap-black.png native-hall/plugin/assets/quick-key-black.png
+        native-hall/plugin/assets/panel-clean.png native-hall/plugin/assets/fadercap-clean.png
+        native-hall/plugin/assets/quick-key-clean.png native-hall/plugin/assets/bezel-clean.png
+        native-hall/plugin/assets/panel-compact-clean.png native-hall/plugin/assets/menu-clean.png)
 juce_add_plugin(NativeHall224 VERSION ${PROJECT_VERSION} PRODUCT_NAME "Cineol-X 224" COMPANY_NAME "NK Stuff"
     BUNDLE_ID "net.joelanders.nativehall224" PLUGIN_MANUFACTURER_CODE Rflx PLUGIN_CODE Nh24
     FORMATS ${_formats} IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE
@@ -59,6 +64,7 @@ target_sources(NativeHall224 PRIVATE native-hall/plugin/Processor.cpp
     native-hall/plugin/Editor.cpp native-hall/plugin/RomBank.cpp native-hall/plugin/Presets.cpp)
 target_link_libraries(NativeHall224 PRIVATE native_hall_core native_224_import native_xl_import cineol_ui_data
     juce::juce_audio_utils juce::juce_recommended_config_flags)
+target_link_libraries(NativeHall224 PUBLIC cineol_clean_core)
 target_compile_definitions(NativeHall224 PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_STANDALONE_PLUGIN_AUTO_OPEN_AUDIO_INPUT=1)
 if(APPLE)
@@ -81,3 +87,5 @@ juce_add_console_app(cineol_rom_import_check PRODUCT_NAME "cineol_rom_import_che
 target_sources(cineol_rom_import_check PRIVATE native-hall/tests/rom_import_check.cpp)
 target_link_libraries(cineol_rom_import_check PRIVATE NativeHall224 juce::juce_audio_utils)
 add_subdirectory(native-hall/float)
+
+add_subdirectory(native-hall/clean-ab)

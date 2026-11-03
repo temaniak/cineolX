@@ -181,7 +181,9 @@ private:
         return a.bass==b.bass && a.mid==b.mid && a.crossover==b.crossover
             && a.treble==b.treble && a.depth==b.depth && a.predelay_ms==b.predelay_ms
             && a.diffusion==b.diffusion && a.mode_enhancement==b.mode_enhancement
-            && a.decay_optimization==b.decay_optimization;
+            && a.decay_optimization==b.decay_optimization
+            && a.modulation_period==b.modulation_period && a.modulation_step==b.modulation_step
+            && a.optimization_response==b.optimization_response;
     }
     const ProgramBank* bank_=nullptr;
     unsigned current_program_=2;

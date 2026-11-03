@@ -1,5 +1,30 @@
 # Native 224XL sound baseline
 
+Current October 26, 2026 GitHub corrections are recorded in
+[GITHUB_FIXES_2026-10-26.md](GITHUB_FIXES_2026-10-26.md): physical frequency
+endpoint protection, restored voice/indirect decay controls and host bypass.
+The subsequent Chorus/hidden-control ROM comparison is recorded in
+[REFLEXION_CHORUS_HIDDEN_CONTROLS_2026-10-26.md](REFLEXION_CHORUS_HIDDEN_CONTROLS_2026-10-26.md).
+The [November 2 manual audit](MANUAL_CONTROL_AUDIT_2026-11-02.md) adds hidden
+control reset/recall evidence and keeps the Rich Chorus documentation/reference
+discrepancy open, including Mode Enhancement access and controller timing.
+The [November 2 hidden-control fix](HIDDEN_CONTROLS_FIX_2026-11-02.md) implements
+original-224 Rate/Depth/Optimization with matched state/cost oracles and stable
+legacy behavior. The [Rich Chorus correction](RICH_CHORUS_FIX_2026-11-02.md)
+restores the two rich faders and Mod access, and adds the missing Chorus-dependent
+controller work budget. The general free-running XL scheduler and the
+manual-versus-v8.21 interpolation discrepancy remain open; see its explicit
+timing and listening limits.
+The subsequent [Rich dynamic timing correction](XL_RICH_DYNAMIC_TIMING_FIX_2026-11-02.md)
+connects the native controller/compiler work clock for Rich Plate and Rich Split.
+All 24 cadence fixtures now pass the user-permitted tolerance (maximum 4.34%
+versus 31.49% previously), with progressive decay writes, coherent live updates,
+48 independent sound fixtures, all-28 regression and paired all-22 CPU checks.
+Small peripheral/phase/floor differences remain explicit; other XL clocks are
+unchanged. Do not pursue exact peripheral equivalence without a material sound
+mismatch under the user's November 2 tolerance instruction.
+The record below retains its original checkpoint and historical measurements.
+
 Date: October 5, 2026. Engine checkpoint: `c6454a317b92b2a52d0cad17ebd3bdcd9f190d86`
 on `codex/original-224-sound-accuracy`. This investigation adds offline tools
 and documentation; production DSP, import, plugin parameters and installed
@@ -720,3 +745,59 @@ chord fixtures at matched playback levels; assess onset/routing, brightness,
 tail envelope and the low-level end of the decay. Keep the injected-WCS render
 labelled as a diagnostic. Host listening and numerical/listening acceptance
 targets remain open.
+
+## Separate Clean A/B prototype — November 2, 2026
+
+The user approved a seven-program fixed-point precision experiment, including
+XL Concert/Bright/Dark Hall and CD Plate B. The separate
+[Clean A/B prototype report](CLEAN_AB_PROTOTYPE_2026-11-02.md) records the
+isolated extra-12-bit signal path, unchanged clocks/circuit filters, zero-bit
+identity check, noise/character measurements and installed prototype formats.
+This does not change or supersede the main fidelity engine. The user subsequently
+accepted its noise reduction after listening. Before extending it to the other
+algorithms, see the [Dark Hall runaway investigation](DARK_HALL_RUNAWAY_2026-11-02.md):
+a first-hand 1985 hardware review and independent original v8.21 firmware both
+exhibit runaway. Clean can also expose growth at settings where Original settles.
+No stability correction has been implemented or accepted.
+
+The subsequent earlier-firmware follow-up in that report uses full Reflexion
+ROM execution for X v8.1, XL v8.1A and XL v8.21. Factory V5 runs away in v8.21
+but not the earlier two within 60 seconds; earlier finite high-decay cases also
+remain low in 90-second tests. XL v8.1A remains at its floor with Mod/Opt off,
+whereas v8.21 still runs away after matching the earlier audible tone controls.
+This is a version-dependent observed failure, not evidence that every X/XL
+revision has it. The exact firmware change and v8.2 remain untested. This is an
+offline reference investigation; native firmware support has not expanded.
+
+The [Dark Hall cause/control report](DARK_HALL_FEEDBACK_CONTROL_2026-11-02.md)
+then localizes a 298.213 Hz growing mode of the coupled v8.21 feedback network.
+An ideal linear graph and a frequency-domain pole solve agree with the full-ROM
+rise (~2.9 dB/s). A diagnostic reduction of the running firmware's Mid feedback
+returns removes the runaway. A private Clean Q24 feedback-gain prototype crosses
+from decay to growth continuously, is sample-identical at 100%, and retains
+tails with allocation/release counts zero. There is no shipped correction or
+GUI slider yet; exact historical instruction-level cause and all-control
+stability/listening acceptance remain open.
+
+## Global Clean and integrated Dark Hall variation — November 2, 2026
+
+The accepted extra-12-bit fixed-point path is now shared by the main plugin and
+the A/B fixture and covers all 28 algorithms. Settings → Clean also switches
+six ImageGen-restored surface assets. Original/Clean histories stay warm, with
+a short crossfade and unchanged dry/quad routing and host latency. CPU and
+memory cost increase because both precision paths run; no gate or new filter
+curve is introduced. Dirt remains independent.
+
+Dark Hall page 5, fader 3 now binds the appended `dark_stability` parameter.
+The on-screen Variation value reads Stable at 0 and Original at 1, with a
+percentage between; no separate bottom slider or physical label remains.
+Stable caps excessive LF/Mid return gain, retaining the v8.21 graph. It is not
+an exact v8.1 emulation. Both precision paths pass 144 finite 45-second
+long-decay cases at Stable; Original deliberately preserves the runaway.
+
+See [implementation, validation and reproduction](CLEAN_ALL_ALGORITHMS_2026-11-02.md)
+and [ImageGen asset provenance](CLEAN_SKIN_ASSETS_2026-11-02.md). Existing host
+parameter IDs/indices remain; new IDs append with version hint 9. Preset schema
+7 restores legacy defaults from versions 1–6. No ROM/cache format, public
+release/tag or numeric plugin version changes. New all-program/Stable listening
+acceptance remains pending even though the user accepted the earlier prototype.

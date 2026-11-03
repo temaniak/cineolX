@@ -125,7 +125,7 @@ static Task<void> active_setup(Machine& m,LarcOperator& op,const ProgramData& da
         if(data.pages[p].cells[slot]==cell)co_await op.moveSlider(int(p+1),slot,cell==45?10:18);
     co_await op.gotoPage(1);co_await m.sleep(.2);
 }
-static Task<void> fixture(Machine& m,LarcOperator& op,const ProgramData& data) {
+static Task<void> fixture(Machine& m,LarcOperator& op,const ProgramData& data,Graph graph) {
     co_await op.gotoPage(1);
     // Direct LARC fader messages preserve the firmware's soft pickup state.
     // No RAM seeds or operator takeOver helper are used for these sweeps.
@@ -135,19 +135,19 @@ static Task<void> fixture(Machine& m,LarcOperator& op,const ProgramData& data) {
         for(unsigned raw:{2u,64u,254u,120u,2u,254u}){m.fader(slot,raw);co_await m.sleep(.18);}
     }
     for(unsigned cell:{data.dynamics.shared_stop?6u:12u,data.dynamics.shared_stop?7u:13u,45u}) {
-        if(!data.control_active(cell))continue;
+        if(!data.control_active(cell,graph))continue;
         for(unsigned p=0;p<data.page_count;++p)for(unsigned slot=0;slot<6;++slot)if(data.pages[p].cells[slot]==cell) {
             co_await op.gotoPage(int(p+1));for(unsigned raw:{2u,18u,120u,254u}){m.fader(slot,raw);co_await m.sleep(.18);}
         }
     }
     co_await op.gotoPage(1);co_await m.sleep(.5);
 }
-static Task<void> numeric_pages_fixture(Machine& m,LarcOperator& op,const ProgramData& data) {
+static Task<void> numeric_pages_fixture(Machine& m,LarcOperator& op,const ProgramData& data,Graph graph) {
     for(unsigned page=0;page<data.page_count;++page) {
         const auto& p=data.pages[page];if(p.type==5)continue;
         co_await op.gotoPage(int(page+1));
         for(unsigned slot=0;slot<6;++slot) {
-            const unsigned cell=p.cells[slot];if(cell>=48 || !data.control_active(cell))continue;
+            const unsigned cell=p.cells[slot];if(cell>=48 || !data.control_active(cell,graph))continue;
             m.fader(slot,m.peek(uint16_t(0x3ca3+cell)));co_await m.sleep(.18);
             for(unsigned raw:{2u,8u,64u,254u}) {m.fader(slot,raw);co_await m.sleep(.18);}
         }
@@ -187,7 +187,7 @@ int main(int argc,char** argv) {
             float* channels[]={output[0].data(),output[1].data(),output[2].data(),output[3].data()};uint32_t random=17;
             for(unsigned frame=0;frame<12032;frame+=64){for(auto& x:input){random=random*1664525u+1013904223u;x=frame<4800?.12f*float(int32_t(random))/2147483648.f:0;}require(m->render(input.data(),zero.data(),channels,64),"fader active audio failed");}
         }
-        Probe probe{engine->host()};probe.start();const auto result=m->run_task([&]{return numeric_pages?numeric_pages_fixture(*m,*op,data):fixture(*m,*op,data);});require(!result.failed,result.error.text);probe.stop();
+        Probe probe{engine->host()};probe.start();const auto result=m->run_task([&]{return numeric_pages?numeric_pages_fixture(*m,*op,data,Graph(i)):fixture(*m,*op,data,Graph(i));});require(!result.failed,result.error.text);probe.stop();
         std::cout<<info.name<<": pickup="<<probe.pickups<<", accepted="<<probe.accepted<<", rejected="<<probe.rejected<<", states=";for(auto x:probe.pickup_states)std::cout<<x<<'/';
         std::cout<<", paths64/93/99/120=";for(auto x:probe.pickup_paths)std::cout<<x<<'/';
         std::cout<<", finish="<<probe.finishes<<", transactions="<<probe.transactions<<", handlers="<<probe.handlers<<", main returns="<<probe.main_returns<<", compilers="<<probe.compilers<<", stopped requests="<<probe.stopped_requests<<", active tail="<<(active_tail && data.dynamics.enabled)<<", IRQ="<<probe.irq_count<<", work errors="<<probe.work_errors<<", state errors="<<probe.state_errors<<", retention errors="<<probe.retention_errors<<'\n'<<std::flush;

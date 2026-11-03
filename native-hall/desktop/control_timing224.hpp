@@ -87,7 +87,7 @@ private:
 // dispatch or CPU state lives here. The writer supplies each bounded WCS
 // access duration, including its seven instruction states and bus waits.
 template<class Write> unsigned modulation_cycles224(const ProgramBank& bank,
-        unsigned program,const ModulationState& state,bool enabled,Write&& write) noexcept {
+        unsigned program,const ModulationState& state,bool enabled,Write&& write,uint8_t effective_step=0) noexcept {
     if(!enabled)return 767; // Entry test and the 48-iteration delay path.
     const auto& p=bank.programs[program];
     unsigned cycles=70;
@@ -120,7 +120,7 @@ template<class Write> unsigned modulation_cycles224(const ProgramBank& bank,
         const uint8_t cap=state.descriptors[at+2],cached=state.descriptors[at+3];
         auto phase=state.descriptors[at+4];
         const bool up=random&1;
-        const int step=p.modulation_step;
+        const int step=effective_step?effective_step:p.modulation_step;
         cycles+=76;
         const bool add=(up && !(phase&1)) || (!up && (phase&1));
         cycles+=add?35:39;

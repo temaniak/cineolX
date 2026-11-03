@@ -3,6 +3,8 @@
 #include <juce-plugin/source/roms/sha256.hpp>
 #include <bit>
 #include <stdexcept>
+#include <clean/core/program_bank.hpp>
+#include <clean/desktop/bank.hpp>
 
 namespace {
 constexpr int64_t bank_file_size=sizeof(native_hall::BankHeader)+sizeof(native_hall::ProgramBank);
@@ -20,14 +22,16 @@ juce::File CineolRomBank::cacheFile() {
    #endif
     return folder.getChildFile("Cineol-X 224").getChildFile("programs-v44-import-v1.bank224");
 }
-CineolRomBank::CineolRomBank():Thread("Cineol ROM preparation") {
+CineolRomBank::CineolRomBank():Thread("Cineol ROM preparation"),
+    clean_bank_(std::make_unique<clean_native_hall::ProgramBank>()),
+    clean_xl_bank_(std::make_unique<clean_cineol::xl::Bank>()) {
     juce::MemoryBlock bytes;
     const auto original=cacheFile(),xl=xlCacheFile();
     if(original.getSize()==bank_file_size && original.loadFileAsData(bytes) &&
-       native_hall::read_bank(bytes.getData(),bytes.getSize(),bank_)) ready_.store(true,std::memory_order_release);
+       native_hall::read_bank(bytes.getData(),bytes.getSize(),bank_)) publishOriginal();
     bytes.reset();
     if(xl.getSize()==int64_t(sizeof(cineol::xl::BankHeader)+sizeof(cineol::xl::Bank)) && xl.loadFileAsData(bytes) &&
-       cineol::xl::read_bank(bytes.getData(),bytes.getSize(),xl_bank_)) xl_ready_.store(true,std::memory_order_release);
+       cineol::xl::read_bank(bytes.getData(),bytes.getSize(),xl_bank_)) publishXL();
     status_=ready() && xlReady()?"224 v4.4 and 224XL v8.21 ready.":
         ready()?"224 v4.4 ready. Import 224XL v8.21 to add native XL programs.":
         xlReady()?"224XL v8.21 ready. Import 224 v4.4 to add the original programs.":missing_roms;
@@ -35,6 +39,14 @@ CineolRomBank::CineolRomBank():Thread("Cineol ROM preparation") {
         status_="Re-import the original 224XL v8.21 ROM set once to prepare the native modulation startup update.";
     else if(!xlReady() && xl.getSiblingFile("programs-v821-native-v3.bankxl").existsAsFile())
         status_="Re-import the original 224XL v8.21 ROM set once to prepare the native dynamics update.";
+}
+void CineolRomBank::publishOriginal() {
+    static_assert(sizeof(*clean_bank_)==sizeof(bank_) && std::is_trivially_copyable_v<clean_native_hall::ProgramBank>);
+    std::memcpy(clean_bank_.get(),&bank_,sizeof(bank_));ready_.store(true,std::memory_order_release);
+}
+void CineolRomBank::publishXL() {
+    static_assert(sizeof(*clean_xl_bank_)==sizeof(xl_bank_) && std::is_trivially_copyable_v<clean_cineol::xl::Bank>);
+    std::memcpy(clean_xl_bank_.get(),&xl_bank_,sizeof(xl_bank_));xl_ready_.store(true,std::memory_order_release);
 }
 CineolRomBank::~CineolRomBank() {
     // Cancellation is checked during emulation; never force-kill a thread
@@ -132,11 +144,11 @@ void CineolRomBank::run() {
         };
         if(original) {
             auto prepared=native_hall::import::prepare_bank(roms,callbacks);native_hall::BankHeader header;
-            save(cacheFile(),header,prepared);bank_=*prepared;ready_.store(true,std::memory_order_release);
+            save(cacheFile(),header,prepared);bank_=*prepared;publishOriginal();
         }
         if(xl) {
             auto prepared=cineol::xl::import::prepare_bank(xl_roms,callbacks);cineol::xl::BankHeader header;
-            save(xlCacheFile(),header,prepared);xl_bank_=*prepared;xl_ready_.store(true,std::memory_order_release);
+            save(xlCacheFile(),header,prepared);xl_bank_=*prepared;publishXL();
         }
         setStatus(ready() && xlReady()?"224 v4.4 and 224XL v8.21 ready.":ready()?"224 v4.4 ready.":"224XL v8.21 ready.");
     } catch(const std::exception& error) {setStatus(juce::String::fromUTF8(error.what()));}
