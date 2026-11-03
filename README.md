@@ -3,12 +3,44 @@
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
 the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
 preview of all 22 **224 XL v8.21** programs. The desktop release is
-**1.0Alpha**, with SPACE clock control, converter-filter DIRT, optional four
-outputs, a wider high-contrast display and black worn faders/preset keys.
+**1.1a**, adding global Clean processing, a Dark Hall variation, restored
+controls, refined Rich-program timing and improved Windows control graphics.
+SPACE clock control, converter-filter DIRT and optional four outputs remain.
 The displayed manufacturer is **NK Stuff**, matching Silver-K; existing plugin
 identifiers are retained for DAW-session compatibility.
 
-## What's new in 1.0Alpha
+## What's new in 1.1a
+
+- **Settings → Clean** reduces quantization noise on all 28 algorithms and
+  selects clean panel/control textures. The original networks, coefficient
+  quantization, clocks, modulation and converter filters remain. Dirt still
+  changes filter bandwidth independently.
+- Original/Clean histories stay active to retain tails during mode changes;
+  this adds CPU and memory cost even with Clean off.
+- **Dark Hall, page 5, fader 3: Variation** smoothly moves from **Stable** at 0
+  to **Original** at 1, with the value on the screen. Stable reduces excessive
+  feedback in the v8.21 graph; it is not a v8.1 firmware replacement. Original
+  preserves the late firmware's possible self-oscillation.
+- Original-224 page 3 adds **Mod Rate**, **Mod Depth** and **Opt Resp** with
+  hardware-compatible interactions, automation and preset/session recall.
+- Restored XL voice/pitch/delay and decay controls; restored Rich Plate/Rich
+  Split Chorus and improved their Dynamic Decay/Optimization work timing.
+- Fixed signal loss at invalid HF frequency endpoints and corrected host
+  bypass/dry alignment with smooth transitions and retained tail histories.
+- Active page faders fill the columns from left to right in both editor modes.
+  Windows faders and quick keys use high-quality Direct2D image filtering.
+- macOS AU includes an experimental idle-paint workaround for Logic mouse
+  input loss; complete first-open/focus resolution is not claimed.
+- Preset schema **7** accepts schemas **1–6**. Old presets/sessions default to
+  Clean off, Dark Hall Original and original-224 advanced values 2/1/5.
+  Existing plugin/parameter IDs and indices remain; new controls are appended.
+  Corrected XL controls/endpoints and Rich timing may change affected old sounds.
+
+The public tag is **v1.1a**, numeric AU/VST3/bundle version is **1.1.0**,
+and the GitHub release is a **prerelease**, as requested by the project owner.
+See the [1.1a notes](docs/releases/v1.1a.md) for installation and validation limits.
+
+## Earlier changes in 1.0Alpha
 
 - **SPACE** lowers each algorithm's DSP clock continuously from nominal to
   exactly half. The screen shows the current setting in kHz. The original 224
@@ -37,9 +69,8 @@ identifiers are retained for DAW-session compatibility.
   are appended; preset schema 5 reads schemas 1–4 with new-control defaults.
   New presets are intended for 1.0Alpha. Existing prepared caches remain usable.
 
-The public tag is **v1.0Alpha**, the numeric AU/VST3/bundle version is **1.0.0**,
-and the GitHub release is marked **prerelease**. This naming was explicitly
-requested by the project owner after the 0.99A/0.99B series.
+The earlier 1.0Alpha prerelease used numeric version 1.0.0 after the
+0.99A/0.99B series.
 
 ## Earlier changes in 0.99B and 0.99A
 
@@ -114,8 +145,8 @@ parameter IDs remain stable. Version 0.9.8 adds the sound and editor refinements
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
-[1.0Alpha release](https://github.com/temaniak/cineolX/releases/tag/v1.0Alpha).
-See the [release notes](docs/releases/v1.0Alpha.md) for installation, compatibility
+[1.1a release](https://github.com/temaniak/cineolX/releases/tag/v1.1a).
+See the [release notes](docs/releases/v1.1a.md) for installation, compatibility
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files

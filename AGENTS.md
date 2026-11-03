@@ -44,3 +44,7 @@
   `1.0.0`, and GitHub status is prerelease. This explicit request supersedes
   continuing the 0.99 letter series for this release; future names still require
   a user request.
+- On 2026-11-03 the user explicitly requested **1.1a** for the Clean/controls/
+  Windows graphics release. Its tag/archive version is `v1.1a`, numeric
+  CMake/plugin version `1.1.0`, and GitHub status is prerelease. Preserve this
+  exact spelling; future release names still require a user request.
