@@ -1,5 +1,20 @@
 # Development guidance
 
+## Private audio streaming
+
+- Reuse the existing Listen service when the user asks to upload listening
+  files to streaming (including “закинь на стриминг”). Read
+  `tools/listen/README.md`; prepare a JSON collection and use its `publish.py`.
+- The configured VPS is `nukkiez-vps` / `45.128.204.208`; the library URL is
+  `https://45-128-204-208.sslip.io/listen/`. Routine uploads use the existing SSH
+  key. Keep access private and return the new collection link.
+- Reuse the player and schema; adapt notes, variants, settings and sections as
+  data. Do not generate a new standalone page for each audio comparison.
+- Publish only audio/presets selected by the current user request. Never
+  upload ROMs, prepared banks, firmware, raw IR archives or server credentials.
+
+## Project development
+
 - The primary repository is https://github.com/temaniak/cineolX. Reflexion is an external dependency under `deps/reflexion`.
 - Preserve audio safety: no allocation, file/network I/O, locks or waits in audio processing.
 - Keep DSP, logical controls and hardware I/O separate.

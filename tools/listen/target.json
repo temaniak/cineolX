@@ -1,0 +1,9 @@
+{
+  "ssh": "nukkiez-vps",
+  "root": "/home/tunnel/nk-listen",
+  "url": "https://45-128-204-208.sslip.io/listen/",
+  "proxyContainer": "nutrition-journal-production-caddy-1",
+  "dockerNetwork": "nutrition-journal-production_edge",
+  "appContainer": "nk-listen",
+  "image": "node:24-alpine"
+}

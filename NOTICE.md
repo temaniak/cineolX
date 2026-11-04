@@ -12,6 +12,14 @@ code development, debugging, testing and documentation.
   machine; the plugin uses its host-rate bridge. `patches/reflexion-scheduler.patch`
   preserves the local bounded scheduler change in build-only exports.
 - JUCE: https://github.com/juce-framework/JUCE, version 8.0.14.
+- The optional, separate Cineol Pitch Lab uses Signalsmith Stretch 1.3.2
+  (MIT, commit `88061fd4eda56a2353c5d65c74aa3f4ccf76f9da`) and Signalsmith
+  Linear 0.6.6 (MIT, commit `7bb1c8f36794d6980080ce817c91f8da8fe56a66`).
+  Sources: https://github.com/Signalsmith-Audio/signalsmith-stretch and
+  https://github.com/Signalsmith-Audio/linear. Their complete license notices
+  are copied into the experimental plugin bundles under `Resources/Licenses`.
+  Signalsmith is a third-party reference implementation, not a Cineol-owned
+  pitch-shifting algorithm. It is isolated behind a replaceable interface.
 - libDaisy: https://github.com/electro-smith/libDaisy, pinned in
   `dependencies.json`. The QSPI bootstrap/linker layout uses libDaisy startup
   conventions; `patches/libdaisy-qspi-init.patch` initializes the HAL QSPI handle

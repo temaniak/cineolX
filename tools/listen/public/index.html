@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#101318">
+  <title>Listen — прослушка</title><link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Listen — главная">Listen</a>
+    <nav><button class="nav-button active" id="library-toggle">Подборки</button><button class="nav-button" id="help-toggle">Как слушать</button></nav>
+    <button class="icon-button lock-button" id="logout" aria-label="Закрыть доступ" title="Закрыть доступ">
+      <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="1.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    </button>
+  </header>
+  <div id="login" class="login" hidden>
+    <h1>Твоя прослушка</h1><p>Открой персональную ссылку или введи ключ доступа.</p>
+    <form id="unlock-form"><label for="access-key">Ключ доступа</label><input id="access-key" type="password" autocomplete="off" required><button class="primary-button" type="submit">Открыть</button></form>
+    <p id="login-error" role="alert"></p>
+  </div>
+  <div id="workspace" class="workspace" hidden>
+    <aside id="sidebar" class="sidebar">
+      <h2>Подборки</h2><label class="sr-only" for="collection">Выбрать подборку</label><select id="collection"></select>
+      <p id="collection-count" class="muted"></p>
+      <div class="search"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><label class="sr-only" for="search">Найти пример</label><input id="search" type="search" placeholder="Найти пример" autocomplete="off"></div>
+      <div id="case-list" class="case-list" role="navigation" aria-label="Примеры"></div>
+      <p id="no-results" class="muted" hidden>Ничего не найдено.</p>
+    </aside>
+    <main>
+      <div id="empty" hidden><h1>Здесь появятся новые подборки</h1><p class="muted">Аудио добавляется загрузчиком Listen.</p></div>
+      <article id="comparison" hidden>
+        <p id="breadcrumb" class="breadcrumb"></p>
+        <div class="title-row"><h1 id="case-title"></h1><div class="case-arrows"><button id="previous" class="icon-button" aria-label="Предыдущий пример">‹</button><button id="next" class="icon-button" aria-label="Следующий пример">›</button></div></div>
+        <p id="case-subtitle" class="subtitle"></p>
+        <div id="variants" class="variants" aria-label="Вариант аудио"></div>
+        <div class="waveform-wrap"><canvas id="waveform" role="slider" tabindex="0" aria-label="Позиция воспроизведения" aria-valuemin="0" aria-valuemax="14" aria-valuenow="0"></canvas><div id="timeline" class="timeline"></div></div>
+        <div class="transport">
+          <button id="play" class="play-button" aria-label="Воспроизвести"><svg viewBox="0 0 24 24" id="play-icon"><path d="M8 4v16l13-8z"/></svg></button>
+          <span id="elapsed" class="clock">0:00</span><label class="sr-only" for="seek">Перемотка</label><input id="seek" type="range" min="0" max="14" step="0.01" value="0"><span id="duration" class="clock">0:14</span>
+          <div class="volume"><button id="mute" class="icon-button" aria-label="Выключить звук"><svg viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3zM16 8a6 6 0 0 1 0 8M19 5a10 10 0 0 1 0 14"/></svg></button><label class="sr-only" for="volume">Громкость</label><input id="volume" type="range" min="0" max="1" step="0.01" value="0.8"></div>
+        </div>
+        <div class="player-secondary"><p id="player-status" class="muted" aria-live="polite">Переключение сохраняет позицию</p><div><button id="restart" class="secondary-button"><svg viewBox="0 0 24 24"><path d="M5 5v14m14-14L8 12l11 7z"/></svg>С начала</button><label class="loop-label">Повтор<input id="loop" type="checkbox" role="switch"><span class="switch-track"></span></label></div></div>
+        <section class="notes-section"><h2>На что обратить внимание</h2><div id="notes"></div><div id="markers" class="markers"></div></section>
+        <section class="settings-section"><h2>Настройки</h2><dl id="settings" class="settings"></dl><div id="downloads" class="downloads"></div></section>
+        <section id="extra-sections" class="extra-sections"></section>
+        <footer>Пробел — воспроизведение <span>·</span> A / B / C — сравнение</footer>
+      </article>
+      <p id="error" role="alert" hidden></p>
+    </main>
+  </div>
+  <dialog id="help"><button id="help-close" class="icon-button dialog-close" aria-label="Закрыть">×</button><h2>Как слушать</h2><p>Выбери пример и нажми воспроизведение. Переключай A, B и C: позиция сохраняется. Аудио загружается только для выбранного примера.</p><p>Клик по волне или ползунку перематывает запись. «Повтор» зацикливает пример. На компьютере работают пробел и клавиши A / B / C.</p><p>Описание и комментарии относятся к выбранной подборке. Пресет и исходное качество аудио доступны по ссылкам под настройками.</p><p>Персональная ссылка открывает доступ на другом устройстве. Сохрани её у себя.</p></dialog>
+  <div id="media" hidden aria-hidden="true"></div>
+</body></html>

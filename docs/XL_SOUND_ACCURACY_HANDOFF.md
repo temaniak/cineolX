@@ -1,5 +1,24 @@
 # Native 224XL sound baseline
 
+The [November 4 Opt-off rebuild](LEXIRS_OPT_OFF_REBUILD_2026-11-04.md) is the
+current listening checkpoint. The user confirmed enabled Decay Opt as the
+reported artifact source. All 71 comparisons, 14 Clean alternatives and 85
+presets are regenerated with Opt off, with other controls and reference files
+preserved. The existing private URL is updated; old generated comparison and
+diagnostic audio was deleted on disk and on the VPS as explicitly requested.
+All current file hashes, audio lengths/levels, preset loads and 156 HTTPS audio
+ranges pass. Production DSP and installed plugin defaults are unchanged.
+
+The [November 4 LexIR artifact investigation](LEXIRS_ARTIFACT_DIAGNOSIS_2026-11-04.md)
+checks the user's reported roughness in both Original and Clean. All 85 published
+Cineol files are finite and unclipped; 42 focused renders across five algorithms
+show no graph accumulator saturation. Mod/Decay Opt control behavior remains a
+candidate, with independent v8.21 firmware evidence and six diagnostic listening
+cases published to the existing private Listen service after the user's explicit
+consent. All 20 unique audio files pass server hash verification and authenticated
+HTTPS range checks; the original collection is unchanged. No DSP fix or listening
+acceptance is claimed.
+
 Current October 26, 2026 GitHub corrections are recorded in
 [GITHUB_FIXES_2026-10-26.md](GITHUB_FIXES_2026-10-26.md): physical frequency
 endpoint protection, restored voice/indirect decay controls and host bypass.
@@ -801,3 +820,17 @@ parameter IDs/indices remain; new IDs append with version hint 9. Preset schema
 7 restores legacy defaults from versions 1–6. No ROM/cache format, public
 release/tag or numeric plugin version changes. New all-program/Stable listening
 acceptance remains pending even though the user accepted the earlier prototype.
+
+## External Little Devil IR comparison — November 4, 2026
+
+The [private 71-set IR comparison](LEXIRS_COMPARISON_2026-11-04.md) analyzes
+Little Devil Studios' 14-family 224XL true-stereo library, screens the pinned
+factory variations and prepares matched Cineol presets and percussion/chord
+listening files. It uses the native XL v5 bank, Clean off, Dirt/Space zero and
+both driven inputs. It does not change DSP or establish original-224 fidelity.
+The 14 V1 examples also include separately labelled, level-matched Clean
+alternatives with the same faders/switches, plus optional Clean presets.
+Capture firmware, levels and modulation phase are unknown; static-IR and
+nearly-infinite-tail limitations remain explicit. Listening acceptance is
+pending. Private audio, histories and hashes stay under ignored
+`build/validation/lexirs-20261104/`.
