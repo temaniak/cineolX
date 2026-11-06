@@ -9,7 +9,7 @@ clean_options=()
 # resolves the repository's pinned version normally.
 clean_juce="$(python3 - <<'PY'
 from pathlib import Path
-for name in ['build/plugin/CMakeCache.txt','build/float-ab/CMakeCache.txt']:
+for name in ['build/plugin/CMakeCache.txt']:
  p=Path(name)
  if not p.exists():continue
  for line in p.read_text().splitlines():
