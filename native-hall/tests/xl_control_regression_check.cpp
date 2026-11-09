@@ -59,10 +59,51 @@ static void check_access(const Bank& bank) {
     for(unsigned i=0;i<bank.programs.size();++i)require(!bank.programs[i].control_active(255,Graph(i)),"parked slot became active");
     std::cout<<"XL control eligibility: voices 1/2 and dependent LF/Mid, genuine unsupported slots pass\n";
 }
+static void check_depth(const Bank& bank) {
+    unsigned checked=0;
+    for(unsigned program=0;program<graphs.size();++program) {
+        const auto& data=bank.programs[program];
+        for(unsigned page=0;page<data.page_count;++page) for(unsigned slot=0;slot<6;++slot) {
+            const unsigned cell=data.pages[page].cells[slot];
+            bool depth=false;for(const auto& control:data.controls.slots)
+                depth|=control.cell==cell && control.kind==ControlKind::depth;
+            if(!depth || !data.control_active(cell,Graph(program)))continue;
+            auto raw=data.controls.factory;raw[42]&=uint8_t(~0xc1u);
+            require(data.control_maximum(page,slot,raw)==254,"Attack/Depth UI reaches the mute sentinel");
+            for(unsigned value=0;value<256;++value) {
+                auto resolved=raw;resolved[cell]=uint8_t(value);data.resolve_controls(resolved);
+                require(resolved[cell]==std::min(value,254u),"Attack/Depth resolution changed a valid fader value");
+            }
+            std::vector<std::array<float,4>> reference;reference.reserve(192000);
+            for(unsigned value:{254u,255u}) {
+                Runtime engine;engine.select(bank,program);raw[cell]=uint8_t(value);data.resolve_controls(raw);
+                engine.controls(raw,false,0,1,1,0,2,false);
+                double signal=0,tail=0;uint32_t random=17;
+                for(unsigned n=0;n<192000;++n) {
+                    random=random*1664525u+1013904223u;
+                    const float input=n>=24000 && n<120000?.03f*float(int32_t(random))/2147483648.f:0;
+                    float l,r;std::array<float,4> quad{};engine.process(input,input*.7f,l,r,true,&quad);
+                    if(value==254)reference.push_back(quad);
+                    else require(quad==reference[n],"Attack/Depth host maximum differs from physical maximum");
+                    for(float sample:quad) {
+                        require(std::isfinite(sample) && std::abs(sample)<2,"Attack/Depth endpoint is nonfinite or unstable");
+                        if(n>=72000 && n<120000)signal+=double(sample)*sample;
+                        if(n>=120000)tail+=double(sample)*sample;
+                    }
+                }
+                require(signal>1e-6 && tail>1e-8,"Attack/Depth maximum lost expected signal or tail");
+            }
+            ++checked;std::cout<<graphs[program].name<<" "<<data.pages[page].names[slot].data()
+                <<": 256 resolutions, four-output 254/255 audio exact\n"<<std::flush;
+        }
+    }
+    require(checked>=19,"Attack/Depth catalog coverage missing");
+    std::cout<<"Attack/Depth endpoints: "<<checked<<" controls pass\n";
+}
 int main(int argc,char** argv) {
-    require(argc==3,"usage: cineol_xl_control_regression_check BANK --hf|--access");
+    require(argc==3,"usage: cineol_xl_control_regression_check BANK --hf|--depth|--access");
     std::ifstream file(argv[1],std::ios::binary);std::vector<char> bytes((std::istreambuf_iterator<char>(file)),{});
     auto bank=std::make_unique<Bank>();require(read_bank(bytes.data(),bytes.size(),*bank),"invalid XL bank");
-    const std::string option=argv[2];require(option=="--hf" || option=="--access","invalid regression selection");
-    if(option=="--hf")check_hf(*bank);else check_access(*bank);
+    const std::string option=argv[2];require(option=="--hf" || option=="--depth" || option=="--access","invalid regression selection");
+    if(option=="--hf")check_hf(*bank);else if(option=="--depth")check_depth(*bank);else check_access(*bank);
 }

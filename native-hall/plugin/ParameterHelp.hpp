@@ -32,11 +32,11 @@ inline juce::String original(unsigned program,const juce::String& id) {
     if(id=="crossover") return tip("Crossover","Sets the frequency separating the Bass and Mid decay regions. Raise it to let the Bass setting affect more of the spectrum.");
     if(id=="treble") return tip("Treble decay","Sets the frequency above which the reverb dies away more quickly. Lower values give a darker tail.");
     if(id=="depth") return tip("Depth","Changes the balance of early and later reverberation to suggest distance within the space. Higher values place the sound farther away.");
-    if(id=="predelay") return tip("Pre-delay","Sets the delay before the reverberation starts. The minimum delay depends on the selected 224 program.");
+    if(id=="predelay") return tip("Pre-delay","Sets the delay before the reverberation starts. The range depends on the selected 224 program; both Plates stop at 107 ms as in the v4.4 firmware.");
     if(id=="diffusion") return program==3?unavailable("Diffusion"):
         tip("Diffusion","Changes how the reflections build into a continuous reverb texture. Its response varies with the program, so the highest value is not always the smoothest setting.");
-    if(id=="mod_rate") return tip("Modulation rate","Lower values give faster movement. Changing Rate resets Modulation Depth to 1, or 2 at Rate 1; a later Depth change replaces that step. Mode Enhancement must be on to hear modulation.");
-    if(id=="mod_depth") return tip("Modulation depth","Sets the size of each modulation step, from 1 to 16. This differs from the main Depth distance control and Diffusion. Changing Rate overwrites this setting.");
+    if(id=="mod_rate") return tip("Modulation rate","Changes the update interval independently of Modulation Depth. Lower values are faster; 1 and 2 share the shortest interval. Mode Enhancement must be on to hear modulation.");
+    if(id=="mod_depth") return tip("Modulation depth","Sets the size of each modulation step, from 1 to 16. It stays unchanged when Rate is adjusted. This differs from the main Depth distance control and Diffusion.");
     if(id=="optimization_response") return tip("Optimization response","Lower values change feedback diffusion more quickly, making the stopped tail less colored but potentially less even. This is a 1 to 16 response setting, not a level threshold; enable Decay Optimization to hear its effect.");
     return {};
 }

@@ -1601,6 +1601,16 @@ private:
         std::array<double,6> positions{};
         if(engine_changed) for(unsigned slot=0;slot<6;++slot) positions[slot]=slotFader(slot).visualProportion();
         displayed_xl_=xl;
+        if(!xl) {
+            auto& delay=sliders_[5];
+            const double maximum=24+native_hall::predelay_spans[unsigned(program)];
+            if(delay.getMaximum()!=maximum) {
+                // Presentation bounds only: preserve the host's raw value and
+                // normalized automation, including old over-limit presets.
+                delay.setRange(24,maximum,1);
+                delay.setValue(processor_.state.getRawParameterValue("predelay")->load(),juce::dontSendNotification);
+            }
+        }
         rom_setup_.setVisible(rom_setup_.shouldBeVisible());
         display_.firmware.setTooltip(ready?"Engine used by the selected algorithm. Click to import ROMs.":processor_.romStatus()+" Click to import ROMs.");
         for(unsigned i=0;i<sliders_.size();++i) {

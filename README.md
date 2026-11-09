@@ -3,11 +3,31 @@
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
 the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
 preview of all 22 **224 XL v8.21** programs. The desktop release is
-**1.1a**, adding global Clean processing, a Dark Hall variation, restored
-controls, refined Rich-program timing and improved Windows control graphics.
+**1.2 Alpha**, correcting Plate pre-delay and XL Attack/Depth endpoints and
+making the original-224 modulation controls independent. Global Clean,
+Dark Hall variation, restored controls and refined Rich-program timing remain.
 SPACE clock control, converter-filter DIRT and optional four outputs remain.
 The displayed manufacturer is **NK Stuff**, matching Silver-K; existing plugin
 identifiers are retained for DAW-session compatibility.
+
+## What's new in 1.2 Alpha
+
+- Both original-224 Plate programs cap effective Pre-delay at 107 ms to avoid
+  delay-memory wrap when old automation requests higher values.
+- XL Attack/Depth 99 resolves to the physical raw-254 endpoint, preserving the
+  wet signal and the stored host value for existing sessions.
+- Original-224 **Mod Rate** and **Mod Depth** now retain independent settings.
+  Changing Rate keeps the selected Depth; changing Depth keeps Rate. This is an
+  intentional departure from the v4.4 panel's reset on Rate edits. The existing
+  period mapping, 1–16 ranges, saved settings and native DSP remain; Rate 1 and 2
+  retain the same shortest interval when Depth is fixed.
+- Rich Plate/Split Chorus was rechecked: its effect depends on Mod and the
+  Dynamic/Optimization settings, and its upper half retains the firmware's
+  constant timing. This recheck adds regression coverage without another DSP change.
+
+The public tag is **v1.2Alpha**, numeric AU/VST3/bundle version is **1.2.0**,
+and the GitHub release is a **prerelease**. See the
+[1.2 Alpha notes](docs/releases/v1.2Alpha.md) for validation and compatibility.
 
 ## What's new in 1.1a
 
@@ -36,9 +56,8 @@ identifiers are retained for DAW-session compatibility.
   Existing plugin/parameter IDs and indices remain; new controls are appended.
   Corrected XL controls/endpoints and Rich timing may change affected old sounds.
 
-The public tag is **v1.1a**, numeric AU/VST3/bundle version is **1.1.0**,
-and the GitHub release is a **prerelease**, as requested by the project owner.
-See the [1.1a notes](docs/releases/v1.1a.md) for installation and validation limits.
+The earlier **v1.1a** prerelease uses numeric AU/VST3/bundle version **1.1.0**.
+See its [release notes](docs/releases/v1.1a.md) for the previous changes.
 
 ## Earlier changes in 1.0Alpha
 
@@ -145,8 +164,8 @@ parameter IDs remain stable. Version 0.9.8 adds the sound and editor refinements
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
-[1.1a release](https://github.com/temaniak/cineolX/releases/tag/v1.1a).
-See the [release notes](docs/releases/v1.1a.md) for installation, compatibility
+[1.2 Alpha release](https://github.com/temaniak/cineolX/releases/tag/v1.2Alpha).
+See the [release notes](docs/releases/v1.2Alpha.md) for installation, compatibility
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files

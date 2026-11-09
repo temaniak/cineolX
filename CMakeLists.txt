@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 # Numeric plugin/bundle versions remain host-compatible; public releases may use letters.
-project(CineolX224 VERSION 1.1.0 LANGUAGES C CXX)
-set(CINEOL_RELEASE_VERSION "1.1a")
+project(CineolX224 VERSION 1.2.0 LANGUAGES C CXX)
+set(CINEOL_RELEASE_VERSION "1.2Alpha")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
@@ -85,4 +85,12 @@ target_link_libraries(native_hall_plugin_check PRIVATE NativeHall224 juce::juce_
 juce_add_console_app(cineol_rom_import_check PRODUCT_NAME "cineol_rom_import_check")
 target_sources(cineol_rom_import_check PRIVATE native-hall/tests/rom_import_check.cpp)
 target_link_libraries(cineol_rom_import_check PRIVATE NativeHall224 juce::juce_audio_utils)
+option(CINEOL_BUILD_FORMAT_CHECK "Build offline host for validating actual AU/VST3 bundles" OFF)
+if(CINEOL_BUILD_FORMAT_CHECK)
+    juce_add_console_app(cineol_built_plugin_check PRODUCT_NAME "cineol_built_plugin_check")
+    target_sources(cineol_built_plugin_check PRIVATE native-hall/tests/built_plugin_check.cpp)
+    target_link_libraries(cineol_built_plugin_check PRIVATE juce::juce_audio_processors_headless juce::juce_recommended_config_flags)
+    target_compile_definitions(cineol_built_plugin_check PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_AU=1
+        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+endif()
 add_subdirectory(native-hall/clean-ab)

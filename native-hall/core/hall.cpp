@@ -54,8 +54,9 @@ void Hall::set_controls(const Controls& next) noexcept {
         p.depth.apply(unsigned(controls_.depth),c_);p.diffusion.apply(unsigned(controls_.diffusion),c_);
         for(unsigned i=0;i<p.loop_count;++i) loop_base_[i]=c_[p.loop_rows[i]];
         set_loop_diffusion(decay_.state().amount);
-        unsigned index=unsigned(std::clamp(requested_predelay-predelay_minima[algorithm_-bank_->programs.data()],0,128));
-        controls_.predelay_ms=int(index)+predelay_minima[algorithm_-bank_->programs.data()];
+        const unsigned program=unsigned(algorithm_-bank_->programs.data());
+        controls_.predelay_ms=resolve_predelay(program,requested_predelay);
+        const unsigned index=unsigned(controls_.predelay_ms-predelay_minima[program]);
         for(unsigned i=0;i<p.predelay_count;++i) offsets_[p.predelay_rows[i]]=p.predelay[index][i];
         return;
     }

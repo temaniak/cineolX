@@ -60,13 +60,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout(
     p.add(std::make_unique<AudioParameterInt>(ParameterID{"treble",1},"Treble Decay",0,31,23,hz));
     p.add(std::make_unique<AudioParameterInt>(ParameterID{"depth",1},"Depth",0,71,21));
     // Keep the v0.2 raw range and normalized automation. As on Daisy, the
-    // position selects 0..128 ms above the chosen program's minimum.
+    // position selects up to 128 ms above the chosen program's minimum;
+    // the Plates resolve their old upper values to the ROM's 107 ms cap.
     p.add(std::make_unique<AudioParameterInt>(ParameterID{"predelay",1},"Pre-delay",24,152,24,
         AudioParameterIntAttributes{}.withLabel("ms")
             .withStringFromValueFunction([selection](int v,int) {
-                return String(v-24+native_hall::predelay_minima[std::min(selection->getIndex(),5)]);
+                const unsigned program=unsigned(std::min(selection->getIndex(),5));
+                return String(native_hall::resolve_predelay(program,v-24+native_hall::predelay_minima[program]));
             }).withValueFromStringFunction([selection](const String& v) {
-                return v.getIntValue()+24-native_hall::predelay_minima[std::min(selection->getIndex(),5)];
+                const unsigned program=unsigned(std::min(selection->getIndex(),5));
+                return native_hall::resolve_predelay(program,v.getIntValue())+24-native_hall::predelay_minima[program];
             })));
     p.add(std::make_unique<AudioParameterInt>(ParameterID{"diffusion",1},"Diffusion",1,63,1));
     p.add(std::make_unique<AudioParameterFloat>(ParameterID{"input_db",1},"Input Gain",NormalisableRange<float>(-36,12,0.1f),0,

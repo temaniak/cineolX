@@ -86,7 +86,9 @@ std::unique_ptr<ProgramBank> prepare_bank(const RomSet& roms,const Callbacks& ca
             unsigned raw=std::min(255,(c.depth*256+71)/72);
             if(c.depth==21 && (p.network==0 || p.network==3)) raw=78;
             h.memory[0x3f6b]=uint8_t(raw*3);h.memory[0x3f6c]=uint8_t(raw*3>>8);
-            h.memory[0x3f6d]=uint8_t(predelay_index+predelay_minima[index]);h.memory[0x3f6e]=uint8_t(c.diffusion);
+            // Direct compiler calls bypass the physical panel's range check.
+            // Keep the fixed 129-entry ABI, saturating unreachable Plate slots.
+            h.memory[0x3f6d]=uint8_t(resolve_predelay(index,int(predelay_index)+predelay_minima[index]));h.memory[0x3f6e]=uint8_t(c.diffusion);
             h.memory[0x3e34]=h.memory[0x3e35]=0;std::fill(h.memory.begin()+0x3f56,h.memory.begin()+0x3f64,0xff);
             // Freeze the accepted ADC readings so later panel scans cannot
             // softly pick up another pot during the pre-delay retiming ramp.

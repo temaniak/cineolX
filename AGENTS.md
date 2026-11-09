@@ -48,3 +48,9 @@
   Windows graphics release. Its tag/archive version is `v1.1a`, numeric
   CMake/plugin version `1.1.0`, and GitHub status is prerelease. Preserve this
   exact spelling; future release names still require a user request.
+
+- On 2026-11-09 the user explicitly requested **1.2 Alpha** for the Plate
+  pre-delay, XL Attack/Depth endpoint and independent modulation controls
+  release. Its tag/archive version is `v1.2Alpha`, numeric CMake/plugin version
+  `1.2.0`, and GitHub status is prerelease. The displayed release title uses
+  **1.2 Alpha**; future release names still require a user request.

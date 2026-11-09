@@ -26,7 +26,7 @@ static void check_static(Engine& engine,Machine& machine,LarcOperator& op,const 
         const unsigned cell=data.pages[page].column*6+slider;
         bool active=false;
         for(const auto& slot:data.controls.slots) if(slot.cell==cell &&
-            (endpoints?slot.kind==ControlKind::filter:static_kind(slot.kind)) &&
+            (endpoints?(slot.kind==ControlKind::filter || slot.kind==ControlKind::depth):static_kind(slot.kind)) &&
             data.control_active(cell,graph)) active=true;
         if(!active) continue;
         const auto positions=endpoints?std::array<unsigned,4>{252,253,254,255}:std::array<unsigned,4>{2,66,130,250};
@@ -41,6 +41,8 @@ static void check_static(Engine& engine,Machine& machine,LarcOperator& op,const 
             std::array<uint8_t,48> values;std::copy_n(host.memory.begin()+0x3ca3,values.size(),values.begin());
             if(endpoints) {
                 auto native=values;native[cell]=uint8_t(raw);data.resolve_controls(native);
+                if(native[cell]!=values[cell]) std::cerr<<info.name<<" endpoint page="<<page+1<<" slot="<<slider
+                    <<" requested="<<raw<<" native="<<unsigned(native[cell])<<" physical="<<unsigned(values[cell])<<'\n';
                 require(native[cell]==values[cell],"native endpoint differs from physical fader calibration");
             }
             tracking=true;data.controls.apply_size(predicted,values);data.controls.apply_static(predicted,values);tracking=false;

@@ -1080,6 +1080,161 @@ static std::vector<float> run(int rate,int block,bool offline,int program,bool m
     require(restored->state.getRawParameterValue("low_latency")->load()==(low?1.0f:0.0f),"Low latency state round trip");
     return out;
 }
+static std::vector<std::array<float,4>> render_rich_chorus(unsigned program,unsigned mode,unsigned chorus,bool clean,bool live=false) {
+    auto p=std::make_unique<NativeHallProcessor>();p->setCurrentProgram(int(program));
+    set(*p,"xl_chorus",live?0.f:float(chorus));set(*p,"mode_enh",float(mode&1));
+    set(*p,"decay_opt",float((mode>>1)&1));set(*p,"xl_42",float((mode>>2)&1));
+    set(*p,"clean_mode",clean?1.f:0.f);
+    const auto* data=p->xlProgram();const unsigned stop=data->dynamics.shared_stop?6:12;
+    for(unsigned cell:{stop,stop+1,45u})set(*p,NativeHallProcessor::ids[NativeHallProcessor::xl_parameter_begin+cell],cell==45?10.f:18.f);
+    for(unsigned c=0;c<4;++c)set(*p,NativeHallProcessor::ids[c<2?12+c:NativeHallProcessor::rear_left_index+c-2],float(c));
+    auto layout=p->getBusesLayout();layout.outputBuses.set(1,juce::AudioChannelSet::stereo());
+    require(p->setBusesLayout(layout),"Rich Chorus four-output layout rejected");p->prepareToPlay(48000,128);
+    std::vector<std::array<float,4>> result(288000);juce::AudioBuffer<float> block(4,128);juce::MidiBuffer midi;uint32_t random=17;
+    for(unsigned at=0;at<result.size();at+=128) {
+        if(live && at==128000)set(*p,"xl_chorus",float(chorus));
+        block.clear();
+        for(unsigned i=0;i<128;++i) {
+            random=random*1664525u+1013904223u;
+            const float x=at+i>=48000 && at+i<144000?.03f*float(int32_t(random))/2147483648.f:0;
+            block.setSample(0,int(i),x);block.setSample(1,int(i),x*.7f);
+        }
+        audio=true;p->processBlock(block,midi);audio=false;
+        for(unsigned i=0;i<128;++i)for(unsigned c=0;c<4;++c) {
+            const float value=block.getSample(int(c),int(i));require(std::isfinite(value),"nonfinite Rich Chorus output");result[at+i][c]=value;
+        }
+    }
+    return result;
+}
+static void check_rich_chorus_plugin() {
+    for(unsigned program:{19u,27u})for(bool clean:{false,true})for(unsigned mode=0;mode<8;++mode) {
+        const auto low=render_rich_chorus(program,mode,0,clean);
+        const auto middle=render_rich_chorus(program,mode,16,clean);
+        const auto high=render_rich_chorus(program,mode,31,clean);
+        require(middle==high,"Rich Chorus upper half invented delay modulation");
+        if(!(mode&1) || !(mode&6))require(low==high,"Rich Chorus altered sound without its applicable controllers");
+        else {
+            double difference=0;
+            for(unsigned n=144000;n<low.size();++n)for(unsigned c=0;c<4;++c)difference+=std::abs(double(low[n][c])-high[n][c]);
+            require(difference>1e-4,"Rich Chorus alias does not reach the active tail controller");
+        }
+        if(mode==7) {
+            const auto live=render_rich_chorus(program,mode,31,clean,true);
+            require(std::equal(low.begin(),low.begin()+128000,live.begin()),"live Chorus edit changed preceding audio");
+            double difference=0;
+            for(unsigned n=144000;n<low.size();++n)for(unsigned c=0;c<4;++c)difference+=std::abs(double(low[n][c])-live[n][c]);
+            require(difference>1e-4,"live Rich Chorus automation did not change the active tail");
+        }
+        std::cout<<"Rich Chorus plugin "<<program<<" clean="<<clean<<" mode="<<mode
+            <<": full host parameter path, four outputs and stopped tail pass\n"<<std::flush;
+    }
+    require(allocations==0 && releases==0,"Rich Chorus processing allocated or released memory");
+}
+static void check_xl_depth_endpoints() {
+    auto p=std::make_unique<NativeHallProcessor>();
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p->createEditor());
+    for(bool compact:{false,true}) {
+        auto* toggle=dynamic_cast<juce::Button*>(find(*editor,"compact_mode"));
+        toggle->setToggleState(compact,juce::dontSendNotification);toggle->onClick();
+        for(int program=6;program<p->getNumPrograms();++program) {
+            p->setCurrentProgram(program);const auto* data=p->xlProgram();
+            for(unsigned page=0;page<data->page_count;++page) for(unsigned source=0;source<6;++source) {
+                const unsigned cell=data->pages[page].cells[source];bool depth=false;
+                for(const auto& control:data->controls.slots)depth|=control.cell==cell && control.kind==cineol::xl::ControlKind::depth;
+                if(!depth || !data->control_active(cell,cineol::xl::Graph(program-6)))continue;
+                const auto* id=NativeHallProcessor::ids[NativeHallProcessor::xl_parameter_begin+cell];set(*p,id,255);
+                auto* button=dynamic_cast<juce::Button*>(find(*editor,("parameter_page_"+juce::String(page+1)).toRawUTF8()));button->onClick();
+                bool found=false;
+                for(unsigned slot=0;slot<6;++slot) {
+                    auto* fader=dynamic_cast<juce::Slider*>(find(*editor,("xl_slot_"+juce::String(slot+1)).toRawUTF8()));
+                    auto* screen=dynamic_cast<juce::Slider*>(find(*editor,("screen_value_"+juce::String(slot)).toRawUTF8()));
+                    if(fader->getProperties()["parameter_id"]!=juce::String(id))continue;
+                    require(fader->getMaximum()==254 && screen->getMaximum()==254 && screen->getValue()==254,
+                        "XL Attack/Depth physical or compact endpoint reaches the mute sentinel");found=true;
+                }
+                require(found && p->xlControl(cell)==255,"XL Attack/Depth editor rewrote the legacy host value");
+            }
+        }
+    }
+    editor.reset();
+    for(int program:{9,16,24,25}) for(int rate:{44100,48000,96000}) for(int clean:{0,1}) {
+        auto a=std::make_unique<NativeHallProcessor>(),b=std::make_unique<NativeHallProcessor>();
+        for(auto* processor:{a.get(),b.get()}) {
+            processor->setCurrentProgram(program);set(*processor,"clean_mode",float(clean));
+            set(*processor,"mode_enh",0);set(*processor,"decay_opt",0);processor->prepareToPlay(rate,511);
+        }
+        for(unsigned cell:{4u,10u}) {
+            if(cell==10 && program<24)continue;
+            const auto* id=NativeHallProcessor::ids[NativeHallProcessor::xl_parameter_begin+cell];
+            set(*a,id,255);set(*b,id,254);
+        }
+        juce::MemoryBlock saved;a->getStateInformation(saved);a->setStateInformation(saved.getData(),int(saved.getSize()));
+        require(a->xlControl(4)==255,"XL Attack 255 session recall lost its stored value");
+        juce::AudioBuffer<float> actual(2,511),expected(2,511);juce::MidiBuffer midi;double energy=0;
+        uint32_t random=17;
+        for(int at=0;at<rate*4;at+=511) {
+            for(int i=0;i<511;++i) {
+                random=random*1664525u+1013904223u;const float input=at+i<rate*2?.05f*float(int32_t(random))/2147483648.f:0;
+                actual.setSample(0,i,input);actual.setSample(1,i,input*.7f);
+            }
+            expected.makeCopyOf(actual);audio=true;a->processBlock(actual,midi);b->processBlock(expected,midi);audio=false;
+            for(int c=0;c<2;++c) for(int i=0;i<511;++i) {
+                require(actual.getSample(c,i)==expected.getSample(c,i),"XL Attack 255 differs from the physical endpoint after recall");
+                energy+=double(actual.getSample(c,i))*actual.getSample(c,i);
+            }
+        }
+        require(energy>1e-4,"reported XL Attack endpoint still silent");
+    }
+    require(allocations==0 && releases==0,"XL Attack processing allocated or released memory");
+    std::cout<<"XL Attack/Depth: all catalog full/compact bounds, legacy values retained, reported programs "
+        "254/255 audio exact in both precision modes at 44.1/48/96 kHz; new/delete=0\n";
+}
+static void check_plate_predelay() {
+    auto p=std::make_unique<NativeHallProcessor>();p->setCurrentProgram(1);set(*p,"predelay",152);
+    juce::MemoryBlock saved;p->getStateInformation(saved);set(*p,"predelay",24);
+    p->setStateInformation(saved.getData(),int(saved.getSize()));
+    require(p->state.getRawParameterValue("predelay")->load()==152,"legacy Plate state value was rewritten");
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p->createEditor());
+    auto* fader=dynamic_cast<juce::Slider*>(find(*editor,"predelay"));
+    auto* value=dynamic_cast<juce::Slider*>(find(*editor,"screen_value_5"));
+    for(int program:{1,4,2,1}) {
+        p->setCurrentProgram(program);
+        auto* second=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_2"));
+        auto* first=dynamic_cast<juce::Button*>(find(*editor,"parameter_page_1"));
+        second->onClick();first->onClick();
+        const int maximum=program==2?152:131;
+        require(fader && value && fader->getMaximum()==maximum && value->getMaximum()==maximum,
+            "Plate physical/screen fader range differs from the ROM cap");
+        require(fader->getValue()==maximum && p->state.getRawParameterValue("predelay")->load()==152,
+            "changing editor range rewrote the saved host value");
+    }
+    editor.reset();
+    for(int program:{1,4}) for(int rate:{44100,48000,96000}) for(int block_size:{128,511}) for(int clean:{0,1}) {
+        auto a=std::make_unique<NativeHallProcessor>(),b=std::make_unique<NativeHallProcessor>();
+        for(auto* processor:{a.get(),b.get()}) {
+            processor->setCurrentProgram(program);set(*processor,"clean_mode",float(clean));
+            processor->prepareToPlay(rate,block_size);
+        }
+        juce::AudioBuffer<float> actual(2,block_size),expected(2,block_size);juce::MidiBuffer midi;
+        uint32_t random=17;
+        for(int at=0;at<rate*6;at+=block_size) {
+            const int delay=std::clamp((at-rate)*128/(rate*3),0,128);
+            set(*a,"predelay",float(24+delay));set(*b,"predelay",float(24+std::min(delay,107)));
+            for(int i=0;i<block_size;++i) {
+                random=random*1664525u+1013904223u;
+                const float input=at+i<rate*4?.05f*float(int32_t(random))/2147483648.f:0;
+                actual.setSample(0,i,input);actual.setSample(1,i,input*.7f);
+            }
+            expected.makeCopyOf(actual);
+            audio=true;a->processBlock(actual,midi);b->processBlock(expected,midi);audio=false;
+            for(int channel=0;channel<2;++channel) for(int i=0;i<block_size;++i)
+                require(actual.getSample(channel,i)==expected.getSample(channel,i),"Plate host automation bypassed the ROM cap");
+        }
+    }
+    require(allocations==0 && releases==0,"Plate pre-delay processing allocated or released memory");
+    std::cout<<"Plate pre-delay: old state retained, physical/compact bounds 107 ms, both precision modes, "
+        "44.1/48/96 kHz, 128/511-frame moving automation and silence exact against capped control; new/delete=0\n";
+}
 static void check_state_and_ranges() {
     auto p=std::make_unique<NativeHallProcessor>();
     require(p->getNumPrograms()==int(NativeHallProcessor::program_count) && p->getCurrentProgram()==2,"program count/default");
@@ -1099,8 +1254,10 @@ static void check_state_and_ranges() {
         const int minimum=native_hall::predelay_minima[program];
         for(int offset:{0,64,128}) {
             const float value=delay->convertTo0to1(float(24+offset));
-            require(delay->getText(value,0).getIntValue()==minimum+offset,"pre-delay display range");
-            require(delay->getValueForText(juce::String(minimum+offset)+" ms")==value,"pre-delay text entry");
+            const int effective=minimum+std::min(offset,native_hall::predelay_spans[unsigned(program)]);
+            require(delay->getText(value,0).getIntValue()==effective,"pre-delay display range");
+            require(delay->getValueForText(juce::String(minimum+offset)+" ms")==
+                delay->convertTo0to1(float(24+effective-minimum)),"pre-delay text entry");
         }
     }
     p->setCurrentProgram(-1);p->setCurrentProgram(int(NativeHallProcessor::program_count));require(p->getCurrentProgram()==5,"invalid host program accepted");
@@ -1205,7 +1362,7 @@ static void check_desktop_engine(const char* path,bool hidden=false) {
             else {set(*p,"mod_rate",float(rate));set(*p,"mod_depth",float(depth));}
             set(*p,"optimization_response",float(opt));
             params.hall.modulation_period=uint8_t(std::max(1u,rate-1));
-            params.hall.modulation_step=uint8_t(position&1?(rate==1?8:4):depth*4);
+            params.hall.modulation_step=uint8_t(depth*4);
             params.hall.optimization_response=uint8_t(opt);
         }
         engine->set_parameters(params);
@@ -1800,10 +1957,10 @@ int main(int argc,char** argv) {
         std::cout<<"Appearance "<<option<<": passed\n";
         return 0;
     }
-    const bool original_fixture=argc==3 && (option=="--bank" || option=="--spillover-224-check" || option=="--spillover-224-cpu" || option=="--hidden-cpu");
+    const bool original_fixture=argc==3 && (option=="--bank" || option=="--predelay-check" || option=="--spillover-224-check" || option=="--spillover-224-cpu" || option=="--hidden-cpu");
     const bool clean_fixture=argc==5 && (option=="--clean-check" || option=="--clean-ui-check");
     const bool dual_fixture=clean_fixture || (argc==4 && (option=="--clean-cpu" || option=="--banks" || option=="--preset-check" || option=="--limits-check" ||
-        option=="--spillover-check" || option=="--quick-check" || option=="--hidden-check" || option=="--bypass-check" || option=="--focus-check" || option=="--au-idle-check" || option=="--vst3-idle-check" || option=="--display-check" || option=="--help-check" || option=="--clock-experiment-check" || option=="--clock-experiment-probe"));
+        option=="--spillover-check" || option=="--quick-check" || option=="--hidden-check" || option=="--xl-depth-check" || option=="--rich-chorus-check" || option=="--bypass-check" || option=="--focus-check" || option=="--au-idle-check" || option=="--vst3-idle-check" || option=="--display-check" || option=="--help-check" || option=="--clock-experiment-check" || option=="--clock-experiment-probe"));
     const bool migration_fixture=argc==5 && option=="--xl-cache-migration";
     require(argc==1 || original_fixture || dual_fixture || migration_fixture || (argc==2 && option=="--ui") ||
         (argc>=3 && argc<=6 && option=="--editor"),
@@ -1849,6 +2006,9 @@ int main(int argc,char** argv) {
     if(argc==4 && option=="--clock-experiment-probe") {probe_clock_experiment();return 0;}
     if(argc==4 && option=="--display-check") {check_display_controls();return 0;}
     if(argc==4 && option=="--help-check") {check_parameter_help();return 0;}
+    if(argc==3 && option=="--predelay-check") {check_state_and_ranges();check_plate_predelay();return 0;}
+    if(argc==4 && option=="--xl-depth-check") {check_xl_depth_endpoints();return 0;}
+    if(argc==4 && option=="--rich-chorus-check") {check_rich_chorus_plugin();return 0;}
     if(argc==4 && std::string(argv[1])=="--focus-check") {check_editor_window_focus();return 0;}
     if(argc==4 && (option=="--au-idle-check" || option=="--vst3-idle-check")) {check_editor_idle_paint(option=="--au-idle-check");return 0;}
     if(argc==3 && std::string(argv[1])=="--spillover-224-check") {check_spillover(true);return 0;}

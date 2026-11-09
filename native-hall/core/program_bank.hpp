@@ -1,5 +1,6 @@
 #pragma once
 #include "profile.hpp"
+#include <algorithm>
 
 namespace native_hall {
 // Six original 224 v4.4 programs, in panel order. ROM5 supplies Hall A.
@@ -9,6 +10,14 @@ inline constexpr std::array<uint8_t,program_count> program_networks={0,1,0,2,1,3
 inline constexpr const char* program_names[program_count]={"Small Hall B","Vocal Plate","Large Hall B",
     "Acoustic Chamber","Percussion Plate A","Small Hall A"};
 inline constexpr std::array<int,program_count> predelay_minima={24,0,24,25,0,24};
+// The v4.4 panel caps both Plates at 107 ms, before the input-delay read
+// wraps into other delay lines. Retain the existing supported Hall/Chamber
+// ranges and bank/host layouts; old Plate values above the cap resolve here.
+inline constexpr std::array<int,program_count> predelay_spans={128,107,128,128,107,128};
+inline int resolve_predelay(unsigned program,int milliseconds) noexcept {
+    program=std::min(program,program_count-1);
+    return std::clamp(milliseconds,predelay_minima[program],predelay_minima[program]+predelay_spans[program]);
+}
 // A column may feed several rows. These are coefficient data, never opcodes.
 template<unsigned Values,unsigned Columns,unsigned Rows> struct CoefficientTable {
     uint8_t columns=0,count=0;

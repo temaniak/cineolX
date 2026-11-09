@@ -3,7 +3,7 @@
 #include <atomic>
 #include <memory>
 
-// One canonical, lock-free control snapshot. Coupled parameter writes must not
+// One canonical, lock-free control snapshot. Parameter writes must not
 // call host listeners from processing. Their mirrors are published by the
 // processor's existing message-thread timer; getValue() is correct immediately.
 class CineolOriginal224Parameters {
@@ -19,10 +19,9 @@ public:
         update([&](unsigned state) {
             const unsigned shift=4*field,mask=15u<<shift;
             state=(state&~mask)|(unsigned(std::clamp(value,1,16)-1)<<shift);
-            if(field==Rate && !(state&restore_bit)) {
-                // v4.4 Shift+7 overwrites Shift+6's step, including Rate 1.
-                state=(state&~(15u<<4))|(get(state,Rate)==1?1u<<4:0u);
-            }
+            // Desktop control behavior: editing Rate or Depth preserves the
+            // other value. The native period/step laws and saved values stay
+            // unchanged; only v4.4's destructive Shift+7 coupling is removed.
             return state;
         });
     }

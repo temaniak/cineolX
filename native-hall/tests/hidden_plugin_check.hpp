@@ -1,9 +1,9 @@
 // Included by plugin_check.cpp; exercises the host/UI contract against ROM-
-// derived expectations, including immediate saves before deferred publication.
+// derived DSP values and independent Rate/Depth editing, including immediate saves.
 static void check_hidden_controls() {
     NativeHallProcessor p;
     auto expect=[&](int rate,int depth,int opt) {
-        require(p.originalHiddenValues()==std::array<int,3>{rate,depth,opt},"hidden effective values differ from ROM contract");
+        require(p.originalHiddenValues()==std::array<int,3>{rate,depth,opt},"hidden effective values differ from independent control contract");
         for(unsigned f=0;f<3;++f) {
             auto* parameter=p.state.getParameter(NativeHallProcessor::ids[NativeHallProcessor::mod_rate_index+f]);
             require(parameter->convertFrom0to1(parameter->getValue())==float(std::array<int,3>{rate,depth,opt}[f]),"host parameter differs from effective hidden setting");
@@ -17,21 +17,25 @@ static void check_hidden_controls() {
     expect(2,1,5);
     for(int program=0;program<6;++program) {
         p.setCurrentProgram(program);set(p,"mode_enh",1);expect(2,1,5);
-        set(p,"mod_depth",8);set(p,"mod_rate",2);expect(2,1,5);
+        set(p,"mod_depth",8);set(p,"mod_rate",2);expect(2,8,5);
         set(p,"mod_rate",2);set(p,"mod_depth",8);expect(2,8,5);
-        set(p,"mod_rate",1);expect(1,2,5);set(p,"mod_depth",8);expect(1,8,5);
-        for(int rate=1;rate<=16;++rate) {set(p,"mod_rate",float(rate));expect(rate,rate==1?2:1,5);}
+        set(p,"mod_rate",1);expect(1,8,5);set(p,"mod_depth",8);expect(1,8,5);
+        for(int rate=1;rate<=16;++rate) {set(p,"mod_rate",float(rate));expect(rate,8,5);}
+        for(int depth=1;depth<=16;++depth) {set(p,"mod_depth",float(depth));expect(16,depth,5);}
+        for(int rate=1;rate<=16;++rate)for(int depth=1;depth<=16;++depth) {
+            set(p,"mod_depth",float(depth));set(p,"mod_rate",float(rate));expect(rate,depth,5);
+            set(p,"mod_rate",float(rate));set(p,"mod_depth",float(depth));expect(rate,depth,5);
+        }
         set(p,"mod_rate",8);set(p,"mod_depth",6);set(p,"optimization_response",12);expect(8,6,12);
         p.setCurrentProgram(program);expect(8,6,12);
         set(p,"decay_opt",0);set(p,"decay_opt",1);expect(8,6,12);
         set(p,"mode_enh",0);expect(2,1,5);
         set(p,"mod_rate",8);set(p,"mod_depth",6);set(p,"optimization_response",12);expect(8,6,12);
         set(p,"mode_enh",1);expect(2,1,5);
-        set(p,"mod_depth",8);set(p,"mod_rate",2);expect(2,1,5);
-        // The raw Depth mirror can still be 8. Recall must use canonical 1,
-        // and a subsequent Depth=8 must not be lost as an unchanged mirror.
+        set(p,"mod_depth",8);set(p,"mod_rate",2);expect(2,8,5);
+        // Saving before the message-thread mirrors update retains both knobs.
         juce::MemoryBlock saved;p.getStateInformation(saved);
-        set(p,"mod_depth",8);p.setStateInformation(saved.getData(),int(saved.getSize()));expect(2,1,5);
+        set(p,"mod_depth",1);p.setStateInformation(saved.getData(),int(saved.getSize()));expect(2,8,5);
         set(p,"mod_depth",8);expect(2,8,5);
         set(p,"mod_rate",1);set(p,"mod_depth",16);set(p,"optimization_response",1);
         p.getStateInformation(saved);NativeHallProcessor restored;
@@ -74,7 +78,7 @@ static void check_hidden_controls() {
     auto* compact=dynamic_cast<juce::ToggleButton*>(find(*editor,"compact_mode"));compact->setToggleState(true,juce::dontSendNotification);compact->onClick();
     auto* value=dynamic_cast<juce::Slider*>(find(*editor,"screen_value_1"));value->setValue(15,juce::sendNotificationSync);expect(11,15,11);
     set(p,"mod_rate",2);juce::Timer::callPendingTimersSynchronously();
-    require(value->getValue()==1,"coupled Depth reset was not displayed in compact mode");
+    require(value->getValue()==15 && p.originalHiddenValues()==std::array<int,3>{2,15,11},"Rate edit changed compact Mod Depth");
     // Direct host parameter setValue is realtime-safe and works without an
     // editor or deferred APVTS publication; DSP consumes the canonical state.
     editor.reset();p.prepareToPlay(48000,127);juce::AudioBuffer<float> buffer(2,127);juce::MidiBuffer midi;

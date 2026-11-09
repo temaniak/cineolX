@@ -801,3 +801,15 @@ parameter IDs/indices remain; new IDs append with version hint 9. Preset schema
 7 restores legacy defaults from versions 1–6. No ROM/cache format, public
 release/tag or numeric plugin version changes. New all-program/Stable listening
 acceptance remains pending even though the user accepted the earlier prototype.
+
+## Assembled bug fixes and independent modulation — November 9, 2026
+
+The user requested original-224 Mod Rate/Mod Depth independence after the
+physical v4.4 coupling was verified. Rate edits now retain Depth; Depth edits
+retain Rate. Keep the existing period/step mapping, IDs and saved settings;
+do not restore the physical panel's Depth reset. Program/Mod resets remain.
+The full universal macOS build, all four focused blocks, earlier bypass fix,
+all-28-program processor/Clean regressions and actual AU/VST3 signal runs on
+arm64 and Rosetta x86_64 pass. See
+[the assembled validation](FOUR_FIXES_VALIDATION_2026-11-09.md) for evidence,
+CPU results and remaining listening/platform limits. No release is requested.

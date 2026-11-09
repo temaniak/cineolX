@@ -54,5 +54,39 @@ ROM/cache compatibility. See `GITHUB_ISSUE_TRIAGE_2026-10-26.md` for initial evi
    mathematical identity. Other XL programs retain their current clocks;
    investigate them further only against a material measured sound mismatch.
 
+10. [x] #13: cap both original-224 Plate pre-delays to the physical v4.4
+    limit of 107 ms. Moving over-limit settings previously crossed into other
+    delay lines and produced a large burst / overexcited tail. Preserve host
+    automation identities and stored values, protect existing banks, and align
+    editor/text/import limits. Physical-ROM evidence, old-fails/new-passes and
+    independent before/after audio are in `ISSUE13_PLATE_PREDELAY_2026-11-09.md`.
+    DAW listening acceptance remains open; no release or issue closure implied.
+
+11. [x] #16/#17/#19/#20: resolve XL Attack/Depth raw 255 to the physical
+    254 endpoint, still displayed as 99. Protect all 23 controls across the
+    19 reverbs, full/compact UI and old presets/automation; preserve internal
+    sentinel compilation, host IDs and bank ABI. The 520-case physical oracle,
+    independent sound comparisons and plugin regressions are recorded in
+    `XL_ATTACK99_ENDPOINT_FIX_2026-11-09.md`. Listening acceptance remains open.
+
+12. [x] #15/#18 verification: Rich Plate/Rich Split Chorus reaches the native
+    controller through live plugin automation in both precision modes. All
+    eight switch combinations confirm conditional tail effects and upper-half
+    invariance; fresh v8.21 references retain zero moving taps. No new DSP
+    defect reproduced. See `RICH_CHORUS_RECHECK_2026-11-09.md`; exact reporter
+    conditions and listening remain open, so issue closure is not implied.
+
+13. [x] #14 verification: original v4.4 physical Shift+7 edits reset the
+    modulation step, giving Depth 1 at Rate 2–16 and Depth 2 at Rate 1. A later
+    Shift+6 Depth edit replaces that step. The plugin initially agreed;
+    see `ISSUE14_RATE_DEPTH_RECHECK_2026-11-09.md`. No DSP change or GitHub
+    issue closure is implied.
+
+14. [x] #14 requested desktop behavior change: retain Mod Depth on every Rate
+    edit and retain Rate on Depth edits. Keep the native period/step mapping,
+    stable parameter IDs and stored values. This deliberately supersedes the
+    panel coupling described above; the physical-ROM observations remain valid.
+    See `FOUR_FIXES_VALIDATION_2026-11-09.md` for the assembled build and signal checks.
+
 Linux VST3 (#1) is outside this work at the user's request. No release or
 GitHub issue closure is implied by this queue.

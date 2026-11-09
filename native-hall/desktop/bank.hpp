@@ -43,29 +43,30 @@ struct ProgramData {
         if(ms>=1180) return 255;
         return ms<50?ms:ms<150?50+(ms-50)/2:ms<350?100+(ms-150)/4:150+(ms-350)/8;
     }
-    uint64_t frequency_controls() const noexcept {
+    uint64_t bounded_fader_controls() const noexcept {
         uint64_t cells=0;
-        for(const auto& control:controls.slots) if(control.kind==ControlKind::filter)
+        for(const auto& control:controls.slots) if(control.kind==ControlKind::filter || control.kind==ControlKind::depth)
             cells|=uint64_t(1)<<control.cell;
         return cells;
     }
     unsigned control_maximum(unsigned page_index,unsigned slot,const std::array<uint8_t,48>& raw) const noexcept {
         const auto& page=pages[page_index];
         const unsigned maximum=page.variable_predelay[slot]?predelay_maximum(raw):page.maximum[slot];
-        // Physical LARC frequency faders stop at 254. The logical record's
-        // 255 is a mute sentinel, not the open-filter endpoint (253/254).
+        // Physical LARC faders stop at 254. For frequency and Attack/Depth
+        // controls, logical 255 zeros coefficient groups, rather than selecting
+        // the displayed maximum (INF or 99).
         // Resolve old automation/presets too, without changing the bank ABI
         // or the host's shared XL parameter ranges.
-        if(page.cells[slot]<48 && (frequency_controls()&(uint64_t(1)<<page.cells[slot])))return std::min(254u,maximum);
+        if(page.cells[slot]<48 && (bounded_fader_controls()&(uint64_t(1)<<page.cells[slot])))return std::min(254u,maximum);
         return maximum;
     }
     void resolve_controls(std::array<uint8_t,48>& raw) const noexcept {
         const unsigned variable_limit=predelay_maximum(raw);
-        const uint64_t frequencies=frequency_controls();
+        const uint64_t bounded=bounded_fader_controls();
         for(unsigned p=0;p<page_count;++p) for(unsigned slot=0;slot<6;++slot) {
             const auto& page=pages[p];const unsigned cell=page.cells[slot];if(cell>=48) continue;
             const unsigned limit=page.variable_predelay[slot]?variable_limit:page.maximum[slot];
-            const unsigned maximum=(frequencies&(uint64_t(1)<<cell))?std::min(254u,limit):limit;
+            const unsigned maximum=(bounded&(uint64_t(1)<<cell))?std::min(254u,limit):limit;
             raw[cell]=uint8_t(std::min(unsigned(raw[cell]),maximum));
         }
     }
