@@ -92,7 +92,8 @@ static void output_buses(NativeHallProcessor& processor) {
     std::cout<<"Front 1-2 + Rear 3-4 bus declaration/activation, empty-cache safety and stereo fallback pass\n";
 }
 static void compare(NativeHallProcessor& processor) {
-    juce::MemoryBlock bytes;require(CineolRomBank::optionsCacheFile().loadFileAsData(bytes),"missing saved bank");
+    const auto cache=processor.originalOptionsReady()?CineolRomBank::optionsCacheFile():CineolRomBank::cacheFile();
+    juce::MemoryBlock bytes;require(cache.loadFileAsData(bytes),"missing saved bank");
     auto bank=std::make_unique<native_hall::ProgramBank>();
     require(native_hall::read_bank(bytes.getData(),bytes.getSize(),*bank),"invalid saved bank");
     auto reference=std::make_unique<native_hall::DesktopEngine48>();reference->prepare(*bank);
