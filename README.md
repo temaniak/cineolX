@@ -10,6 +10,9 @@ SPACE clock control, converter-filter DIRT and optional four outputs remain.
 The displayed manufacturer is **NK Stuff**, matching Silver-K; existing plugin
 identifiers are retained for DAW-session compatibility.
 
+See the [1.3a release notes](docs/releases/v1.3a.md) for the three additional
+224 programs and the ROM re-import instructions.
+
 ## What's new in 1.2 Alpha
 
 - Both original-224 Plate programs cap effective Pre-delay at 107 ms to avoid
