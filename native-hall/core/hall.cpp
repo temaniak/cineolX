@@ -15,7 +15,9 @@ void Hall::reset() noexcept {
         random_hold_=algorithm_->initial_random_hold;decay_.reset(algorithm_->initial_decay);
     } else if(profile_) {
         c_=profile_->coefficients; offsets_=profile_->offsets;
-        mod_=profile_->modulation_descriptors; mod_index_=profile_->modulation_index;
+        mod_.fill(0);
+        std::copy(profile_->modulation_descriptors.begin(),profile_->modulation_descriptors.end(),mod_.begin());
+        mod_index_=profile_->modulation_index;
         mod_divider_=profile_->initial_mod_divider; random_divider_=profile_->initial_random_divider;
         random_hold_=profile_->initial_random_hold;
         decay_.reset(profile_->initial_decay);
@@ -23,7 +25,7 @@ void Hall::reset() noexcept {
 }
 void Hall::select_program(unsigned program) noexcept {
     if(!bank_) return;
-    algorithm_=&bank_->programs[std::min(program,program_count-1)];reset();set_controls(controls_);
+    algorithm_=&bank_->programs[std::min(program,bank_->available_programs-1)];reset();set_controls(controls_);
 }
 void Hall::set_loop_diffusion(unsigned reduction) noexcept {
     if(algorithm_) {
@@ -40,7 +42,8 @@ void Hall::set_loop_diffusion(unsigned reduction) noexcept {
 void Hall::set_controls(const Controls& next) noexcept {
     const int requested_predelay=next.predelay_ms; // next may alias controls_ during selection.
     controls_=next;
-    controls_.bass=std::clamp(next.bass,1,31); controls_.mid=std::clamp(next.mid,0,31);
+    const bool chorus=algorithm_ && algorithm_->network==program_networks[chorus_program];
+    controls_.bass=std::clamp(next.bass,chorus?0:1,31); controls_.mid=std::clamp(next.mid,0,31);
     controls_.crossover=std::clamp(next.crossover,0,31); controls_.treble=std::clamp(next.treble,0,31);
     controls_.depth=std::clamp(next.depth,0,71); controls_.predelay_ms=std::clamp(requested_predelay,24,152);
     controls_.diffusion=std::clamp(next.diffusion,1,63);
@@ -52,7 +55,10 @@ void Hall::set_controls(const Controls& next) noexcept {
         p.tail.apply(unsigned(controls_.bass*32+controls_.mid),c_);
         p.crossover.apply(unsigned(controls_.crossover),c_);p.treble.apply(unsigned(controls_.treble),c_);
         p.depth.apply(unsigned(controls_.depth),c_);p.diffusion.apply(unsigned(controls_.diffusion),c_);
-        for(unsigned i=0;i<p.loop_count;++i) loop_base_[i]=c_[p.loop_rows[i]];
+        // Room A's loop gains are fixed by the program compiler. Its panel
+        // tables do not restore them before applying Decay Opt again.
+        const auto& loop_coefficients=p.identity==9?p.coefficients:c_;
+        for(unsigned i=0;i<p.loop_count;++i) loop_base_[i]=loop_coefficients[p.loop_rows[i]];
         set_loop_diffusion(decay_.state().amount);
         const unsigned program=unsigned(algorithm_-bank_->programs.data());
         controls_.predelay_ms=resolve_predelay(program,requested_predelay);
@@ -149,8 +155,9 @@ void Hall::update_modulation() noexcept {
         phase=uint8_t(value); mod_[at+4]=phase;
         uint8_t first=uint8_t((phase&0xfc)|(cap&3));
         uint8_t second=uint8_t(((cap|3)-4-first)|3);
-        c_[row]=int8_t((~first&255)>>2);
-        c_[row+1]=int8_t((~second&255)>>2);
+        const int a=(~first&255)>>2,b=(~second&255)>>2;
+        c_[row]=algorithm_?algorithm_->modulation_coefficient(j,0,a):int8_t(a);
+        c_[row+1]=algorithm_?algorithm_->modulation_coefficient(j,1,b):int8_t(b);
     }
 }
 ModulationState Hall::modulation_state() const noexcept {
@@ -192,7 +199,7 @@ void Hall::update_decay() noexcept {
     level_clock_+=algorithm_?algorithm_->level_rate_tenths[mode]:profile_->level_rate_tenths[mode];
     if(level_clock_<sample_rate*10) return;
     level_clock_-=sample_rate*10;
-    if(decay_.poll(uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,optimization_response()))
+    if(decay_.poll(decay_mean(),controls_.decay_optimization,optimization_response()))
         set_loop_diffusion(decay_.state().amount);
 }
 } // namespace native_hall

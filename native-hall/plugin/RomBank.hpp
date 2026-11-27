@@ -12,10 +12,11 @@ public:
     CineolRomBank();
     ~CineolRomBank() override;
     bool ready() const noexcept {return ready_.load(std::memory_order_acquire);}
-    const native_hall::ProgramBank& bank() const noexcept {return bank_;}
+    bool optionsReady() const noexcept {return options_ready_.load(std::memory_order_acquire);}
+    const native_hall::ProgramBank& bank(bool options=false) const noexcept {return options?options_bank_:bank_;}
     bool xlReady() const noexcept {return xl_ready_.load(std::memory_order_acquire);}
     const cineol::xl::Bank& xlBank() const noexcept {return xl_bank_;}
-    const clean_native_hall::ProgramBank& cleanBank() const noexcept {return *clean_bank_;}
+    const clean_native_hall::ProgramBank& cleanBank(bool options=false) const noexcept {return options?*clean_options_bank_:*clean_bank_;}
     const clean_cineol::xl::Bank& cleanXLBank() const noexcept {return *clean_xl_bank_;}
     bool importing() const noexcept {return importing_.load(std::memory_order_acquire);}
     double progress() const noexcept {return progress_.load(std::memory_order_relaxed);}
@@ -23,18 +24,22 @@ public:
     bool startImport(const juce::Array<juce::File>&);
     void cancelImport() {signalThreadShouldExit();}
     static juce::File cacheFile();
+    static juce::File optionsCacheFile() {return cacheFile().getSiblingFile("programs-v44-import-v2.bank224");}
     static juce::File xlCacheFile() {return cacheFile().getParentDirectory().getChildFile("programs-v821-native-v5.bankxl");}
 private:
     void run() override;
     void setStatus(const juce::String&);
     void publishOriginal();
+    void publishOptions();
     void publishXL();
     native_hall::ProgramBank bank_{};
+    native_hall::ProgramBank options_bank_{};
     cineol::xl::Bank xl_bank_{};
     std::unique_ptr<clean_native_hall::ProgramBank> clean_bank_;
+    std::unique_ptr<clean_native_hall::ProgramBank> clean_options_bank_;
     std::unique_ptr<clean_cineol::xl::Bank> clean_xl_bank_;
     std::atomic<bool> xl_ready_{false};
-    std::atomic<bool> ready_{false},importing_{false};
+    std::atomic<bool> ready_{false},options_ready_{false},importing_{false};
     std::atomic<double> progress_{0};
     mutable juce::CriticalSection status_lock_;
     juce::String status_;

@@ -19,8 +19,9 @@ public:
     // Periodic FPC captures, including its waiting latch/normalization pipeline.
     // Close Hall/Chamber requests wait; captures are not simply WR_DA+10.
     // Firmware power-up and its transient converter phase are not emulated.
-    inline static constexpr unsigned capture_rows[4][4]={
-        {62,39,112,89}, {57,109,109,57}, {78,32,109,55}, {62,39,112,89}};
+    inline static constexpr unsigned capture_rows[7][4]={
+        {62,39,112,89}, {57,109,109,57}, {78,32,109,55}, {62,39,112,89},
+        {62,39,112,89}, {54,90,90,54}, {38,87,87,38}};
 
     void set_dirt(float dirt) noexcept {circuit_.set_dirt(dirt);}
     void set_clock_factor(float factor) noexcept {circuit_.set_clock_factor(factor);}
@@ -28,7 +29,7 @@ public:
     void reset() noexcept {next_pass_=0;clear();}
     // A hard program switch clears the old output circuit/queued captures but
     // preserves the shared, free-running host/native clock.
-    void select_network(unsigned network) noexcept {network_=std::min(network,3u);clear();}
+    void select_network(unsigned network) noexcept {network_=std::min(network,6u);clear();}
     void push(const float* values) noexcept {
         for(unsigned c=0;c<4;++c) {
             auto& channel=channels_[c];

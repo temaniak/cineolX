@@ -1,0 +1,37 @@
+# Cineol-X 224 Release Notes Draft
+
+Cineol-X 224 adds three programs from the original Lexicon 224 v4.4 firmware.
+The desktop plugin now offers nine original 224 programs and 22 optional 224 XL
+programs, for a total of 31. [GitHub issue #21](https://github.com/temaniak/cineolX/issues/21)
+
+- **Room A (29)** is a room reverb with modulation and Decay Optimization.
+- **Constant Density Plate A (30)** sums the left and right inputs before the
+  plate network.
+- **Chorus A (31)** uses the first four faders to set the levels of four
+  chorus voice pairs. Each pair level can be automated.
+
+Selecting any of these three programs in the **224** menu recalls its ROM
+factory settings. Each works in Original and Clean. Automate its pre-delay
+with **224 Additional Pre-delay**, which follows the selected program's range.
+
+### Updating from 1.2 Alpha
+
+Open the firmware setup and use **Choose ROMs...** to import the same original
+224 v4.4 ROM1–ROM5 files again. This prepares the cache for all nine original
+224 programs. The plugin can also read the earlier six-program 224 cache and
+the existing 224 XL v5 cache.
+
+Use **224 Additional Program** to automate the new selections. **Use Algorithm**
+returns control to the regular **Algorithm** parameter. The new selector
+preserves the 28-position **Algorithm** and VST3 **Program** scales used by
+existing automation. The plugin reads earlier `.cineol224` presets and saves
+new presets in format v8.
+
+### Validation
+
+Development AU and VST3 builds on macOS arm64 passed tests with all three new
+programs in Original and Clean, including live control changes and tails after
+the input fell silent. Plugin checks covered legacy session restore, presets
+and processing at 44.1, 48 and 96 kHz. Fixed-point DSP checks matched the
+Reflexion reference for the tested settings across all nine original 224
+programs.

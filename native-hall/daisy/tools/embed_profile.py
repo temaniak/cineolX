@@ -15,7 +15,7 @@ magic, version, size, checksum = struct.unpack_from('<8sIII', data)
 h = 2166136261
 for byte in data[20:]:
     h = ((h ^ byte) * 16777619) & 0xffffffff
-valid_format = (magic == b'HALL224\0' and version == 2 and size == 11674) or (magic == b'BANK224\0' and version == 1)
+valid_format = (magic == b'HALL224\0' and version == 2 and size == 11674) or (magic == b'BANK224\0' and version in (1, 2))
 if not valid_format or len(data) != size+20 or h != checksum:
     raise SystemExit('A current, valid native Hall profile is required')
 asset = 'bank_profile_data' if magic == b'BANK224\0' else 'hall_profile_data'

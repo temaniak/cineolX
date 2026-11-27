@@ -7,7 +7,8 @@ namespace {
 using native_hall::scales::times;
 using native_hall::scales::frequencies;
 constexpr const char* algorithm_names[native_hall::program_count]={"Small Concert Hall B","Vocal Plate",
-    "Large Concert Hall B","Acoustic Chamber","Percussion Plate A","Small Concert Hall A"};
+    "Large Concert Hall B","Acoustic Chamber","Percussion Plate A","Small Concert Hall A",
+    "Room A","Constant Density Plate A","Chorus A"};
 template<class T> int nearest(const T* table,float value,int start=0) {
     int best=start;for(int i=start;i<32;++i) if(std::abs(float(table[i])-value)<std::abs(float(table[best])-value)) best=i;
     return best;
@@ -44,7 +45,8 @@ void NativeHallProcessor::setEditorWidth(int width) {
 juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout() {
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout p;
-    StringArray names;for(const char* name:algorithm_names) names.add(name);
+    StringArray names;
+    for(unsigned index=0;index<xl_program_begin;++index) names.add(algorithm_names[index]);
     for(const auto& graph:cineol::xl::graphs) names.add(juce::String(graph.name));
     auto hidden=std::make_shared<CineolOriginal224Parameters>();
     auto algorithm=std::make_unique<CineolAlgorithmParameter>(names,hidden);
@@ -116,6 +118,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout NativeHallProcessor::layout(
         }).withValueFromStringFunction([](const String& s) {
             return s.containsIgnoreCase("stable")?0.f:s.trim().equalsIgnoreCase("original")?1.f:s.getFloatValue()/100;
         })));
+    // Keep the legacy 28-value Algorithm scale for recorded host automation.
+    auto options=std::make_unique<CineolOptionProgramParameter>(hidden);
+    auto* option_selection=options.get();
+    p.add(std::move(options));
+    const auto option_delay=[option_selection](int value) {
+        const auto selected=option_selection->getIndex();
+        return selected?native_hall::resolve_predelay(xl_program_begin+unsigned(selected-1),value):value;
+    };
+    p.add(std::make_unique<AudioParameterInt>(ParameterID{"option_predelay",10},"224 Additional Pre-delay",0,255,24,
+        AudioParameterIntAttributes{}.withLabel("ms")
+            .withStringFromValueFunction([option_delay](int value,int){return String(option_delay(value));})
+            .withValueFromStringFunction([option_delay](const String& text){return option_delay(text.getIntValue());})));
+    for(unsigned pair=0;pair<4;++pair)
+        p.add(std::make_unique<AudioParameterInt>(ParameterID{ids[chorus_pair_begin+pair],10},
+            "Chorus A Pair "+String(pair+1)+" Level",0,31,16));
     return p;
 }
 NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
@@ -127,6 +144,7 @@ NativeHallProcessor::NativeHallProcessor():AudioProcessor(BusesProperties()
     for(const char* key:{"display_brightness","display_emphasis","editor_compact","editor_width"})
         if(defaults.containsKey(key)) state.state.setProperty(key,defaults.getValue(key),nullptr);
     algorithm_parameter_=static_cast<juce::AudioParameterChoice*>(state.getParameter("algorithm"));
+    option_program_parameter_=static_cast<juce::AudioParameterChoice*>(state.getParameter("option_program"));
     original_controls_=&static_cast<CineolHidden224Parameter*>(state.getParameter("mod_rate"))->controls();
     for(unsigned i=0;i<values_.size();++i) {
         values_[i]=state.getRawParameterValue(ids[i]);stable_values_[i]=values_[i]->load();
@@ -222,8 +240,8 @@ std::array<float,4> NativeHallProcessor::AudioSlot::process(float l,float r) noe
     return {wet[routes[0]],wet[routes[1]],wet[routes[2]],wet[routes[3]]};
 }
 double NativeHallProcessor::nominalDspRate() const noexcept {
-    const int program=algorithm_parameter_->getIndex();
-    return isXL(program)?30720000.0/(9*cineol::xl::graphs[unsigned(program)-native_hall::program_count].rows):20480.0;
+    const int program=selectedProgram();
+    return isXL(program)?30720000.0/(9*cineol::xl::graphs[unsigned(program)-xl_program_begin].rows):20480.0;
 }
 double NativeHallProcessor::dspRate() const noexcept {
     return nominalDspRate()*(1-.5*values_[space_index]->load(std::memory_order_relaxed));
@@ -248,13 +266,14 @@ void NativeHallProcessor::selectProgram(int requested,const std::array<float,par
         engine_initialized_=false;
     }
     auto& slot=slots_[active_slot_];
-    if(!engine_initialized_ || (requested!=active_program_ && (isXL(requested) || isXL(active_program_)))) {
+    if(!engine_initialized_ || (requested!=active_program_ && (isXL(requested) || isXL(active_program_)
+            || isOptionProgram(requested)!=isOptionProgram(active_program_)))) {
         if(isXL(requested)) {
-            slot.xl_engine.select(rom_bank_->xlBank(),unsigned(requested-native_hall::program_count));
-            slot.clean_xl_engine.select(rom_bank_->cleanXLBank(),unsigned(requested-native_hall::program_count));
+            slot.xl_engine.select(rom_bank_->xlBank(),unsigned(requested-xl_program_begin));
+            slot.clean_xl_engine.select(rom_bank_->cleanXLBank(),unsigned(requested-xl_program_begin));
         } else {
-            slot.engine.activate(rom_bank_->bank(),unsigned(requested));
-            slot.clean_engine.activate(rom_bank_->cleanBank(),unsigned(requested));
+            slot.engine.activate(rom_bank_->bank(isOptionProgram(requested)),originalIndex(requested));
+            slot.clean_engine.activate(rom_bank_->cleanBank(isOptionProgram(requested)),originalIndex(requested));
         }
         slot.alignment.fill({});slot.clean_alignment.fill({});slot.alignment_position=0;
         slot.clean_mix=slot.clean_target=v[clean_mode_index]>=.5f?1:0;
@@ -272,7 +291,7 @@ void NativeHallProcessor::applyControls(const std::array<float,parameter_count>&
     for(auto& precision_slot:slots_) precision_slot.clean_target=v[clean_mode_index]>=.5f?1:0;
     slot.routes={unsigned(v[12]),unsigned(v[13]),unsigned(v[rear_left_index]),unsigned(v[rear_right_index])};
     if(isXL(active_program_)) {
-        const auto& data=rom_bank_->xlBank().programs[unsigned(active_program_)-native_hall::program_count];
+        const auto& data=rom_bank_->xlBank().programs[unsigned(active_program_)-xl_program_begin];
         auto controls=data.controls.factory;
         for(unsigned cell=0;cell<controls.size();++cell) if(v[xl_parameter_begin+cell]>=0)
             controls[cell]=uint8_t(std::clamp(int(v[xl_parameter_begin+cell]),0,255));
@@ -287,11 +306,19 @@ void NativeHallProcessor::applyControls(const std::array<float,parameter_count>&
     else {
         native_hall::Parameters p;
         p.hall.bass=int(v[0]);p.hall.mid=int(v[1]);p.hall.crossover=int(v[2]);p.hall.treble=int(v[3]);
-        p.program=unsigned(std::clamp(active_program_,0,int(native_hall::program_count)-1));
-        p.hall.depth=int(v[4]);p.hall.predelay_ms=int(v[5])-24+native_hall::predelay_minima[p.program];
+        p.program=originalIndex(active_program_);
+        p.hall.depth=int(v[4]);
+        p.hall.predelay_ms=isOptionProgram(active_program_)?int(v[option_predelay_index]):int(v[5])-24+native_hall::predelay_minima[p.program];
+        if(isChorusA(active_program_)) {
+            p.hall.bass=int(v[chorus_pair_begin]);p.hall.mid=int(v[chorus_pair_begin+1]);
+            p.hall.crossover=int(v[chorus_pair_begin+2]);p.hall.treble=int(v[chorus_pair_begin+3]);
+            p.hall.depth=0;
+        }
         p.hall.diffusion=int(v[6]);
         p.input_db=v[7];p.mix=v[8];p.analog=true;p.dirt=0;p.hall.mode_enhancement=v[10]>=0.5f;
         p.hall.decay_optimization=v[11]>=0.5f;p.output_left=int(v[12]);p.output_right=int(v[13]);
+        if(isOptionProgram(active_program_) && rom_bank_->bank(true).programs[p.program].loop_count==0)
+            p.hall.decay_optimization=false;
         p.hall.modulation_period=uint8_t(std::max(1,int(v[mod_rate_index])-1));
         p.hall.modulation_step=uint8_t(4*int(v[mod_depth_index]));
         p.hall.optimization_response=uint8_t(v[optimization_response_index]);
@@ -319,9 +346,10 @@ void NativeHallProcessor::processAudio(juce::AudioBuffer<float>& b,bool bypassed
         std::atomic_thread_fence(std::memory_order_acquire);
         if(parameter_transaction_.load(std::memory_order_acquire)==transaction && !(hidden&CineolOriginal224Parameters::restore_bit) &&
             ((hidden&CineolOriginal224Parameters::program_mask)>>12)==unsigned(candidate[14]) &&
+            ((hidden&CineolOriginal224Parameters::option_mask)>>19)==unsigned(candidate[option_program_index]) &&
             bool(hidden&CineolOriginal224Parameters::mode_bit)==(candidate[10]>=.5f)) stable_values_=v=candidate;
     }
-    const int requested=std::clamp(int(v[14]),0,int(program_count)-1);
+    const int requested=effectiveProgram(int(v[14]),int(v[option_program_index]));
     const bool rear_enabled=getTotalNumOutputChannels()==4;
     if(!programAvailable(requested)) {
         if(getTotalNumInputChannels()==1) b.copyFrom(1,0,b,0,0,b.getNumSamples());
@@ -404,17 +432,22 @@ void NativeHallProcessor::processAudio(juce::AudioBuffer<float>& b,bool bypassed
     }
 }
 int NativeHallProcessor::getCurrentProgram() {
-    // Parameter listeners can run before APVTS publishes its raw mirror.
-    // Read the choice's own atomic value so the display changes immediately.
     return algorithm_parameter_->getIndex();
 }
+int NativeHallProcessor::selectedProgram() const noexcept {
+    // Parameter listeners can run before APVTS publishes its raw mirrors.
+    return effectiveProgram(algorithm_parameter_->getIndex(),option_program_parameter_->getIndex());
+}
 void NativeHallProcessor::setCurrentProgram(int program) {
-    if(program<0 || program>=getNumPrograms() || program==getCurrentProgram()) return;
+    if(program>=0 && program<getNumPrograms()) selectAlgorithm(program);
+}
+void NativeHallProcessor::selectAlgorithm(int program) {
+    if(program<0 || program>=int(program_count) || program==selectedProgram()) return;
     const juce::ScopedLock lock(preset_write_lock_);
     parameter_transaction_.fetch_add(1,std::memory_order_acq_rel);
     preset_recall_revision_.fetch_add(1,std::memory_order_release);
     if(isXL(program) && rom_bank_->xlReady()) {
-        const auto& data=rom_bank_->xlBank().programs[unsigned(program)-native_hall::program_count];
+        const auto& data=rom_bank_->xlBank().programs[unsigned(program)-xl_program_begin];
         for(unsigned alias=0;alias<2;++alias) {
             auto* parameter=state.getParameter(ids[15+alias]);
             parameter->setValueNotifyingHost(parameter->convertTo0to1(float(alias?data.diffusion_index:data.chorus)));
@@ -424,9 +457,24 @@ void NativeHallProcessor::setCurrentProgram(int program) {
             parameter->setValueNotifyingHost(parameter->convertTo0to1(float(data.controls.factory[cell])));
         }
     }
+    if(isOptionProgram(program) && rom_bank_->optionsReady()) {
+        const auto& data=rom_bank_->bank(true).programs[originalIndex(program)];
+        auto write=[&](unsigned index,float value) {
+            auto* parameter=state.getParameter(ids[index]);
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
+        };
+        for(unsigned i=0;i<4;++i) write(isChorusA(program)?chorus_pair_begin+i:i,data.factory[i]);
+        if(!isChorusA(program)) write(4,data.factory[4]);
+        write(option_predelay_index,data.factory[5]);
+        write(6,data.factory[6]);
+        write(10,1);write(11,data.loop_count?1:0);
+        write(mod_rate_index,data.modulation_period+1);
+        write(mod_depth_index,data.modulation_step/4);
+        if(data.loop_count) write(optimization_response_index,data.decay_amount);
+    }
     int left=0,right=2;
     if(isXL(program)) {
-        const auto graph=cineol::xl::Graph(unsigned(program)-native_hall::program_count);
+        const auto graph=cineol::xl::Graph(unsigned(program)-xl_program_begin);
         if(graph==cineol::xl::Graph::chorus_echo) {left=2;right=0;}
         else if(unsigned(graph)>=unsigned(cineol::xl::Graph::hall_hall)) right=1;
     }
@@ -434,20 +482,26 @@ void NativeHallProcessor::setCurrentProgram(int program) {
         auto* route=state.getParameter(ids[12+channel]);
         route->setValueNotifyingHost(route->convertTo0to1(float(channel?right:left)));
     }
-    auto* parameter=state.getParameter("algorithm");
-    parameter->setValueNotifyingHost(parameter->convertTo0to1(float(program)));
+    if(!isOptionProgram(program))
+        algorithm_parameter_->setValueNotifyingHost(algorithm_parameter_->convertTo0to1(float(program)));
+    option_program_parameter_->setValueNotifyingHost(option_program_parameter_->convertTo0to1(
+        isOptionProgram(program)?float(program-int(legacy_host_program_count)+1):0.f));
     parameter_transaction_.fetch_add(1,std::memory_order_release);
 }
 const juce::String NativeHallProcessor::getProgramName(int program) {
     if(program<0 || program>=getNumPrograms()) return {};
-    if(isXL(program)) return juce::String(cineol::xl::graphs[unsigned(program)-native_hall::program_count].name);
-    return algorithm_names[program];
+    return algorithmName(program);
+}
+juce::String NativeHallProcessor::algorithmName(int program) const {
+    if(program<0 || program>=int(program_count)) return {};
+    if(isXL(program)) return juce::String(cineol::xl::graphs[unsigned(program)-xl_program_begin].name);
+    return algorithm_names[originalIndex(program)];
 }
 juce::AudioProcessorEditor* NativeHallProcessor::createEditor() {return new CineolEditor(*this);}
-bool NativeHallProcessor::usesXL() const noexcept {return isXL(algorithm_parameter_->getIndex());}
+bool NativeHallProcessor::usesXL() const noexcept {return isXL(selectedProgram());}
 const cineol::xl::ProgramData* NativeHallProcessor::xlProgram() const noexcept {
-    const int program=algorithm_parameter_->getIndex();
-    return isXL(program) && rom_bank_->xlReady()?&rom_bank_->xlBank().programs[unsigned(program)-native_hall::program_count]:nullptr;
+    const int program=selectedProgram();
+    return isXL(program) && rom_bank_->xlReady()?&rom_bank_->xlBank().programs[unsigned(program)-xl_program_begin]:nullptr;
 }
 unsigned NativeHallProcessor::parameterPages() const noexcept {if(const auto* data=xlProgram()) return data->page_count;return 3;}
 uint8_t NativeHallProcessor::xlControl(unsigned cell) const noexcept {

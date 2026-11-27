@@ -33,6 +33,8 @@ inline juce::String original(unsigned program,const juce::String& id) {
     if(id=="treble") return tip("Treble decay","Sets the frequency above which the reverb dies away more quickly. Lower values give a darker tail.");
     if(id=="depth") return tip("Depth","Changes the balance of early and later reverberation to suggest distance within the space. Higher values place the sound farther away.");
     if(id=="predelay") return tip("Pre-delay","Sets the delay before the reverberation starts. The range depends on the selected 224 program; both Plates stop at 107 ms as in the v4.4 firmware.");
+    if(id=="option_predelay") return tip("Pre-delay","Sets the delay before the effect starts. The available range follows this program.");
+    if(id.startsWith("chorus_pair_")) return tip("Chorus A voice pair","Sets the level of this pair of chorus voices, one on each input channel.");
     if(id=="diffusion") return program==3?unavailable("Diffusion"):
         tip("Diffusion","Changes how the reflections build into a continuous reverb texture. Its response varies with the program, so the highest value is not always the smoothest setting.");
     if(id=="mod_rate") return tip("Modulation rate","Changes the update interval independently of Modulation Depth. Lower values are faster; 1 and 2 share the shortest interval. Mode Enhancement must be on to hear modulation.");
@@ -146,13 +148,16 @@ inline juce::String xl(unsigned program,const cineol::xl::ProgramData& data,unsi
 }
 inline juce::String mode(unsigned program,const cineol::xl::ProgramData* data,bool optimization) {
     const auto title=optimization?"Decay optimization":"Mode enhancement";
-    if(program>=6 && (!data || (optimization?!data->dynamics.enabled:!data->mode_enhancement_active(cineol::xl::Graph(program-6))))) return unavailable(title);
-    if(program>=6 && optimization && data->controls.feedback.count==0)
+    const bool xl=NativeHallProcessor::isXL(int(program));
+    if(optimization && NativeHallProcessor::isOptionProgram(int(program)) && NativeHallProcessor::originalIndex(int(program))>=7)
+        return unavailable(title);
+    if(xl && (!data || (optimization?!data->dynamics.enabled:!data->mode_enhancement_active(cineol::xl::Graph(program-6))))) return unavailable(title);
+    if(xl && optimization && data->controls.feedback.count==0)
         return tip(title,"This program has no feedback-diffusion stage for Decay Optimization. The switch is stored, but it does not apply diffusion changes here.");
-    if(!optimization && program>=6 && cineol::xl::rich_chorus_graph(cineol::xl::Graph(program-6)))
+    if(!optimization && xl && cineol::xl::rich_chorus_graph(cineol::xl::Graph(program-6)))
         return tip(title,"Enables the Chorus-dependent controller timing. In this ROM the program has no moving delay taps, but Chorus can change the timing of Dynamic Decay and Decay Optimization.");
     if(optimization) return tip(title,"Adapts feedback diffusion as the input level changes and the tail fades. It can change the tail's texture and coloration.");
-    return tip(title,program>=6?"Enables the program's delay modulation. Use the Chorus control to change its speed and the amount of audible movement.":
+    return tip(title,xl?"Enables the program's delay modulation. Use the Chorus control to change its speed and the amount of audible movement.":
         "Enables moving delay taps in the reverb. Switching it in either direction restores the hidden Rate, Modulation Depth and Optimization Response defaults. Preset recall restores saved settings together.");
 }
 inline juce::String dynamic(const cineol::xl::ProgramData* data) {
@@ -160,7 +165,7 @@ inline juce::String dynamic(const cineol::xl::ProgramData* data) {
     return tip("Dynamic decay","Switches to the LF and Mid Stop Decay settings when the input level falls. Use it to shorten pauses or let tails bloom, depending on the stopped decay settings.");
 }
 inline juce::String output(unsigned program,bool left) {
-    return tip(left?"Left output":"Right output",program>=23?
+    return tip(left?"Left output":"Right output",NativeHallProcessor::isXL(int(program)) && program>=23?
         "Selects which of the four effect outputs feeds this plugin channel. Split programs use A/C for the left-input effect and B/D for the right-input effect.":
         "Selects which of the four effect outputs feeds this plugin channel. Different pairs can change the stereo balance and the reflections you hear.");
 }

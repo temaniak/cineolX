@@ -60,7 +60,7 @@ int main(int argc,char** argv) {
     auto bank=std::make_unique<ProgramBank>();
     require(read_bank(bytes.data(),bytes.size(),*bank),"Invalid prepared bank");
     uint64_t total_grants=0,total_displaced=0,total_held=0;
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<legacy_program_count;++program) {
         auto plain=std::make_unique<Machine>(),accessed=std::make_unique<Machine>();
         plain->model=accessed->model=Model::Lexicon224;
         std::ifstream image(std::string(argv[1])+"."+std::to_string(program)+".wcs",std::ios::binary);

@@ -68,7 +68,18 @@ jobs:
           CINEOL224_CACHE_DIR="$PWD/build/empty-check-cache" \
             build/plugin/cineol_rom_import_check_artefacts/Release/cineol_rom_import_check --empty
       - name: Package verified binaries
-        run: python script/package_release.py --platform ${{ matrix.package_platform }} --build-dir ${{ matrix.build_dir }}
+        shell: bash
+        env:
+          RELEASE_BUILD: >-
+            ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+            || (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main') }}
+        run: |
+          options=()
+          if [[ "$RELEASE_BUILD" != true ]]; then
+            options+=(--candidate)
+          fi
+          python script/package_release.py --platform ${{ matrix.package_platform }} \
+            --build-dir ${{ matrix.build_dir }} "${options[@]}"
       - name: Upload Windows graphics checks
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

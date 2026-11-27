@@ -4,12 +4,12 @@
 #include <cassert>
 
 namespace native_hall {
-// A procedure predicts at most twelve writes. Its final commit precedes
+// A procedure predicts at most three writes per modulation tap. Its final commit precedes
 // return, and the next procedure's writes follow a later audio boundary.
 // Select old/new values by each target's one fetch, without a row interpreter.
 class ControlWriteQueue224 {
 public:
-    static constexpr unsigned capacity=12;
+    static constexpr unsigned capacity=3*maximum_modulation_taps;
     void reset() noexcept {count_=0;}
     void push(uint64_t visible,ControlWrite224 write) noexcept {
         assert(count_<capacity && (!count_ || events_[count_-1].visible<=visible));

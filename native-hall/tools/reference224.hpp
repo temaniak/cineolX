@@ -80,7 +80,7 @@ inline std::array<uint16_t,100> offsets(const lexicon224x::cpu::Host& h) {
 inline native_hall::ModulationState modulation(const lexicon224x::cpu::Host& h) {
     native_hall::ModulationState state;
     const unsigned count=h.memory[0x3e29]&15;
-    require(count<=2,"Unsupported modulation descriptor count");
+    require(count<=native_hall::maximum_modulation_taps,"Unsupported modulation descriptor count");
     std::copy_n(h.memory.begin()+word(h,0x3e27),5*count,state.descriptors.begin());
     state.index=uint16_t(word(h,0x3e69));state.divider=h.memory[0x3e66];
     state.random_divider=h.memory[0x3e67];state.hold=h.memory[0x3e68];

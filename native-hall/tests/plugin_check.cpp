@@ -648,7 +648,7 @@ static void check_presets() {
     require(restored.presetName()=="Warm Concert Hall" && !restored.presetModified(),"DAW state lost preset identity/baseline");
     auto firmware_xml=juce::XmlDocument::parse(first);
     require(firmware_xml && firmware_xml->getStringAttribute("firmware")=="224-v4.4" &&
-        firmware_xml->getIntAttribute("version")==7,"preset firmware identity missing");
+        firmware_xml->getIntAttribute("version")==8,"preset firmware identity missing");
     const auto foreign=files.folder.getChildFile("Foreign.cineol224");
     for(const auto& identity:juce::StringArray{"224xl-v8.21","unknown"}) {
         firmware_xml->setAttribute("firmware",identity);firmware_xml->writeTo(foreign);
@@ -944,7 +944,11 @@ static void check_preset_browser() {
         // notifications after earlier modal tests have stopped their loop.
         search->setText(text,false);search->onTextChange();
     };
-    require(filters->getListBoxModel()->getNumRows()==28 && presets->getListBoxModel()->getNumRows()==3,"browser did not show one unified preset list");
+    require(filters->getListBoxModel()->getNumRows()==int(NativeHallProcessor::program_count) &&
+        presets->getListBoxModel()->getNumRows()==3,"browser did not show one unified preset list");
+    require(filters->getListBoxModel()->getTooltipForRow(6).startsWith("Room A") &&
+        filters->getListBoxModel()->getTooltipForRow(8).startsWith("Chorus A"),
+        "additional 224 programs did not stay with the original 224 group");
     require(presets->getListBoxModel()->getTooltipForRow(0).contains("Large Concert Hall B") &&
             presets->getListBoxModel()->getTooltipForRow(2).contains("224 XL"),"browser algorithm/model annotation missing");
     struct Events final : juce::AudioProcessorParameter::Listener {
@@ -955,7 +959,8 @@ static void check_preset_browser() {
     for(const auto* id:NativeHallProcessor::ids) p.state.getParameter(id)->addListener(&events);
     filters->getListBoxModel()->returnKeyPressed(2);require(presets->getListBoxModel()->getNumRows()==1,"single algorithm filter failed");
     filters->getListBoxModel()->returnKeyPressed(1);require(presets->getListBoxModel()->getNumRows()==2,"two algorithm union failed");
-    filters->getListBoxModel()->returnKeyPressed(6);require(presets->getListBoxModel()->getNumRows()==3,"three algorithm union failed");
+    filters->getListBoxModel()->returnKeyPressed(int(native_hall::program_count));
+    require(presets->getListBoxModel()->getNumRows()==3,"three algorithm union failed");
     filters->getListBoxModel()->returnKeyPressed(2);require(presets->getListBoxModel()->getNumRows()==2,"algorithm filter removal failed");
     all->onClick();require(presets->getListBoxModel()->getNumRows()==3,"all algorithms reset failed");
     query("bRoWsEr xL");require(presets->getListBoxModel()->getNumRows()==1,"case-insensitive preset search failed");
@@ -1046,7 +1051,11 @@ static void check_preset_audio() {
 }
 static std::vector<float> run(int rate,int block,bool offline,int program,bool mono=false,bool low=false,float mix=1,float dirt=-1,bool clean=false) {
     auto p=std::make_unique<NativeHallProcessor>();require(p->ready(),"missing imported bank");
-    p->setCurrentProgram(program);
+    p->selectAlgorithm(program);
+    const bool option=NativeHallProcessor::isOptionProgram(program);
+    constexpr int first_option=int(NativeHallProcessor::legacy_host_program_count);
+    const int next_program=option?first_option+(program-first_option+1)%3:
+        program<6?(program+1)%6:6+(program-6+1)%int(cineol::xl::graphs.size());
     set(*p,"clean_mode",clean?1.f:0.f);
     set(*p,"low_latency",low?1.0f:0.0f);set(*p,"mix",mix);if(dirt>=0) set(*p,"analog",1-dirt);
     p->setPlayConfigDetails(mono?1:2,2,rate,2048);p->setNonRealtime(offline);p->prepareToPlay(rate,2048);
@@ -1058,7 +1067,8 @@ static std::vector<float> run(int rate,int block,bool offline,int program,bool m
         if(pos<rate && pos+n>rate) n=rate-pos;
         if(pos==rate) {
             set(*p,"bass",20);set(*p,"mid",16);set(*p,"diffusion",30);set(*p,"analog",dirt>=0?1-dirt:0);
-            set(*p,"algorithm",float((program<6?(program+1)%6:6+(program-6+1)%int(cineol::xl::graphs.size()))));
+            if(option) set(*p,"option_program",float(next_program-first_option+1));
+            else set(*p,"algorithm",float(next_program));
         }
         b.setSize(2,n,false,false,true);
         for(int i=0;i<n;++i) {
@@ -1076,7 +1086,7 @@ static std::vector<float> run(int rate,int block,bool offline,int program,bool m
     auto restored=std::make_unique<NativeHallProcessor>();restored->setStateInformation(state.getData(),int(state.getSize()));
     require(restored->state.getRawParameterValue("bass")->load()==20 &&
             restored->state.getRawParameterValue("diffusion")->load()==30 &&
-            restored->getCurrentProgram()==(program<6?(program+1)%6:6+(program-6+1)%int(cineol::xl::graphs.size())),"parameter/algorithm state round trip");
+            restored->selectedProgram()==next_program,"parameter/algorithm state round trip");
     require(restored->state.getRawParameterValue("low_latency")->load()==(low?1.0f:0.0f),"Low latency state round trip");
     return out;
 }
@@ -1237,7 +1247,7 @@ static void check_plate_predelay() {
 }
 static void check_state_and_ranges() {
     auto p=std::make_unique<NativeHallProcessor>();
-    require(p->getNumPrograms()==int(NativeHallProcessor::program_count) && p->getCurrentProgram()==2,"program count/default");
+    require(p->getNumPrograms()==int(NativeHallProcessor::legacy_host_program_count) && p->getCurrentProgram()==2,"program count/default");
     for(unsigned i=0;i<15;++i)
         require(p->state.getParameter(NativeHallProcessor::ids[i])->getParameterIndex()==int(i),"legacy parameter order changed");
     require(p->state.getParameter("low_latency")->getParameterIndex()==15 &&
@@ -1276,7 +1286,7 @@ static void check_state_and_ranges() {
     require(p->state.getRawParameterValue("low_latency")->load()==0,"old session retained enabled Low latency");
     require(p->state.getRawParameterValue("spillover")->load()==0 &&
             p->state.getRawParameterValue("spillover_time")->load()==5,"old session retained Spillover options");
-    std::cout<<NativeHallProcessor::program_count<<" host programs, parameter indices, pre-delay ranges/text entry, v0.2 migration pass\n";
+    std::cout<<p->getNumPrograms()<<" legacy host programs, parameter indices, pre-delay ranges/text entry, v0.2 migration pass\n";
 }
 static void check_low_latency() {
     auto wait_for_latency=[](NativeHallProcessor& processor,int expected) {
@@ -1427,6 +1437,60 @@ static void check_dirt() {
         "224-to-XL bank recall did not restore and animate Dirt");
     std::cout<<"Dirt: continuous native sound at intermediate amounts, bounded + block invariant, fractional presets, marquee pause/scroll pass\n";
 }
+static void check_option_programs() {
+    auto p=std::make_unique<NativeHallProcessor>();
+    require(p->originalOptionsReady(),"additional 224 programs require the expanded bank");
+    auto* legacy=p->state.getParameter("algorithm");
+    require(p->getNumPrograms()==28 && legacy->getNumSteps()==28,"legacy Algorithm automation scale changed");
+    for(int program=0;program<28;++program) {
+        legacy->setValueNotifyingHost(float(program)/27.f);
+        require(p->selectedProgram()==program,"legacy normalized automation selected another program");
+    }
+    auto old=p->state.copyState();
+    old.setProperty("firmware_id","224xl-v8.21",nullptr);
+    for(unsigned i=NativeHallProcessor::option_program_index;i<NativeHallProcessor::parameter_count;++i)
+        old.removeChild(old.getChildWithProperty("id",NativeHallProcessor::ids[i]),nullptr);
+    juce::MemoryBlock legacy_session;
+    juce::AudioProcessor::copyXmlToBinary(*old.createXml(),legacy_session);
+
+    p->selectAlgorithm(30);
+    require(p->ready() && !p->usesXL() && p->algorithmName(30)=="Chorus A","Chorus A host selection failed");
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p->createEditor());
+    auto* voice=dynamic_cast<juce::Slider*>(find(*editor,"chorus_pair_1"));
+    require(voice && voice->isVisible() && voice->getMinimum()==0 && voice->getMaximum()==31,
+        "Chorus A must expose zero-to-full voice levels");
+    require(!find(*editor,"depth")->isEnabled() && !find(*editor,"decay_opt")->isEnabled(),
+        "Chorus A exposes unavailable controls");
+    voice->setValue(0,juce::sendNotificationSync);
+    require(p->state.getRawParameterValue("chorus_pair_1")->load()==0,"voice fader wrote the wrong control");
+    PresetTestFiles files;
+    const auto file=files.folder.getChildFile("Chorus A.cineol224");
+    require(p->savePreset(file).wasOk(),"Chorus A preset save failed");
+    p->setStateInformation(legacy_session.getData(),int(legacy_session.getSize()));
+    require(p->selectedProgram()==27 && p->usesXL() && p->state.getRawParameterValue("option_program")->load()==0,
+        "legacy session retained the previously selected additional program");
+    require(p->loadPreset(file).wasOk() && p->selectedProgram()==30 &&
+            p->state.getRawParameterValue("chorus_pair_1")->load()==0,"Chorus A preset recall failed");
+    const auto* delay=p->state.getParameter("option_predelay");
+    for(int program=28;program<31;++program) {
+        p->selectAlgorithm(program);
+        const auto index=NativeHallProcessor::originalIndex(program);
+        require(delay->getText(0,0).getIntValue()==native_hall::predelay_minima[index] &&
+            delay->getText(1,0).getIntValue()==native_hall::predelay_minima[index]+native_hall::predelay_spans[index],
+            "additional 224 pre-delay range is wrong");
+    }
+
+    for(int program=28;program<31;++program) for(int rate:{44100,48000,96000}) for(bool clean:{false,true}) {
+        const auto a=run(rate,128,false,program,false,false,1,-1,clean);
+        const auto b=run(rate,511,true,program,false,false,1,-1,clean);
+        require(a==b,"additional 224 audio depends on block size");
+        double energy=0;
+        for(float sample:a) energy+=double(sample)*sample;
+        require(energy>1e-6,"additional 224 program is silent");
+    }
+    require(allocations==0 && releases==0,"additional program processing allocated or released memory");
+    std::cout<<"Additional 224 programs: old automation/session, presets, voice faders, Original/Clean and 44.1/48/96 kHz pass\n";
+}
 static void check_xl() {
     PresetTestFiles files;auto p=std::make_unique<NativeHallProcessor>();
     const auto bank=files.folder.getChildFile("Cross Engine.cineolbank");
@@ -1494,7 +1558,7 @@ static void check_xl() {
         p->setPlayConfigDetails(2,2,rate,128);reference->setPlayConfigDetails(2,2,rate,128);
         p->prepareToPlay(rate,128);reference->prepareToPlay(rate,128);
         juce::AudioBuffer<float> actual(2,128),expected(2,128);juce::MidiBuffer midi;
-        for(int program=0;program<int(NativeHallProcessor::program_count);++program) {
+        for(int program=0;program<int(NativeHallProcessor::legacy_host_program_count);++program) {
             p->setCurrentProgram(program);reference->setCurrentProgram(program);
             if(program==6) {
                 require(p->loadBankPreset("Original",bank).wasOk() && !p->usesXL(),"XL to 224 recall failed");
@@ -1514,25 +1578,25 @@ static void check_xl() {
                 }
             }
             const bool finite_effect=NativeHallProcessor::isXL(program) &&
-                (cineol::xl::graphs[program-native_hall::program_count].bank==4 ||
-                 cineol::xl::Graph(program-native_hall::program_count)==cineol::xl::Graph::inverse_room);
+                (cineol::xl::graphs[program-NativeHallProcessor::xl_program_begin].bank==4 ||
+                 cineol::xl::Graph(program-NativeHallProcessor::xl_program_begin)==cineol::xl::Graph::inverse_room);
             if(!finite_effect) require(tail>1e-8,"native algorithm has no reverb tail");
             require(p->getLatencySamples()==reference->getLatencySamples(),"engine switch changed latency");
         }
     }
     juce::MemoryBlock session;p->getStateInformation(session);auto restored=std::make_unique<NativeHallProcessor>();
     restored->setStateInformation(session.getData(),int(session.getSize()));
-    require(restored->getCurrentProgram()==int(NativeHallProcessor::program_count)-1 && restored->usesXL() &&
+    require(restored->getCurrentProgram()==int(NativeHallProcessor::legacy_host_program_count)-1 && restored->usesXL() &&
         restored->state.getRawParameterValue("xl_diffusion")->load()==p->state.getRawParameterValue("xl_diffusion")->load(),"XL session round trip failed");
-    std::cout<<"Unified selection + cross-engine presets/session/tails: "<<NativeHallProcessor::program_count<<" algorithms, 44.1/48/96k pass\n";
-    for(int program=6;program<int(NativeHallProcessor::program_count);++program) for(int rate:{44100,48000,96000}) {
+    std::cout<<"Unified selection + cross-engine presets/session/tails: "<<NativeHallProcessor::legacy_host_program_count<<" algorithms, 44.1/48/96k pass\n";
+    for(int program=6;program<int(NativeHallProcessor::legacy_host_program_count);++program) for(int rate:{44100,48000,96000}) {
         auto a=run(rate,128,false,program),b=run(rate,511,true,program);
         require(a==b && a==run(rate,20000,false,program),"XL output depends on block size/offline mode");
         require(a==run(rate,128,false,program,false,true),"XL low-latency wet changed DSP");
         run(rate,333,false,program,true);
         std::cout<<"XL "<<program-5<<", "<<rate<<" Hz: native audio, block invariance, wet-only + mono pass\n";
     }
-    for(int program=6;program<int(NativeHallProcessor::program_count);++program) {
+    for(int program=6;program<int(NativeHallProcessor::legacy_host_program_count);++program) {
         p->setCurrentProgram(program);set(*p,"mix",0);set(*p,"low_latency",0);p->prepareToPlay(48000,128);
         juce::AudioBuffer<float> dry(2,128);juce::MidiBuffer events;
         for(unsigned n=0;n<100;++n) {dry.clear();audio=true;p->processBlock(dry,events);audio=false;}
@@ -1858,7 +1922,8 @@ static void check_clock_experiment() {
         const int expected_latency=expected_bridge.latency()+int(std::lround(cineol::SpaceClock::latency*double(rate)/48000));
         for(int program=0;program<int(NativeHallProcessor::program_count);++program) {
             if(rate!=48000 && program!=2 && program!=6 && program!=9 && program!=21)continue;
-            p.setCurrentProgram(program);
+            if(!p.programAvailable(program)) continue;
+            p.selectAlgorithm(program);
             for(float space:{0.f,.5f,1.f}) {
                 set(p,"space",space);set(p,"analog",1-space);set(p,"filters_follow_clock",space==.5f?1:0);
                 require(std::abs(p.dspRate()-p.nominalDspRate()*(1-.5*space))<.01,"display rate or algorithm ratio wrong");
@@ -1890,7 +1955,7 @@ static void check_clock_experiment() {
     require(std::abs(restored.state.getRawParameterValue("space")->load()-.77f)<1e-5f && restored.state.getRawParameterValue("filters_follow_clock")->load()==1 && restored.state.getRawParameterValue("output_rear_l")->load()==3,"new session parameters lost");
     PresetTestFiles files;const auto preset=files.folder.getChildFile("experiment.cineol224");require(p.savePreset(preset).wasOk(),"new preset save failed");
     set(p,"space",0);require(p.loadPreset(preset).wasOk() && std::abs(p.state.getRawParameterValue("space")->load()-.77f)<1e-5f,"new preset recall failed");
-    auto xml=juce::XmlDocument::parse(preset);require(xml && xml->getIntAttribute("version")==7,"new preset schema missing");
+    auto xml=juce::XmlDocument::parse(preset);require(xml && xml->getIntAttribute("version")==8,"new preset schema missing");
     auto legacy=juce::ValueTree::fromXml(*xml);legacy.setProperty("version",4,nullptr);
     for(unsigned i=NativeHallProcessor::legacy_parameter_count;i<NativeHallProcessor::parameter_count;++i)legacy.removeChild(legacy.getChildWithProperty("id",NativeHallProcessor::ids[i]),nullptr);
     require(legacy.createXml()->writeTo(preset) && p.loadPreset(preset).wasOk(),"legacy v4 preset rejected");
@@ -1899,7 +1964,7 @@ static void check_clock_experiment() {
     auto* space=find(*editor,"space");auto* dirt=find(*editor,"dirt");auto* help=find(*editor,"help");auto* gear=find(*editor,"settings");
     require(space && dirt && space->getX()<dirt->getX() && help->getX()<gear->getX() && gear->getX()-help->getX()<100,"approved Space/Dirt/help layout missing");
     require(find(*editor,"output_rear_l") && find(*editor,"output_rear_r") && find(*editor,"screen_value_9"),"quad routing display missing");
-    std::cout<<"Clock Experiment: "<<cases<<" moving-clock/Dirt/link cases, all28 algorithms,44.1/48/96k,quad rear energy="<<rear_energy<<",callback new/delete=0,legacy/session/preset/UI checks pass\n";
+    std::cout<<"Clock Experiment: "<<cases<<" moving-clock/Dirt/link cases, available algorithms,44.1/48/96k,quad rear energy="<<rear_energy<<",callback new/delete=0,legacy/session/preset/UI checks pass\n";
 }
 #include "hidden_plugin_check.hpp"
 static void probe_clock_experiment() {
@@ -1957,7 +2022,8 @@ int main(int argc,char** argv) {
         std::cout<<"Appearance "<<option<<": passed\n";
         return 0;
     }
-    const bool original_fixture=argc==3 && (option=="--bank" || option=="--predelay-check" || option=="--spillover-224-check" || option=="--spillover-224-cpu" || option=="--hidden-cpu");
+    const bool original_fixture=argc==3 && (option=="--bank" || option=="--predelay-check" || option=="--option-programs-check" ||
+        option=="--spillover-224-check" || option=="--spillover-224-cpu" || option=="--hidden-cpu");
     const bool clean_fixture=argc==5 && (option=="--clean-check" || option=="--clean-ui-check");
     const bool dual_fixture=clean_fixture || (argc==4 && (option=="--clean-cpu" || option=="--banks" || option=="--preset-check" || option=="--limits-check" ||
         option=="--spillover-check" || option=="--quick-check" || option=="--hidden-check" || option=="--xl-depth-check" || option=="--rich-chorus-check" || option=="--bypass-check" || option=="--focus-check" || option=="--au-idle-check" || option=="--vst3-idle-check" || option=="--display-check" || option=="--help-check" || option=="--clock-experiment-check" || option=="--clock-experiment-probe"));
@@ -1977,7 +2043,10 @@ int main(int argc,char** argv) {
             .getChildFile("cineol-plugin-check-"+juce::Uuid().toString());
         require(test_cache.folder.createDirectory().wasOk(),"could not create test cache");
         set_cache_directory(test_cache.folder);
-        require(juce::File(juce::String::fromUTF8(argv[2])).copyFileTo(CineolRomBank::cacheFile()),"could not seed test bank");
+        const juce::File source(juce::String::fromUTF8(argv[2]));
+        const auto destination=source.getSize()==int64_t(sizeof(native_hall::BankHeader)+native_hall::legacy_bank_size)?
+            CineolRomBank::cacheFile():CineolRomBank::optionsCacheFile();
+        require(source.copyFileTo(destination),"could not seed test bank");
         if(dual_fixture) require(juce::File(juce::String::fromUTF8(argv[3])).copyFileTo(CineolRomBank::xlCacheFile()),"could not seed XL bank");
     }
     if(migration_fixture) {
@@ -2007,6 +2076,7 @@ int main(int argc,char** argv) {
     if(argc==4 && option=="--display-check") {check_display_controls();return 0;}
     if(argc==4 && option=="--help-check") {check_parameter_help();return 0;}
     if(argc==3 && option=="--predelay-check") {check_state_and_ranges();check_plate_predelay();return 0;}
+    if(argc==3 && option=="--option-programs-check") {check_option_programs();return 0;}
     if(argc==4 && option=="--xl-depth-check") {check_xl_depth_endpoints();return 0;}
     if(argc==4 && option=="--rich-chorus-check") {check_rich_chorus_plugin();return 0;}
     if(argc==4 && std::string(argv[1])=="--focus-check") {check_editor_window_focus();return 0;}

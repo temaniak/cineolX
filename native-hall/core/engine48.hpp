@@ -67,7 +67,7 @@ public:
         bank_=nullptr;hall_.prepare(profile);initialize();return true;
     }
     bool prepare(const ProgramBank& bank,unsigned program=2) noexcept {
-        bank_=&bank;current_program_=std::min(program,program_count-1);
+        bank_=&bank;current_program_=std::min(program,bank.available_programs-1);
         hall_.prepare(bank,current_program_);initialize();params_.program=current_program_;return true;
     }
     // Desktop firmware switches reuse kernels prepared outside processing.
@@ -76,7 +76,7 @@ public:
         input_.prepare();output_.prepare();
     }
     bool activate(const ProgramBank& bank,unsigned program=2) noexcept {
-        bank_=&bank;current_program_=std::min(program,program_count-1);
+        bank_=&bank;current_program_=std::min(program,bank.available_programs-1);
         hall_.prepare(bank,current_program_);reset_audio();params_.program=current_program_;return true;
     }
 private:
@@ -92,7 +92,7 @@ private:
 public:
     void set_parameters(const Parameters& p) noexcept {
         const bool controls_changed=!controls_applied_ || !same_controls(params_.hall,p.hall);
-        const unsigned program=std::min(p.program,program_count-1);
+        const unsigned program=bank_?std::min(p.program,bank_->available_programs-1):p.program;
         const bool program_changed=bank_ && program!=current_program_;
         params_=p; params_.mix=std::clamp(p.mix,0.0f,1.0f);
         params_.output_left=std::clamp(p.output_left,0,3);params_.output_right=std::clamp(p.output_right,0,3);

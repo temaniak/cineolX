@@ -13,8 +13,26 @@ constexpr int display_global_x=global_fader_x-variable_fader_x,display_divider_x
 constexpr const char* captions[]={"BASS","MID","CROSSOVER","TREBLE","DEPTH","PRE-DELAY",
     "DIFFUSION","INPUT","MIX"};
 constexpr const char* hidden_captions[]={"MOD RATE","MOD DEPTH","OPT RESP"};
-const char* caption(unsigned index) {return index>=NativeHallProcessor::mod_rate_index?
-    hidden_captions[index-NativeHallProcessor::mod_rate_index]:captions[index];}
+constexpr const char* chorus_captions[]={"PAIR 1","PAIR 2","PAIR 3","PAIR 4"};
+const char* caption(unsigned index) {
+    if(index>=NativeHallProcessor::chorus_pair_begin) return chorus_captions[index-NativeHallProcessor::chorus_pair_begin];
+    if(index==NativeHallProcessor::option_predelay_index) return "PRE-DELAY";
+    return index>=NativeHallProcessor::mod_rate_index?hidden_captions[index-NativeHallProcessor::mod_rate_index]:captions[index];
+}
+constexpr int menuProgram(int row) {
+    constexpr int first=NativeHallProcessor::xl_program_begin;
+    constexpr int options=native_hall::program_count-first;
+    if(row<first) return row;
+    return row<first+options?int(NativeHallProcessor::legacy_host_program_count)+row-first:row-options;
+}
+unsigned originalFaderParameter(int program,unsigned slot) {
+    if(NativeHallProcessor::isOptionProgram(program) && slot==5) return NativeHallProcessor::option_predelay_index;
+    if(NativeHallProcessor::isChorusA(program) && slot<4) return NativeHallProcessor::chorus_pair_begin+slot;
+    return slot;
+}
+bool originalOptimizationAvailable(int program) {
+    return !NativeHallProcessor::isOptionProgram(program) || NativeHallProcessor::originalIndex(program)==6;
+}
 constexpr int display_width=panel_width-2*variable_fader_x;
 constexpr int faderX(unsigned slot) {return slot<6?variable_fader_x+int(slot)*fader_step:global_fader_x+int(slot-6)*global_fader_step;}
 constexpr unsigned route_indices[]={12,13,NativeHallProcessor::rear_left_index,NativeHallProcessor::rear_right_index};
@@ -890,7 +908,7 @@ private:
         const auto* firmware=cineol::find_firmware(entry.firmware.toStdString());
         const auto model=entry.firmware=="224-v4.4"?juce::String("224"):entry.firmware=="224xl-v8.21"?juce::String("224 XL"):
             firmware?juce::String(firmware->name.data()):entry.firmware;
-        return processor_.getProgramName(entry.algorithm)+" · "+model;
+        return processor_.algorithmName(entry.algorithm)+" · "+model;
     }
     bool available(const NativeHallProcessor::PresetInfo& entry) const {
         const auto* firmware=cineol::find_firmware(entry.firmware.toStdString());
@@ -947,19 +965,20 @@ private:
     void dismiss() {setVisible(false);if(onClose) onClose();}
     struct FilterModel final : juce::ListBoxModel {
         explicit FilterModel(PresetBrowser& browser):owner(browser) {}
-        int getNumRows() override {return owner.processor_.getNumPrograms();}
+        int getNumRows() override {return int(NativeHallProcessor::program_count);}
         void paintListBoxItem(int row,juce::Graphics& g,int width,int height,bool) override {
             if(!juce::isPositiveAndBelow(row,getNumRows())) return;
-            const bool selected=owner.selected_[size_t(row)];
+            const int program=menuProgram(row);
+            const bool selected=owner.selected_[size_t(program)];
             if(selected) {g.setColour(juce::Colour(0xff6d2c28));g.fillRect(0,0,width,height);}
             g.setColour(selected?juce::Colours::white:ink);g.drawRect(10,height/2-7,14,14,1);
             if(selected) {juce::Path tick;tick.startNewSubPath(12,float(height/2));tick.lineTo(16,float(height/2+4));tick.lineTo(22,float(height/2-4));g.strokePath(tick,juce::PathStrokeType(2));}
-            g.setFont(font(18));g.drawText(owner.processor_.getProgramName(row),34,0,width-91,height,juce::Justification::centredLeft);
-            g.setFont(font(15));g.drawText(NativeHallProcessor::isXL(row)?"XL":"224",width-48,0,40,height,juce::Justification::centredRight);
+            g.setFont(font(18));g.drawText(owner.processor_.algorithmName(program),34,0,width-91,height,juce::Justification::centredLeft);
+            g.setFont(font(15));g.drawText(NativeHallProcessor::isXL(program)?"XL":"224",width-48,0,40,height,juce::Justification::centredRight);
         }
-        void listBoxItemClicked(int row,const juce::MouseEvent&) override {owner.toggleFilter(row);}
-        void returnKeyPressed(int row) override {owner.toggleFilter(row);}
-        juce::String getTooltipForRow(int row) override {return owner.processor_.getProgramName(row)+": click to include or remove this algorithm. Multiple selections are allowed.";}
+        void listBoxItemClicked(int row,const juce::MouseEvent&) override {if(juce::isPositiveAndBelow(row,getNumRows())) owner.toggleFilter(menuProgram(row));}
+        void returnKeyPressed(int row) override {if(juce::isPositiveAndBelow(row,getNumRows())) owner.toggleFilter(menuProgram(row));}
+        juce::String getTooltipForRow(int row) override {return owner.processor_.algorithmName(menuProgram(row))+": click to include or remove this algorithm. Multiple selections are allowed.";}
         PresetBrowser& owner;
     };
     struct PresetModel final : juce::ListBoxModel {
@@ -1080,10 +1099,12 @@ private:
     void update() {
         const bool busy=processor_.importingRoms();progress_=processor_.importProgress();
         const bool original_ready=processor_.programAvailable(0),xl_ready=processor_.programAvailable(6);
+        const bool options_ready=processor_.originalOptionsReady();
         const auto status=processor_.romStatus();
         if(!busy) {
-            if(status.endsWith("ready.") && ((original_ready && !original_ready_) || (xl_ready && !xl_ready_))) requested_=false;
-            original_ready_=original_ready;xl_ready_=xl_ready;
+            if(status.endsWith("ready.") && ((original_ready && !original_ready_) || (xl_ready && !xl_ready_) ||
+                    (options_ready && !options_ready_))) requested_=false;
+            original_ready_=original_ready;xl_ready_=xl_ready;options_ready_=options_ready;
         }
         status_.setText(status,juce::dontSendNotification);
         choose_.setVisible(!busy);choose_.setEnabled(!busy && !chooser_open_);
@@ -1099,7 +1120,7 @@ private:
     juce::ProgressBar progress_bar_;
     std::unique_ptr<juce::FileChooser> chooser_;
     bool chooser_open_=false;
-    bool requested_=false,original_ready_=false,xl_ready_=false;
+    bool requested_=false,original_ready_=false,xl_ready_=false,options_ready_=false;
 };
 }
 
@@ -1113,7 +1134,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
         settings_panel_.onAppearanceChanged=[this]{applyAppearance();};
         for(unsigned slot=0;slot<display_.values.size();++slot) {
             auto& value=display_.values[slot];
-            value.onDragStart=[this,slot]{if(slot<6) {if(displayed_xl_) focused_xl_slot_=slot;else focused_=page_==0?slot:page_==2?NativeHallProcessor::mod_rate_index+std::min(slot,2u):6;}if(value_attachments_[slot]) {value_dragging_[slot]=true;value_attachments_[slot]->beginGesture();}};
+            value.onDragStart=[this,slot]{if(slot<6) {if(displayed_xl_) focused_xl_slot_=slot;else focused_=page_==0?originalFaderParameter(processor_.selectedProgram(),slot):page_==2?NativeHallProcessor::mod_rate_index+std::min(slot,2u):6;}if(value_attachments_[slot]) {value_dragging_[slot]=true;value_attachments_[slot]->beginGesture();}};
             value.onDragEnd=[this,slot]{endValueGesture(slot);};
             value.onValueChange=[this,slot]{
                 if(binding_values_ || !value_attachments_[slot]) return;
@@ -1238,6 +1259,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
         clean_attachment_=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("clean_mode"),[this](float value){applyClean(value);});
         clean_attachment_->sendInitialUpdate();
         algorithm_attachment_=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("algorithm"),[this](float){refreshProgram();});
+        option_program_attachment_=std::make_unique<juce::ParameterAttachment>(*processor_.state.getParameter("option_program"),[this](float){refreshProgram();});
         algorithm_attachment_->sendInitialUpdate();
         const auto quick_cap=clean_skin_?clean_quick_:original_quick_;
         for(unsigned slot=0;slot<quick_keys_.size();++slot) {
@@ -1290,7 +1312,7 @@ struct CineolEditor::Panel final : public juce::Component,private juce::Timer,pr
 private:
     // Native-only variation occupies the first unused fader after Size and
     // Stop Delay on Dark Hall page 5. Firmware cells/host IDs never move.
-    bool darkVariation(unsigned slot) const {return processor_.getCurrentProgram()==8 && page_==4 && slot==2;}
+    bool darkVariation(unsigned slot) const {return processor_.selectedProgram()==8 && page_==4 && slot==2;}
     void applyClean(float value) {
         clean_skin_=value>=.5f;
         look_.setClean(clean_skin_);getProperties().set("clean_skin",clean_skin_);
@@ -1366,13 +1388,14 @@ private:
     }
     void showAlgorithms() {
         juce::PopupMenu menu;menu.setLookAndFeel(&look_);
-        for(int program=0;program<processor_.getNumPrograms();++program) {
-            if(program==0) menu.addSectionHeader("224");
-            if(program==6) {menu.addSeparator();menu.addSectionHeader("224 XL");}
-            menu.addItem(program+1,processor_.getProgramName(program),processor_.programAvailable(program),program==processor_.getCurrentProgram());
+        for(int row=0;row<int(NativeHallProcessor::program_count);++row) {
+            const int program=menuProgram(row);
+            if(row==0) menu.addSectionHeader("224");
+            if(row==int(native_hall::program_count)) {menu.addSeparator();menu.addSectionHeader("224 XL");}
+            menu.addItem(program+1,processor_.algorithmName(program),processor_.programAvailable(program),program==processor_.selectedProgram());
         }
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&display_.algorithm).withMinimumWidth(310).withStandardItemHeight(30).withMaximumNumColumns(1),
-            [safe=juce::Component::SafePointer<Panel>(this)](int item){if(safe && item>0) safe->processor_.setCurrentProgram(item-1);});
+            [safe=juce::Component::SafePointer<Panel>(this)](int item){if(safe && item>0) safe->processor_.selectAlgorithm(item-1);});
     }
     void showOutputs(unsigned channel) {
         juce::PopupMenu menu;menu.setLookAndFeel(&look_);auto* parameter=processor_.state.getParameter(NativeHallProcessor::ids[route_indices[channel]]);
@@ -1429,7 +1452,7 @@ private:
         auto* owner=findParentComponentOfClass<juce::AudioProcessorEditor>();
         jassert(owner!=nullptr);if(!owner) {preset_dialog_open_=false;return;}
         auto* dialog=new PresetDialog("Save preset",
-            "Algorithm: "+processor_.getProgramName(processor_.getCurrentProgram())+"\nName this preset to add it to the bank.",
+            "Algorithm: "+processor_.algorithmName(processor_.selectedProgram())+"\nName this preset to add it to the bank.",
             *owner);
         dialog->setLookAndFeel(&look_);
         const auto current=processor_.presetName();
@@ -1455,7 +1478,7 @@ private:
     }
     void bindXL() {
         const auto* data=processor_.xlProgram();binding_xl_=true;
-        const auto graph=cineol::xl::Graph(processor_.getCurrentProgram()-6);
+        const auto graph=cineol::xl::Graph(processor_.selectedProgram()-6);
         // Presentation order only: active firmware slots first, preserving
         // their relative order. Host IDs and bank/ROM cells never move.
         unsigned count=0,active_count=0;
@@ -1472,7 +1495,7 @@ private:
             const bool variation=darkVariation(slot);
             slider.getProperties().set("source_slot",variation?-1:int(source));
             const unsigned cell=data?data->pages[unsigned(page_)].cells[source]:255;
-            const bool active=variation || (cell<48 && data->control_active(cell,cineol::xl::Graph(processor_.getCurrentProgram()-6)));
+            const bool active=variation || (cell<48 && data->control_active(cell,cineol::xl::Graph(processor_.selectedProgram()-6)));
             slider.setParked(!active);slider.setEnabled(active && processor_.ready());
             if(!active) {slider.getProperties().set("parameter_id",juce::String{});slider.setName("Inactive fader");slider.setRange(0,1);slider.setValue(0,juce::dontSendNotification);slider.setTitle("Inactive fader");continue;}
             if(variation) {
@@ -1513,7 +1536,7 @@ private:
         for(unsigned slot=0;slot<6;++slot) {
             if(darkVariation(slot)) continue;
             const unsigned source=xl_source_slots_[slot],cell=page.cells[source];
-            if(cell>=48 || !data.control_active(cell,cineol::xl::Graph(processor_.getCurrentProgram()-6))) continue;
+            if(cell>=48 || !data.control_active(cell,cineol::xl::Graph(processor_.selectedProgram()-6))) continue;
             auto& slider=xl_sliders_[slot];const auto position=slider.visualProportion();
             const unsigned maximum=data.control_maximum(unsigned(page_),source,raw);
             const double range=std::max(xl_scales_[slot],maximum/xl_scales_[slot]*xl_scales_[slot]);
@@ -1525,7 +1548,7 @@ private:
         binding_xl_=false;
     }
     void refreshDisplay() {
-        const int program=processor_.getCurrentProgram();
+        const int program=processor_.selectedProgram();
         const bool xl=processor_.usesXL();
         const unsigned focus=focused_;
         if(!xl) for(unsigned field=0;field<hidden_sliders_.size();++field) {
@@ -1535,7 +1558,7 @@ private:
         auto* focused=processor_.state.getParameter(NativeHallProcessor::ids[focus]);
         auto value=focused->getText(focused->getValue(),0);
         if(focused->getLabel().isNotEmpty()) value+=" "+focused->getLabel();
-        if(!xl) display_.update(program,processor_.getProgramName(program),caption(focus),value);
+        if(!xl) display_.update(program,processor_.algorithmName(program),caption(focus),value);
         display_.firmware.setButtonText(xl?"224 XL":"224");
         display_.updatePreset(processor_.presetName(),processor_.presetModified());
         std::array<juce::String,10> names,values;
@@ -1549,7 +1572,7 @@ private:
                 }
                 const auto* data=processor_.xlProgram();const auto* page=data?&data->pages[unsigned(page_)]:nullptr;
                 const unsigned source=xl_source_slots_[slot],cell=page?page->cells[source]:255;
-                if(cell>=48 || !data->control_active(cell,cineol::xl::Graph(processor_.getCurrentProgram()-6))) {names[slot]="--";values[slot]="--";continue;}
+                if(cell>=48 || !data->control_active(cell,cineol::xl::Graph(processor_.selectedProgram()-6))) {names[slot]="--";values[slot]="--";continue;}
                 names[slot]=juce::String(page->names[source].data());
                 auto raw=data->controls.factory;
                 for(unsigned i=0;i<raw.size();++i) raw[i]=processor_.xlControl(i);
@@ -1560,9 +1583,12 @@ private:
                 // Keep that distinct from a parked/unavailable fader in the UI.
                 values[slot]=formatted.startsWith("--")?"INF"+formatted.substring(2):formatted;continue;
             }
-            const int index=slot>=6?int(slot+1):page_==0?int(slot):page_==2?
+            const int index=slot>=6?int(slot+1):page_==0?int(originalFaderParameter(program,slot)):page_==2?
                 (slot<3?int(NativeHallProcessor::mod_rate_index+slot):-1):slot==0?6:-1;
-            if(index<0 || (index==6 && program==3)) {names[slot]="--";values[slot]="--";continue;}
+            if(index<0 || (index==6 && program==3) || (index==4 && NativeHallProcessor::isChorusA(program)) ||
+                    (index==int(NativeHallProcessor::optimization_response_index) && !originalOptimizationAvailable(program))) {
+                names[slot]="--";values[slot]="--";continue;
+            }
             auto* param=processor_.state.getParameter(NativeHallProcessor::ids[index]);
             names[slot]=index==15?"CHORUS":index==16?"DIFFUSION":caption(unsigned(index));values[slot]=param->getText(param->getValue(),0);
             if(param->getLabel().isNotEmpty()) values[slot]+=" "+param->getLabel();
@@ -1575,7 +1601,7 @@ private:
                 display_.setHelp(slot,darkVariation(slot)?cineol::help::global("dark_stability"):data?cineol::help::xl(unsigned(program),*data,unsigned(page_),xl_source_slots_[slot]):cineol::help::unavailable("Parameter"));
             } else display_.setHelp(slot,source.getTooltip().isEmpty()?cineol::help::unavailable("Unused slot"):source.getTooltip());
         }
-        if(xl) display_.update(program,processor_.getProgramName(program),names[focused_xl_slot_],values[focused_xl_slot_]);
+        if(xl) display_.update(program,processor_.algorithmName(program),names[focused_xl_slot_],values[focused_xl_slot_]);
         display_.updatePages(processor_.parameterPages(),unsigned(page_),processor_.ready());
         display_.getProperties().set("page_index",page_);
         for(unsigned i=0;i<4;++i) {
@@ -1583,7 +1609,8 @@ private:
             display_.outputs[i].setButtonText(juce::String(route_names[i])+" "+juce::String::charToString(char('A'+int(parameter->convertFrom0to1(parameter->getValue())))));
             if(i>=2) continue;
             const auto* data=processor_.xlProgram();
-            const bool unavailable=xl && (!data || (i==0?!data->mode_enhancement_active(cineol::xl::Graph(program-6)):!data->dynamics.enabled));
+            const bool unavailable=xl?(!data || (i==0?!data->mode_enhancement_active(cineol::xl::Graph(program-6)):!data->dynamics.enabled)):
+                i==1 && !originalOptimizationAvailable(program);
             display_.modes[i].setButtonText(juce::String(i==0?"MOD ENH ":"DECAY OPT ")+(unavailable?juce::String("--"):display_.modes[i].getToggleState()?juce::String("ON"):juce::String("OFF")));
         }
         display_.dynamic.setToggleState((processor_.xlControl(42)&1)!=0,juce::dontSendNotification);
@@ -1592,7 +1619,7 @@ private:
         display_.dynamic.setButtonText(juce::String("DYN DECAY ")+(dynamics_available?(display_.dynamic.getToggleState()?"ON":"OFF"):"--"));
     }
     void refreshProgram() {
-        const int program=processor_.getCurrentProgram();
+        const int program=processor_.selectedProgram();
         const bool ready=processor_.ready();const bool xl=processor_.usesXL();
         const bool engine_changed=displayed_program_>=0 && program!=displayed_program_;
         if(engine_changed) tooltips_.hideTip();
@@ -1602,24 +1629,43 @@ private:
         if(engine_changed) for(unsigned slot=0;slot<6;++slot) positions[slot]=slotFader(slot).visualProportion();
         displayed_xl_=xl;
         if(!xl) {
+            for(unsigned slot=0;slot<6;++slot) {
+                const unsigned index=originalFaderParameter(program,slot);
+                auto& slider=sliders_[slot];
+                const auto* id=NativeHallProcessor::ids[index];
+                if(slider.getComponentID()==id) continue;
+                auto* param=processor_.state.getParameter(id);
+                slider_attachments_[slot].reset();
+                slider.onValueChange=nullptr;
+                slider.setComponentID(id);slider.setName(param->getName(40));slider.setTitle(slider.getName());
+                slider.setTextValueSuffix(param->getLabel().isEmpty()?juce::String{}:" "+param->getLabel());
+                slider_attachments_[slot]=std::make_unique<SliderAttachment>(processor_.state,id,slider);
+                slider.onDragStart=[this,index]{focused_=index;refreshDisplay();};
+                slider.onValueChange=slider.onDragStart;
+                focused_=originalFaderParameter(program,0);
+            }
             auto& delay=sliders_[5];
-            const double maximum=24+native_hall::predelay_spans[unsigned(program)];
-            if(delay.getMaximum()!=maximum) {
+            const auto index=NativeHallProcessor::originalIndex(program);
+            const double minimum=NativeHallProcessor::isOptionProgram(program)?native_hall::predelay_minima[index]:24;
+            const double maximum=minimum+native_hall::predelay_spans[index];
+            if(delay.getMaximum()!=maximum || delay.getMinimum()!=minimum) {
                 // Presentation bounds only: preserve the host's raw value and
                 // normalized automation, including old over-limit presets.
-                delay.setRange(24,maximum,1);
-                delay.setValue(processor_.state.getRawParameterValue("predelay")->load(),juce::dontSendNotification);
+                delay.setRange(minimum,maximum,1);
+                delay.setValue(processor_.state.getRawParameterValue(delay.getComponentID())->load(),juce::dontSendNotification);
             }
         }
         rom_setup_.setVisible(rom_setup_.shouldBeVisible());
         display_.firmware.setTooltip(ready?"Engine used by the selected algorithm. Click to import ROMs.":processor_.romStatus()+" Click to import ROMs.");
         for(unsigned i=0;i<sliders_.size();++i) {
             auto& slider=sliders_[i];slider.setVisible(!compact_ && (i>=7 || (!xl && (page_==0?i<6:page_==1 && i==6))));
-            slider.setEnabled(ready && (i!=6 || program!=3));slider.setParked(i==6 && program==3);
-            slider.setTooltip(cineol::help::original(unsigned(program),NativeHallProcessor::ids[i]));
+            const bool inactive=(i==6 && program==3) || (i==4 && NativeHallProcessor::isChorusA(program));
+            slider.setEnabled(ready && !inactive);slider.setParked(inactive);
+            slider.setTooltip(inactive?cineol::help::unavailable(slider.getName()):cineol::help::original(unsigned(program),slider.getComponentID()));
         }
         for(auto& slider:xl_sliders_) slider.setVisible(xl && !compact_);
         for(auto& slider:hidden_sliders_) {slider.setVisible(!xl && page_==2 && !compact_);slider.setEnabled(ready);}
+        hidden_sliders_[2].setEnabled(ready && originalOptimizationAvailable(program));
         if(rebind) {bindXL();bound_program_=program;bound_page_=page_;bound_ready_=ready;}
         if(const auto* data=processor_.xlProgram())
             for(unsigned slot=0;slot<6;++slot) xl_sliders_[slot].setTooltip(darkVariation(slot)?cineol::help::global("dark_stability"):cineol::help::xl(unsigned(program),*data,unsigned(page_),xl_source_slots_[slot]));
@@ -1633,14 +1679,16 @@ private:
         for(auto& output:display_.outputs) output.setEnabled(ready);
         dirt_.setEnabled(ready);dirt_.setVisible(!compact_);space_.setEnabled(ready);space_.setVisible(!compact_);
         const auto* data=processor_.xlProgram();
-        for(unsigned i=0;i<display_.modes.size();++i) display_.modes[i].setEnabled(ready && (!xl || (data && (i==0?data->mode_enhancement_active(cineol::xl::Graph(program-6)):data->dynamics.enabled))));
+        for(unsigned i=0;i<display_.modes.size();++i) display_.modes[i].setEnabled(ready && (xl?
+            (data && (i==0?data->mode_enhancement_active(cineol::xl::Graph(program-6)):data->dynamics.enabled)):
+            (i==0 || originalOptimizationAvailable(program))));
         for(unsigned i=0;i<2;++i) {
             display_.modes[i].setTooltip(cineol::help::mode(unsigned(program),data,i==1));
             display_.outputs[i].setTooltip(cineol::help::output(unsigned(program),i==0));
         }
         display_.dynamic.setTooltip(cineol::help::dynamic(data));
         dirt_.setTooltip(cineol::help::global("dirt"));
-        display_.algorithm.setTooltip(cineol::help::tip("Algorithm: "+processor_.getProgramName(program),
+        display_.algorithm.setTooltip(cineol::help::tip("Algorithm: "+processor_.algorithmName(program),
             "Selects the effect algorithm and its available control pages. Enable Spillover to let the previous program's tail fade through a switch."));
         display_.dynamic.setEnabled(ready && xl && data && data->dynamics.enabled);
         if(program!=displayed_program_) {
@@ -1715,6 +1763,7 @@ private:
     PresetBrowser preset_browser_;
     std::array<std::unique_ptr<SliderAttachment>,9> slider_attachments_;
     std::unique_ptr<juce::ParameterAttachment> algorithm_attachment_;
+    std::unique_ptr<juce::ParameterAttachment> option_program_attachment_;
     std::array<std::unique_ptr<juce::ParameterAttachment>,4> output_attachments_;
     std::array<std::unique_ptr<ButtonAttachment>,2> button_attachments_;
     std::unique_ptr<juce::ParameterAttachment> dirt_attachment_;

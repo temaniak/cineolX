@@ -1,6 +1,7 @@
 // Exercise queue/phase assertions in optimized offline checks too.
 #undef NDEBUG
 #include "../desktop/dac22448.hpp"
+#include "../core/program_bank.hpp"
 #include <analog/filters_224.hpp>
 #include <isa-level-cpp/lexicon224x.hpp>
 #include <emulator/timing.hpp>
@@ -20,8 +21,11 @@ void operator delete[](void* p) noexcept {::operator delete(p);}
 static void require(bool ok,const char* message){if(!ok){std::cerr<<message<<'\n';std::exit(1);}}
 
 static void check_capture_rows(const char* prefix) {
-    constexpr unsigned networks[]={0,1,0,2,1,3};
-    for(unsigned program=0;program<6;++program) {
+    native_hall::BankHeader header;
+    std::ifstream bank(prefix,std::ios::binary);
+    const unsigned count=bank.read(reinterpret_cast<char*>(&header),sizeof header) && header.version==2?
+        native_hall::program_count:native_hall::legacy_program_count;
+    for(unsigned program=0;program<count;++program) {
         auto machine=std::make_unique<lexicon224x::Machine>();machine->model=lexicon224x::Model::Lexicon224;
         std::ifstream file(std::string(prefix)+"."+std::to_string(program)+".wcs",std::ios::binary);
         uint8_t image[512];require(bool(file.read(reinterpret_cast<char*>(image),512)),"missing independent WCS fixture");
@@ -30,7 +34,7 @@ static void check_capture_rows(const char* prefix) {
             lexicon224x::fetch(*machine);lexicon224x::converter_clock(*machine);
             for(unsigned c=0;c<4;++c)if(machine->dac_channels>>c&1) {
                 if(row<100)continue; // FPC cold-start pass precedes the periodic schedule.
-                unsigned expected=native_hall::Dac48::capture_rows[networks[program]][c];
+                unsigned expected=native_hall::Dac48::capture_rows[native_hall::program_networks[program]][c];
                 if(row<expected || (row-expected)%100!=0)
                     std::cerr<<"Program "<<program<<" channel "<<c<<" capture row "<<row<<" expected "<<expected<<" + 100*k\n";
                 require(row>=expected && (row-expected)%100==0,"native DAC capture phase differs from FPC/WCS");found|=1u<<c;
@@ -39,7 +43,7 @@ static void check_capture_rows(const char* prefix) {
         }
         require(found==15,"missing DAC channel capture");
     }
-    std::cout<<"Six WCS networks: DAC capture phases match independent FPC, including queued Chamber requests\n";
+    std::cout<<count<<" programs: DAC capture phases match independent FPC, including queued Chamber requests\n";
 }
 
 int main(int argc,char** argv) {
@@ -50,7 +54,8 @@ int main(int argc,char** argv) {
             "DAC event origin differs from original-224 row/propagation timing");
     constexpr double pi=3.14159265358979323846;
     auto actual=std::make_unique<native_hall::Dac48>();
-    for(unsigned network=0;network<4;++network) {
+    constexpr unsigned networks=std::size(native_hall::Dac48::capture_rows);
+    for(unsigned network=0;network<networks;++network) {
         double maximum=0;
         for(int frequency:{0,100,1000,4000,6000,8000,9000,9600,10000}) {
             auto modal=lexicon224x::analog::aout_224_modal();
@@ -92,7 +97,7 @@ int main(int argc,char** argv) {
     tracking=true;
     // Bounded clocks, reset, and topology changes at every host/native phase.
     for(unsigned frame=0;frame<1000000;++frame) {
-        if(frame%137==0)actual->select_network((frame/137)%4);
+        if(frame%137==0)actual->select_network((frame/137)%networks);
         if(frame%170003==0){actual->reset();phase=0;}
         if(phase<32){actual->push(input.data());phase+=75;}
         phase-=32;

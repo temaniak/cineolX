@@ -60,8 +60,15 @@ struct Host {
     std::unique_ptr<AudioPluginInstance> create(unsigned program,bool clean) {
         String error;auto result=formats.createPluginInstance(description,48000,128,error);
         require(result!=nullptr,"Built plugin instantiation failed: "+error);
-        set(*result,"Algorithm",normalized(int(program),0,27));set(*result,"Clean",clean?1.f:0.f);
-        set(*result,"Left Output",0);set(*result,"Right Output",normalized(program>=23?1:2,0,3));
+        require(result->getNumPrograms()==28,"Built plugin changed the legacy Program list");
+        bool legacy_algorithm=false;
+        for(const auto* parameter:result->getParameters()) if(parameter->getName(80)=="Algorithm")
+            legacy_algorithm=parameter->getNumSteps()==28;
+        require(legacy_algorithm,"Built plugin changed the legacy Algorithm scale");
+        if(program<28) set(*result,"Algorithm",normalized(int(program),0,27));
+        else set(*result,"224 Additional Program",normalized(int(program)-27,0,3));
+        set(*result,"Clean",clean?1.f:0.f);
+        set(*result,"Left Output",0);set(*result,"Right Output",normalized(program>=23 && program<28?1:2,0,3));
         set(*result,"Dry / Wet",1);set(*result,"Mode Enhancement",1);set(*result,"Decay Optimization",1);
         result->setRateAndBufferSizeDetails(48000,128);return result;
     }
@@ -101,7 +108,9 @@ int main(int argc,char** argv)try {
     ScopedJuceInitialiser_GUI init;const File bundle(String::fromUTF8(argv[1])),out(String::fromUTF8(argv[4]));
     require(out.createDirectory().wasOk(),"Cannot create validation output directory");const auto cache=out.getChildFile("private-test-cache");
     require(cache.createDirectory().wasOk(),"Cannot create isolated cache");
-    require(File(String::fromUTF8(argv[2])).copyFileTo(cache.getChildFile("programs-v44-import-v1.bank224")) &&
+    const File bank(String::fromUTF8(argv[2]));
+    const bool options=bank.getSize()>123480;
+    require(bank.copyFileTo(cache.getChildFile(options?"programs-v44-import-v2.bank224":"programs-v44-import-v1.bank224")) &&
         File(String::fromUTF8(argv[3])).copyFileTo(cache.getChildFile("programs-v821-native-v5.bankxl")),"Cannot seed isolated test cache");
     require(setenv("CINEOL224_CACHE_DIR",cache.getFullPathName().toRawUTF8(),1)==0,"Cannot set isolated cache");
    #if JUCE_MAC
@@ -145,8 +154,21 @@ int main(int argc,char** argv)try {
             require(a==b,"Built Rate edit changed existing Mod Depth");record("independent_rate",program,clean,a);
             if(program==2 && !clean)wav(out.getChildFile("independent-rate-depth.wav"),a);
         }
+        if(options) for(unsigned program=28;program<31;++program) {
+            const auto configure=[=](int delay,int pair){return [=](auto& p,unsigned) {
+                set(p,"224 Additional Pre-delay",float(delay)/255.f);
+                set(p,"Decay Optimization",program==28?1.f:0.f);
+                if(program==30) set(p,"Chorus A Pair 1 Level",float(pair)/31.f);
+            };};
+            const int delay=program==28?24:program==29?5:12;
+            auto wet=render(host,program,clean,configure(delay,16));
+            auto changed=render(host,program,clean,configure(program==30?delay:delay+39,0));
+            require(wet!=changed,"Additional 224 control did not reach audio processing");
+            record("additional_224",program,clean,wet);
+        }
     }
     require(bool(metrics),"Cannot finish signal metrics");
-    std::cout<<bundle.getFileName()<<": all four regression blocks pass through the actual format; Original/Clean, 48 kHz / 128 frames, seeded noise and input-silent tails\n";
+    std::cout<<bundle.getFileName()<<": legacy regressions"<<(options?" and three additional 224 programs":"")
+        <<" pass through the actual format; Original/Clean, 48 kHz / 128 frames, seeded noise and input-silent tails\n";
     require(cache.deleteRecursively(),"Cannot remove disposable test-bank copies");return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

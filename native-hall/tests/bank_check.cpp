@@ -25,7 +25,7 @@ int main(int argc,char** argv) {
     rejected->programs[0]=bank->programs[0];rejected->programs[0].tail.rows[0]=100;
     require(!rejected->programs[0].valid(0),"bad coefficient row accepted");
     auto hall=std::make_unique<Hall>();auto engine=std::make_unique<Engine48>();
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<bank->available_programs;++program) {
         // Freeze the control clock only for the independent arithmetic test.
         auto quiet=std::make_unique<ProgramBank>(*bank);quiet->programs[program].level_rate_tenths.fill(0);
         quiet->programs[program].initial_decay.amount=0;
@@ -40,9 +40,10 @@ int main(int argc,char** argv) {
         uint32_t random=17;uint64_t wanted_saturations=0;
         for(unsigned frame=0;frame<12000;++frame) {
             if(frame%257==0) {
-                unsigned n=frame/257;c.bass=1+(n*7)%31;c.mid=(n*11)%32;c.crossover=(n*13)%32;
+                unsigned n=frame/257;c.bass=program==chorus_program?(n*7)%32:1+(n*7)%31;
+                c.mid=(n*11)%32;c.crossover=(n*13)%32;
                 c.treble=(n*17)%32;c.depth=(n*19)%72;c.diffusion=1+(n*23)%63;
-                c.predelay_ms=predelay_minima[program]+int((n*29)%129);hall->set_controls(c);
+                c.predelay_ms=predelay_minima[program]+int((n*29)%unsigned(predelay_spans[program]+1));hall->set_controls(c);
                 for(unsigned r=0;r<100;++r) {
                     int coeff=hall->coefficients()[r];
                     model->wcs[r]=(model->wcs[r]&~(0xfc000000u|0x800000u|0x3fffu))
@@ -84,14 +85,14 @@ int main(int argc,char** argv) {
         const auto retained_memory=engine->hall().memory();engine->set_parameters(p);
         require(engine->hall().memory()==retained_memory,"same-program control update cleared the tail");
         tracking=false;double elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
-        require(peak<4 && energy>1e-6 && tail>1e-8,"silent or runaway program");
+        require(peak<4 && energy>1e-6 && (program==chorus_program || tail>1e-8),"silent or runaway program");
         std::cout<<"  48k signal/tail, mode toggles: peak="<<peak<<" tail energy="<<tail<<" host elapsed="<<elapsed<<"s/3s audio\n";
     }
     engine->prepare(*bank,0);Parameters p;p.program=0;p.hall.predelay_ms=24;p.mix=0;engine->set_parameters(p);
     for(unsigned i=0;i<10000;++i){float l,r;engine->process(0,0,l,r);}
     tracking=true;
     // All directed hard switches must take effect at the control update.
-    for(unsigned from=0;from<program_count;++from) for(unsigned to=0;to<program_count;++to) {
+    for(unsigned from=0;from<bank->available_programs;++from) for(unsigned to=0;to<bank->available_programs;++to) {
         p.program=from;engine->set_parameters(p);
         require(engine->active_program()==from,"source selection was deferred");
         for(unsigned n=0;n<128;++n){float l,r;engine->process(0,0,l,r);}
@@ -108,7 +109,7 @@ int main(int argc,char** argv) {
     p.mix=1;
     for(unsigned n=0;n<240000;++n) {
         if(n%96==0) {
-            p.program=(n/96)%6;p.hall.depth=(n/96)%72;p.hall.diffusion=1+(n/96)%63;
+            p.program=(n/96)%bank->available_programs;p.hall.depth=(n/96)%72;p.hall.diffusion=1+(n/96)%63;
             p.hall.predelay_ms=predelay_minima[p.program]+int((n/96)%129);
             p.analog=(n/1920)%2;engine->set_parameters(p);
             require(engine->active_program()==p.program,"rapid selection was deferred");
@@ -119,6 +120,6 @@ int main(int argc,char** argv) {
     p.program=5;engine->set_parameters(p);
     tracking=false;require(engine->active_program()==5,"last selection was deferred");
     require(allocations==0,"heap allocation in processing/control/switching");
-    std::cout<<"36 directed hard switches: immediate, delay cleared, dry exact; 2500 rapid switches: immediate, bounded; heap allocations=0\n";
+    std::cout<<bank->available_programs*bank->available_programs<<" directed hard switches: immediate, delay cleared, dry exact; 2500 rapid switches: immediate, bounded; heap allocations=0\n";
     std::cout<<"Storage: bank="<<sizeof(ProgramBank)<<" program="<<sizeof(ProgramProfile)<<" engine="<<sizeof(Engine48)<<" bytes\n";
 }

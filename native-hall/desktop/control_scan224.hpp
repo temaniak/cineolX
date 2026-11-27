@@ -83,7 +83,7 @@ public:
             case Stage::LevelWord: {
                 level_word_|=peak_;peak_=0;
                 observe(Event::LevelWord,next_,level_word_);
-                level_mean_=uint8_t((controls.bass+controls.mid)/2);
+                level_mean_=hall.decay_mean();
                 level_enabled_=controls.decay_optimization;
                 level_period_=hall.optimization_response();
                 const unsigned duration=level_cycles224(bank,program,hall.decay_state(),level_word_,

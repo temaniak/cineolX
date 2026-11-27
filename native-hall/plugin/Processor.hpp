@@ -33,15 +33,35 @@ public:
     bool producesMidi() const override {return false;}
     bool isMidiEffect() const override {return false;}
     double getTailLengthSeconds() const override {return 70;}
-    int getNumPrograms() override {return int(program_count);}
+    // JUCE uses this count to normalize the VST3 Program parameter.
+    int getNumPrograms() override {return int(legacy_host_program_count);}
     int getCurrentProgram() override;
     void setCurrentProgram(int) override;
     const juce::String getProgramName(int) override;
     void changeProgramName(int,const juce::String&) override {}
     void getStateInformation(juce::MemoryBlock&) override;
     void setStateInformation(const void*,int) override;
+    static constexpr unsigned xl_program_begin=native_hall::legacy_program_count;
+    static constexpr unsigned legacy_host_program_count=xl_program_begin+cineol::xl::graphs.size();
     static constexpr unsigned program_count=native_hall::program_count+cineol::xl::graphs.size();
-    static bool isXL(int program) noexcept {return program>=int(native_hall::program_count);}
+    static constexpr bool isXL(int program) noexcept {
+        return program>=int(xl_program_begin) && program<int(legacy_host_program_count);
+    }
+    static constexpr bool isOptionProgram(int program) noexcept {
+        return program>=int(legacy_host_program_count) && program<int(program_count);
+    }
+    static constexpr unsigned originalIndex(int program) noexcept {
+        return isOptionProgram(program)?unsigned(program)-legacy_host_program_count+xl_program_begin:unsigned(program);
+    }
+    static constexpr bool isChorusA(int program) noexcept {
+        return isOptionProgram(program) && originalIndex(program)==native_hall::chorus_program;
+    }
+    static constexpr int effectiveProgram(int legacy,int option) noexcept {
+        return option?int(legacy_host_program_count)+option-1:legacy;
+    }
+    int selectedProgram() const noexcept;
+    juce::String algorithmName(int) const;
+    void selectAlgorithm(int);
     bool usesXL() const noexcept;
     const cineol::xl::ProgramData* xlProgram() const noexcept;
     unsigned parameterPages() const noexcept;
@@ -55,8 +75,11 @@ public:
             CineolOriginal224Parameters::get(snapshot,CineolOriginal224Parameters::Depth),
             CineolOriginal224Parameters::get(snapshot,CineolOriginal224Parameters::Optimization)};
     }
-    bool programAvailable(int program) const noexcept {return isXL(program)?rom_bank_->xlReady():rom_bank_->ready();}
-    bool ready() const noexcept {return programAvailable(algorithm_parameter_->getIndex());}
+    bool programAvailable(int program) const noexcept {
+        return isXL(program)?rom_bank_->xlReady():isOptionProgram(program)?rom_bank_->optionsReady():rom_bank_->ready();
+    }
+    bool ready() const noexcept {return programAvailable(selectedProgram());}
+    bool originalOptionsReady() const noexcept {return rom_bank_->optionsReady();}
     bool importingRoms() const noexcept {return rom_bank_->importing();}
     double importProgress() const noexcept {return rom_bank_->progress();}
     juce::String romStatus() const {return rom_bank_->status();}
@@ -103,11 +126,12 @@ public:
         "input_db","mix","analog","mode_enh","decay_opt","output_l","output_r","algorithm","xl_chorus","xl_diffusion",
         "xl_00", "xl_01", "xl_02", "xl_03", "xl_04", "xl_05", "xl_06", "xl_07", "xl_08", "xl_09", "xl_10", "xl_11", "xl_12", "xl_13", "xl_14", "xl_15", "xl_16", "xl_17", "xl_18", "xl_19", "xl_20", "xl_21", "xl_22", "xl_23", "xl_24", "xl_25", "xl_26", "xl_27", "xl_28", "xl_29", "xl_30", "xl_31", "xl_32", "xl_33", "xl_34", "xl_35", "xl_36", "xl_37", "xl_38", "xl_39", "xl_40", "xl_41", "xl_42", "xl_43", "xl_44", "xl_45", "xl_46", "xl_47",
         "space","filters_follow_clock","output_rear_l","output_rear_r","mod_rate","mod_depth","optimization_response",
-        "clean_mode","dark_stability"};
+        "clean_mode","dark_stability","option_program","option_predelay","chorus_pair_1","chorus_pair_2","chorus_pair_3","chorus_pair_4"};
     static constexpr unsigned xl_parameter_begin=17;
     static constexpr unsigned legacy_parameter_count=65,space_index=65,filter_link_index=66,rear_left_index=67,rear_right_index=68;
     static constexpr unsigned space_parameter_count=69,mod_rate_index=69,mod_depth_index=70,optimization_response_index=71;
     static constexpr unsigned hidden_parameter_count=72,clean_mode_index=72,dark_stability_index=73;
+    static constexpr unsigned option_program_index=74,option_predelay_index=75,chorus_pair_begin=76;
     static constexpr unsigned parameter_count=std::size(ids);
 private:
     juce::SharedResourcePointer<CineolEditorPreferences> editor_preferences_;
@@ -155,6 +179,7 @@ private:
     int active_program_=-1;
     lexplug::RateBridge bridge_,rear_bridge_;
     juce::AudioParameterChoice* algorithm_parameter_=nullptr;
+    juce::AudioParameterChoice* option_program_parameter_=nullptr;
     std::array<std::atomic<float>*,parameter_count> values_{};
     std::array<float,parameter_count> previous_{};
     std::array<float,parameter_count> stable_values_{}; // Audio-thread snapshot; never follows a partial preset recall.

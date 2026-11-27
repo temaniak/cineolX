@@ -22,7 +22,7 @@ void compact(CoefficientTable<V,C,R>& table,const std::vector<Coefficients>& sam
         bool changed=false;
         for(unsigned i=1;i<V;++i) changed|=samples[i][r]!=samples[0][r];
         if(!changed) continue;
-        check(table.count<R,"too many coefficient rows");
+        check(table.count<R,"too many coefficient rows in "+std::to_string(V)+"-entry table");
         unsigned column=0;
         for(;column<table.columns;++column) {
             bool equal=true;
@@ -74,8 +74,10 @@ std::unique_ptr<ProgramBank> prepare_bank(const RomSet& roms,const Callbacks& ca
     for(unsigned index=0;index<program_count;++index) {
         stage=program_names[index];progress=double(index)/program_count;report();
         unsigned prepared_controls=0;
-        auto& p=bank->programs[index];p.identity=program_identities[index];p.network=index==1 || index==4?1:index==3?2:index==5?3:0;
+        auto& p=bank->programs[index];p.identity=program_identities[index];p.network=program_networks[index];
         button(0,p.identity);wait(400);check((h.memory[0x3f65]&63)==p.identity,"program selection failed");
+        constexpr unsigned factory_addresses[]={0x3f67,0x3f66,0x3f68,0x3f69,0x3f6a,0x3f6d,0x3f6e};
+        for(unsigned i=0;i<p.factory.size();++i) p.factory[i]=h.memory[factory_addresses[i]];
         if(h.memory[0x3f65]&64) button(0,64);
         if(h.memory[0x3f65]&128) button(0,128);
         wait(300);
@@ -103,7 +105,12 @@ std::unique_ptr<ProgramBank> prepare_bank(const RomSet& roms,const Callbacks& ca
             }
             wait(5); // Let deferred WCS bus writes pass the protected DSP rows.
         };
-        Controls base;base.mode_enhancement=base.decay_optimization=false;base.predelay_ms=predelay_minima[index];compile(base);
+        Controls base;
+        if(index>=legacy_program_count) {
+            base.bass=p.factory[0];base.mid=p.factory[1];base.crossover=p.factory[2];
+            base.treble=p.factory[3];base.depth=p.factory[4];base.diffusion=p.factory[6];
+        }
+        base.mode_enhancement=base.decay_optimization=false;base.predelay_ms=predelay_minima[index];compile(base);
         p.coefficients=capture();p.offsets=offsets();
         if(!callbacks.capture_prefix.empty()) {
             std::ofstream listing(callbacks.capture_prefix+"."+std::to_string(index)+".txt");
@@ -113,16 +120,29 @@ std::unique_ptr<ProgramBank> prepare_bank(const RomSet& roms,const Callbacks& ca
         }
         p.loop_count=h.memory[0x3e23];check(p.loop_count<=4,"unsupported loop diffusion descriptors");
         for(unsigned i=0;i<p.loop_count;++i) {
-            unsigned a=word(word(0x3e21)+i*3);p.loop_rows[i]=uint8_t(127-(a-0x4000)/4);
+            const unsigned descriptor=word(0x3e21)+i*3;
+            unsigned a=word(descriptor);p.loop_rows[i]=uint8_t(127-(a-0x4000)/4);
+            p.loop_types[i]=h.memory[descriptor+2];
         }
-        p.modulation_flags=h.memory[0x3e29];check((p.modulation_flags&15)<=2,"unsupported modulation descriptors");
+        p.modulation_flags=h.memory[0x3e29];check((p.modulation_flags&15)<=maximum_modulation_taps,"unsupported modulation descriptors");
         std::copy_n(h.memory.begin()+word(0x3e27),(p.modulation_flags&15)*5,p.modulation_descriptors.begin());
+        for(unsigned tap=0;tap<(p.modulation_flags&15);++tap) {
+            const unsigned address=p.modulation_descriptors[5*tap]|unsigned(p.modulation_descriptors[5*tap+1])<<8;
+            check(address>=0x4077 && address<=0x41ff && (address&3)==3,"invalid modulation tap");
+            const unsigned row=127-(address-0x4000)/4;
+            check(row+1<100,"modulation tap is outside the native network");
+            for(unsigned side=0;side<2;++side)
+                p.modulation_negative[2*tap+side]=decode(h.dsp->wcs[row+side],Model::Lexicon224).negative;
+        }
         p.modulation_index=uint16_t(word(0x3e69));p.modulation_period=h.memory[0x3f72];p.modulation_hold=h.memory[0x3f73];
         p.modulation_step=h.memory[0x3f74];p.modulation_mask=h.memory[0x3f75];p.decay_amount=h.memory[0x3f71];
         p.initial_mod_divider=h.memory[0x3e66];p.initial_random_divider=h.memory[0x3e67];p.initial_random_hold=h.memory[0x3e68];
         std::memcpy(&p.initial_decay,h.memory.data()+0x3e32,sizeof p.initial_decay);p.initial_decay.amount=0;
         std::vector<Coefficients> samples;samples.reserve(1024);
-        for(int b=0;b<32;++b) for(int m=0;m<32;++m) {auto c=base;c.bass=b;c.mid=m;compile(c);samples.push_back(capture());}
+        for(int b=0;b<32;++b) for(int m=0;m<32;++m) {
+            auto c=base;c.bass=b;c.mid=m;compile(c);samples.push_back(capture());
+            p.decay_means[unsigned(b*32+m)]=h.memory[0x3e61];
+        }
         compact(p.tail,samples);
         auto sweep=[&](auto& table,int Controls::* member,int count) {
             samples.clear();for(int i=0;i<count;++i) {auto c=base;c.*member=member==&Controls::diffusion?std::max(1,i):i;compile(c);samples.push_back(capture());}compact(table,samples);
@@ -130,19 +150,21 @@ std::unique_ptr<ProgramBank> prepare_bank(const RomSet& roms,const Callbacks& ca
         sweep(p.crossover,&Controls::crossover,32);sweep(p.treble,&Controls::treble,32);
         sweep(p.depth,&Controls::depth,72);sweep(p.diffusion,&Controls::diffusion,64);
         std::vector<Offsets> delays;
-        for(unsigned i=0;i<129;++i) {compile(base,i);delays.push_back(offsets());}
+        const unsigned delay_count=std::max(129,predelay_spans[index]+1);
+        for(unsigned i=0;i<delay_count;++i) {compile(base,i);delays.push_back(offsets());}
         for(unsigned r=0;r<100;++r) {
-            bool changed=false;for(unsigned i=1;i<129;++i) changed|=delays[i][r]!=delays[0][r];
+            bool changed=false;for(unsigned i=1;i<delay_count;++i) changed|=delays[i][r]!=delays[0][r];
             if(!changed) continue;check(p.predelay_count<4,"too many pre-delay rows");
             unsigned j=p.predelay_count++;p.predelay_rows[j]=uint8_t(r);
-            for(unsigned i=0;i<129;++i) p.predelay[i][j]=delays[i][r];
+            for(unsigned i=0;i<delay_count;++i) p.predelay[i][j]=delays[i][r];
         }
         // Combine all controls, then compare every coefficient and offset with
         // ROM. This catches hidden interactions missed by independent sweeps.
         auto native=std::make_unique<Hall>();native->prepare(*bank,index);
         for(unsigned n=0;n<96;++n) {
-            auto c=base;c.bass=1+(n*7)%31;c.mid=(n*11)%32;c.crossover=(n*13)%32;c.treble=(n*17)%32;
-            c.depth=(n*19)%72;c.diffusion=1+(n*23)%63;unsigned delay=(n*29)%129;
+            auto c=base;c.bass=index==chorus_program?(n*7)%32:1+(n*7)%31;
+            c.mid=(n*11)%32;c.crossover=(n*13)%32;c.treble=(n*17)%32;
+            c.depth=(n*19)%72;c.diffusion=1+(n*23)%63;unsigned delay=(n*29)%delay_count;
             c.predelay_ms=int(delay)+predelay_minima[index];compile(c,delay);native->set_controls(c);
             auto wanted=capture();auto wanted_offsets=offsets();
             for(unsigned r=0;r<100;++r) check(native->coefficients()[r]==wanted[r] && native->offsets()[r]==wanted_offsets[r],
@@ -163,12 +185,13 @@ std::unique_ptr<ProgramBank> prepare_bank(const RomSet& roms,const Callbacks& ca
             native->advance_modulation();++comparisons;h.pc_watches[0xc7c]=true;
         };
         wait(2000);h.pc_observer={};h.pc_watches[0xc7c]=false;
+        check(comparisons>1,"missing modulation updates");
         if(callbacks.log) *callbacks.log<<"  Modulation: "<<comparisons-1<<" ROM-clocked updates exact"<<std::endl;
         compile(base);
         // Check the shared level controller and each program's own AP targets.
         unsigned decay_checks=0;bool first=true,pending=false;
-        auto optimized=base;optimized.decay_optimization=true;native->set_controls(optimized);
-        h.memory[0x3f65]=h.memory[0x3f55]=uint8_t(p.identity|128);
+        auto optimized=base;optimized.decay_optimization=p.loop_count!=0;native->set_controls(optimized);
+        h.memory[0x3f65]=h.memory[0x3f55]=uint8_t(p.identity|(optimized.decay_optimization?128:0));
         h.pc_watches[0x0779]=h.pc_watches[0x0228]=true;
         h.pc_observer=[&](uint64_t,cpu::CpuSnapshot cpu) {
             h.pc_watches[cpu.pc]=true;

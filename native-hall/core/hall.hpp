@@ -15,9 +15,9 @@ struct Controls {
 
 // In-memory diagnostic snapshot only; not a bank, plugin parameter or session ABI.
 struct ModulationState {
-    std::array<uint8_t,10> descriptors{};
-    std::array<int8_t,4> coefficients{};
-    std::array<uint16_t,4> offsets{};
+    std::array<uint8_t,5*maximum_modulation_taps> descriptors{};
+    std::array<int8_t,2*maximum_modulation_taps> coefficients{};
+    std::array<uint16_t,2*maximum_modulation_taps> offsets{};
     uint16_t index=0;
     uint8_t divider=1,random_divider=8,hold=1;
 };
@@ -42,9 +42,14 @@ public:
     void observe_decay(int16_t left,int16_t right,unsigned detectors=0) noexcept {
         decay_.observe(left,right,detectors);
     }
+    uint8_t decay_mean() const noexcept {
+        if(algorithm_ && algorithm_->network>=4)
+            return algorithm_->decay_means[unsigned(controls_.bass*32+controls_.mid)];
+        return uint8_t((controls_.bass+controls_.mid)/2);
+    }
     void poll_decay() noexcept {
         if(!profile_ && !algorithm_)return;
-        if(decay_.poll(uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,
+        if(decay_.poll(decay_mean(),controls_.decay_optimization,
                        optimization_response()))
             set_loop_diffusion(decay_.state().amount);
     }
@@ -73,7 +78,7 @@ public:
         decay_.reset(state);level_clock_=0;set_loop_diffusion(state.amount);
     }
     void advance_decay(uint8_t level) noexcept {
-        if(decay_.step(level,uint8_t((controls_.bass+controls_.mid)/2),controls_.decay_optimization,optimization_response()))
+        if(decay_.step(level,decay_mean(),controls_.decay_optimization,optimization_response()))
             set_loop_diffusion(decay_.state().amount);
     }
 private:
@@ -132,8 +137,8 @@ private:
     std::array<int16_t,4> registers_{}, output_{};
     std::array<int8_t,100> c_{};
     std::array<uint16_t,100> offsets_{};
-    // CPU-format address/phase state for the two modulated interpolation taps.
-    std::array<uint8_t,10> mod_{};
+    // CPU-format address/phase state for the modulated interpolation taps.
+    std::array<uint8_t,5*maximum_modulation_taps> mod_{};
     uint16_t position_=1, mod_index_=0;
     uint8_t mod_divider_=1, random_divider_=8, random_hold_=1;
     uint32_t mod_clock_=0, level_clock_=0;

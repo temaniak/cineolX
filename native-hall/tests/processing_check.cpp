@@ -87,7 +87,7 @@ static void check_controls(const native_hall::ProgramBank& bank) {
     auto reference=std::make_unique<native_hall::Engine48>();
     auto actual=std::make_unique<native_hall::Engine48>();
     uint32_t random=31;
-    for(unsigned program=0;program<native_hall::program_count;++program) {
+    for(unsigned program=0;program<bank.available_programs;++program) {
         native_hall::Parameters p;p.program=program;
         for(unsigned pass=0;pass<2;++pass) {
             // Repreparing with the previous settings must invalidate the cache.
@@ -117,7 +117,7 @@ static void check_controls(const native_hall::ProgramBank& bank) {
                         case 32:p.hall.mode_enhancement=!p.hall.mode_enhancement;break;
                         case 33:p.hall.decay_optimization=!p.hall.decay_optimization;break;
                     }
-                    if(k>1200 && k%13==0) p.program=(p.program+1)%6;
+                    if(k>1200 && k%13==0) p.program=(p.program+1)%bank.available_programs;
                     reference->set_parameters(p);actual->set_parameters(p);
                     // Reproduce the previous engine's unconditional Hall write.
                     reference->hall().set_controls(p.hall);

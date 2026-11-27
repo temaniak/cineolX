@@ -1,10 +1,10 @@
 # Cineol-X 224
 
-Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project based on
-the six programs of the **original Lexicon 224, firmware v4.4** plus a desktop
-preview of all 22 **224 XL v8.21** programs. The desktop release is
-**1.2 Alpha**, correcting Plate pre-delay and XL Attack/Depth endpoints and
-making the original-224 modulation controls independent. Global Clean,
+Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project. The
+desktop source supports all nine programs of the **original Lexicon 224 v4.4**
+and all 22 programs of the **224 XL v8.21**. The latest desktop release,
+**1.2 Alpha**, fixed Plate pre-delay and XL Attack/Depth endpoints and made
+the original-224 modulation controls independent. Global Clean,
 Dark Hall variation, restored controls and refined Rich-program timing remain.
 SPACE clock control, converter-filter DIRT and optional four outputs remain.
 The displayed manufacturer is **NK Stuff**, matching Silver-K; existing plugin
@@ -169,7 +169,7 @@ See the [release notes](docs/releases/v1.2Alpha.md) for installation, compatibil
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files
-for the six original-224 programs. The optional 22-program **224 XL** preview
+for the original-224 programs. The optional 22-program **224 XL** preview
 requires a separate complete **224 XL v8.21** ROM set. Use **Choose ROMs...**
 in the plugin; see [ROM requirements and first use](#rom-requirements-and-first-use).
 
@@ -222,6 +222,16 @@ are shipped in this repository or embedded in the desktop plugin.
 | 26 | Plate / Hall (224 XL) |
 | 27 | Plate / Chorus (224 XL) |
 | 28 | Rich Split (224 XL) |
+| 29 | Room A (224) |
+| 30 | Constant Density Plate A (224) |
+| 31 | Chorus A (224) |
+
+The development build groups programs 29–31 with the other 224 programs in
+the menu. The published 1.2 Alpha has programs 1–28. The host's legacy
+**Algorithm** and VST3 **Program** parameters retain their 28 positions for
+existing automation.
+Use **224 Additional Program** to automate selection of the new programs.
+**Use Algorithm** returns selection to the legacy parameter.
 
 The main parameters are Bass Decay, Mid Decay, Crossover, Treble Decay, Depth,
 Pre-delay, Diffusion, Input Gain, Dry/Wet and Program. The plugin also exposes
@@ -229,8 +239,13 @@ Mod Enhancement, Decay Optimization, continuous Dirt and independent
 left/right choices from outputs A–D. Original 224 and regular XL reverbs use
 A/C by default; split algorithms use A/B to include both engines, and Chorus &
 Echo uses C/A to preserve the input orientation. Manual algorithm selection
-recalls the XL factory controls and the appropriate output pair. Original 224
-controls, Input and Mix are retained; Dirt now controls filter opening.
+recalls the XL factory controls and the appropriate output pair. Selecting
+one of the first six 224 programs retains the panel controls. Input and Mix
+are retained. Dirt controls filter opening.
+Selecting one of the three additional 224 programs recalls its ROM factory
+settings. Chorus A uses the first four faders for voice-pair levels.
+Constant Density Plate A sums the inputs. Decay Optimization is unavailable
+on Constant Density Plate A and Chorus A.
 
 Bass/Mid labels use the original discrete time scale; they are not a promise of
 measured T60. Diffusion has no effect in Acoustic Chamber. Small and Large Hall
@@ -391,11 +406,10 @@ Sessions saved before these options existed restore Spillover off and 5 seconds.
 The Daisy 224 processing path and shared DSP algorithms are unchanged.
 
 Low latency is saved per instance and defaults to **off**, including when
-loading older sessions. Existing parameter IDs and indices are unchanged.
-The algorithm choice now has 28 entries; its normalized automation scale
-has expanded. The Low latency setting is not automatable. Host latency updates happen outside the audio
-callback, even with the editor closed. Switching may produce a brief transient
-or require a transport restart in hosts that defer compensation changes.
+loading older sessions. The Low latency setting is not automatable. Host latency
+updates happen outside the audio callback, even with the editor closed.
+Switching may produce a brief transient or require a transport restart in
+hosts that defer compensation changes.
 Click the gear again or press Escape to close Settings.
 
 ## ROM requirements and first use
@@ -405,10 +419,10 @@ reverb for the first time, import your own complete supported ROM set:
 
 | Engine | Required firmware | Required files | Programs unlocked |
 | --- | --- | --- | --- |
-| Original Lexicon 224 | **v4.4** | **ROM1–ROM5**, five files of 2,048 bytes each | Six original-224 programs |
+| Original Lexicon 224 | **v4.4** | **ROM1–ROM5**, five files of 2,048 bytes each | Nine original-224 programs |
 | Lexicon 224 XL desktop preview | **v8.21** | **SBC1–SBC3** (2,048 bytes each) and **NVS1–NVS8** (4,096 bytes each), eleven files total | 22 XL programs |
 
-Import both sets to enable all 28 programs. Original-224 ROMs do not unlock XL,
+Import both sets to enable all 31 programs. Original-224 ROMs do not unlock XL,
 and XL ROMs do not unlock original-224 programs. Files must match the expected
 SHA-256 digests; filenames do not matter. **224X v8.1**, **224 XL v8.1A**, other
 versions, modified files and incomplete sets are rejected. Daisy accepts only
@@ -439,13 +453,16 @@ interpret ROMs during audio processing or dynamically add arbitrary algorithms.
 On macOS the resulting cache is stored at:
 
 ```text
-~/Library/Application Support/Cineol-X 224/programs-v44-import-v1.bank224
+~/Library/Application Support/Cineol-X 224/programs-v44-import-v2.bank224
 ~/Library/Application Support/Cineol-X 224/programs-v821-native-v5.bankxl
 ```
 
 Later launches use that cache without asking for the original files. A corrupt
 or incompatible cache returns to the import screen. The cache is not included
 in DAW state. To repeat setup, close all instances and remove this cache file.
+The earlier `programs-v44-import-v1.bank224` still enables the first six 224
+programs. Re-import the same ROM1–ROM5 set to enable Room A, Constant Density
+Plate A and Chorus A. Cineol-X keeps the v1 cache alongside the new one.
 `CINEOL224_CACHE_DIR` selects a different cache directory for isolated tests.
 Runtime ROM import does not upload files or require a network connection.
 The 22-program XL bank uses format 3, including logical controls, page bindings
@@ -503,10 +520,11 @@ build/plugin/NativeHall224_artefacts/Release/VST3/Cineol-X 224.vst3
 build/plugin/NativeHall224_artefacts/Release/Standalone/Cineol-X 224.app
 ```
 
-Local macOS builds are ad-hoc signed. The script does not install or launch
-them. Copy the AU to `~/Library/Audio/Plug-Ins/Components/` or the VST3 to
-`~/Library/Audio/Plug-Ins/VST3/`, then restart or rescan your DAW. Configure
-audio input/output in the standalone's audio settings when needed.
+Local macOS builds are ad-hoc signed. Before updating the AU, back up any older
+`Cineol-X 224.component` from the system or user Components folder to a location
+outside both scan folders. Copy the new AU to `/Library/Audio/Plug-Ins/Components/`
+or the VST3 to `~/Library/Audio/Plug-Ins/VST3/`, then restart or rescan your DAW.
+Configure audio input/output in the standalone's audio settings when needed.
 
 `BUILD_JOBS` controls build parallelism; `JUCE_DIR` reuses a local JUCE checkout.
 For Intel or a universal macOS build, configure `build/plugin` manually with
@@ -544,8 +562,9 @@ gh run list --workflow desktop-build.yml
 gh run download RUN_ID --dir build/downloaded
 ```
 
-Manual runs and pull requests upload downloadable archives without publishing
-by default. On `main`, selecting **publish** (or passing `-f publish=true` to
+Manual runs and pull requests upload downloadable candidate archives by
+default. Candidate filenames include the commit they were built from. On
+`main`, selecting **publish** (or passing `-f publish=true` to
 `gh workflow run`) creates the version tag and release after both builds pass.
 To publish a version, update both the numeric plugin version and
 `CINEOL_RELEASE_VERSION` in `CMakeLists.txt`, add English release
@@ -674,7 +693,7 @@ NATIVE_HALL_ROM_DIR='/path/to/224-v44-roms' ./script/build_plugin.sh --check
 
 Checks cover import/cancellation/cache restart, dry behavior before import,
 processor state and automation, allocation-free processing, event-timed desktop
-ADC/DAC boundaries and all six native networks against the independent row
+ADC/DAC boundaries and all seven original-224 networks against the independent row
 machine. Daisy `--check` also exercises
 voltage normalization, inversion, controller mapping, button gestures, RGB
 colors and stereo DSP before checking the ARM image layout.

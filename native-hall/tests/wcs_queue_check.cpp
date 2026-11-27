@@ -27,7 +27,7 @@ int main(int argc,char** argv) {
     std::ifstream file(argv[1],std::ios::binary);std::vector<char> bytes((std::istreambuf_iterator<char>(file)),{});
     auto bank=std::make_unique<ProgramBank>();require(read_bank(bytes.data(),bytes.size(),*bank),"Invalid bank");
     uint64_t total_writes=0;
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<bank->available_programs;++program) {
         auto hall=std::make_unique<Hall>();hall->prepare(*bank,program);
         Controls controls;controls.predelay_ms=predelay_minima[program];hall->set_controls(controls);
         auto reference=std::make_unique<Machine>();reference->model=Model::Lexicon224;
@@ -39,14 +39,14 @@ int main(int argc,char** argv) {
             reference->wcs[row]=(reference->wcs[row]&~(0xfc000000u|0x800000u|0x3fffu)) |
                 uint32_t(std::abs(c))<<26|(c<0?0x800000u:0)|uint32_t(~hall->offsets()[row]&0x3fff);
         }
-        ControlWriteQueue224 queue;std::array<Event,12> events{};unsigned index=events.size(),peak=0;
+        ControlWriteQueue224 queue;std::array<Event,ControlWriteQueue224::capacity> events{};unsigned index=events.size(),peak=0;
         uint32_t random=224;const auto next=[&](){return random=random*1664525u+1013904223u;};
         for(unsigned frame=0;frame<12000;++frame) {
             if(frame%4==0) {
                 require(queue.size()==0 && index==events.size(),"Pending fixture group did not finish");
                 for(unsigned i=0;i<events.size();++i) {
                     auto& e=events[i];e.write.kind=i%4==0?ControlWrite224::Kind::AddressLow:ControlWrite224::Kind::Coefficient;
-                    e.write.row=uint8_t(bank->programs[program].loop_rows[i/3]+i%3);
+                    e.write.row=uint8_t(bank->programs[program].loop_rows[(i/3)%4]+i%3);
                     if(e.write.kind==ControlWrite224::Kind::AddressLow) {
                         const auto& d=bank->programs[program].modulation_descriptors;
                         e.write.row=uint8_t(127-((unsigned(d[0])|(unsigned(d[1])<<8))-0x4000)/4+(i&1));
@@ -82,7 +82,7 @@ int main(int argc,char** argv) {
                 [](int16_t a,uint16_t b){return uint16_t(a)==b;}),"Fetch-visible queue changed delay memory");
         }
         require(!queue.size() && peak==ControlWriteQueue224::capacity,"Queue boundary/capacity coverage missing");
-        std::cout<<program_names[program]<<": 12000 full-scale passes, 36000 mixed writes, all fetch boundaries bit exact\n";
+        std::cout<<program_names[program]<<": 12000 full-scale passes, "<<3000*events.size()<<" mixed writes, all fetch boundaries bit exact\n";
     }
-    std::cout<<"72000 passes and "<<total_writes<<" writes: fixed graph matches independent row-by-row application\n";
+    std::cout<<12000*bank->available_programs<<" passes and "<<total_writes<<" writes: fixed graph matches independent row-by-row application\n";
 }

@@ -23,5 +23,5 @@ int main(int argc,char** argv) try {
     out.write(reinterpret_cast<const char*>(&header),sizeof header);
     out.write(reinterpret_cast<const char*>(bank.get()),sizeof(ProgramBank));
     if(!out) throw std::runtime_error("bank write failed");
-    std::cout<<"Prepared all six v4.4 programs: "<<sizeof(ProgramBank)<<" bytes\n";
+    std::cout<<"Prepared "<<program_count<<" v4.4 programs: "<<sizeof(ProgramBank)<<" bytes\n";
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

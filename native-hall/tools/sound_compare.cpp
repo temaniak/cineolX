@@ -25,20 +25,26 @@ int main(int argc,char** argv) try {
     }
     require(arguments==10 || arguments==15,"usage: native_224_sound_compare ROM_DIRECTORY BANK OUTPUT_DIRECTORY PROGRAM MODE noise|music SEED AMPLITUDE WARMUP_MS [BASS MID TREBLE DEPTH PREDELAY] [--startup-probe] [--compiler-start]");
     const unsigned program=unsigned(std::stoul(argv[4])),mode=unsigned(std::stoul(argv[5]));
-    require(program<6 && mode<4,"Invalid program/mode");
+    require(program<program_count && mode<4,"Invalid program/mode");
     const std::string fixture=argv[6];require(fixture=="noise" || fixture=="music","Invalid fixture");
     uint32_t random=uint32_t(std::stoul(argv[7]));const float amplitude=std::stof(argv[8]);
     const unsigned warmup=unsigned(std::stoul(argv[9]))*48;
     require(amplitude>0 && amplitude<=2 && warmup<=480000,"Invalid amplitude/warmup");
-    auto bank=read_bank(argv[2]);const auto output=std::filesystem::path(argv[3]);std::filesystem::create_directories(output);
+    auto bank=read_bank(argv[2]);require(program<bank->available_programs,"Program missing from prepared bank");
+    const auto output=std::filesystem::path(argv[3]);std::filesystem::create_directories(output);
     Controls controls;controls.predelay_ms=predelay_minima[program];
+    if(program>=legacy_program_count) {
+        const auto& factory=bank->programs[program].factory;
+        controls.bass=factory[0];controls.mid=factory[1];controls.crossover=factory[2];
+        controls.treble=factory[3];controls.depth=factory[4];controls.predelay_ms=factory[5];controls.diffusion=factory[6];
+    }
     if(arguments==15) {
         controls.bass=std::stoi(argv[10]);controls.mid=std::stoi(argv[11]);controls.treble=std::stoi(argv[12]);
         controls.depth=std::stoi(argv[13]);controls.predelay_ms=std::stoi(argv[14]);
     }
-    require(controls.bass>=1 && controls.bass<=31 && controls.mid>=0 && controls.mid<=31 &&
+    require(controls.bass>=(program==chorus_program?0:1) && controls.bass<=31 && controls.mid>=0 && controls.mid<=31 &&
             controls.treble>=0 && controls.treble<=31 && controls.depth>=0 && controls.depth<=71 &&
-            controls.predelay_ms>=predelay_minima[program] && controls.predelay_ms<=predelay_minima[program]+128,"Invalid controls");
+            controls.predelay_ms==resolve_predelay(program,controls.predelay_ms),"Invalid controls");
     std::ofstream phases;
     if(startup_probe) {
         phases.open(output/"startup.csv");require(bool(phases),"Cannot write startup CSV");

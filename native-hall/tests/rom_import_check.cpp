@@ -92,7 +92,7 @@ static void output_buses(NativeHallProcessor& processor) {
     std::cout<<"Front 1-2 + Rear 3-4 bus declaration/activation, empty-cache safety and stereo fallback pass\n";
 }
 static void compare(NativeHallProcessor& processor) {
-    juce::MemoryBlock bytes;require(CineolRomBank::cacheFile().loadFileAsData(bytes),"missing saved bank");
+    juce::MemoryBlock bytes;require(CineolRomBank::optionsCacheFile().loadFileAsData(bytes),"missing saved bank");
     auto bank=std::make_unique<native_hall::ProgramBank>();
     require(native_hall::read_bank(bytes.getData(),bytes.getSize(),*bank),"invalid saved bank");
     auto reference=std::make_unique<native_hall::DesktopEngine48>();reference->prepare(*bank);
@@ -153,7 +153,7 @@ static void wait(NativeHallProcessor& processor) {
 }
 static void invalid_imports() {
     auto refresh_ui=[] {juce::Thread::sleep(120);juce::Timer::callPendingTimersSynchronously();};
-    const auto cache=CineolRomBank::cacheFile();
+    const auto cache=CineolRomBank::optionsCacheFile();
     require(!cache.existsAsFile() && !CineolRomBank::xlCacheFile().existsAsFile(),"invalid-import check requires an empty isolated cache");
     const auto folder=cache.getParentDirectory().getChildFile("invalid-rom-fixtures");
     require(folder.createDirectory().wasOk(),"could not create ROM fixtures");
@@ -234,7 +234,7 @@ static void graphics_snapshots(const juce::File& output) {
             p.level_rate_tenths.fill(100);p.modulation_rate_tenths.fill(1000);require(p.valid(i),"graphics synthetic profile");
         }
         native_hall::BankHeader header;header.checksum=native_hall::profile_checksum(bank.get(),sizeof(*bank));
-        juce::FileOutputStream stream(CineolRomBank::cacheFile());
+        juce::FileOutputStream stream(CineolRomBank::optionsCacheFile());
         require(stream.openedOk()&&stream.write(&header,sizeof header)&&stream.write(bank.get(),sizeof(*bank)),"graphics synthetic cache");
     }
     NativeHallProcessor p;require(p.ready(),"graphics fixture not ready");p.setEditorAppearance({1,.8f,false});
@@ -279,7 +279,7 @@ int main(int argc,char** argv) {
             processor.prepareToPlay(48000,256);if(mode=="--cached-xl") compare_xl(processor);else compare(processor);
         } else if(mode=="--add-xl") {
             require(argc==4 && processor.ready() && !processor.programAvailable(6),"add-XL test requires only original cache");
-            juce::MemoryBlock original;require(CineolRomBank::cacheFile().loadFileAsData(original),"original bank missing");
+            juce::MemoryBlock original;require(CineolRomBank::optionsCacheFile().loadFileAsData(original),"original bank missing");
             NativeHallProcessor second;processor.setCurrentProgram(6);second.setCurrentProgram(6);dry(processor);
             processor.setPlayConfigDetails(2,2,48000,256);processor.prepareToPlay(48000,256);
             std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
@@ -288,7 +288,7 @@ int main(int argc,char** argv) {
             wait(processor);require(processor.ready() && second.ready(),"added XL not published to instances");
             juce::MemoryBlock got,wanted,unchanged;
             require(CineolRomBank::xlCacheFile().loadFileAsData(got) && juce::File(juce::String::fromUTF8(argv[3])).loadFileAsData(wanted) && got==wanted,"added XL differs from offline preparation");
-            require(CineolRomBank::cacheFile().loadFileAsData(unchanged) && original==unchanged,"adding XL changed original bank");
+            require(CineolRomBank::optionsCacheFile().loadFileAsData(unchanged) && original==unchanged,"adding XL changed original bank");
             compare_xl(processor);
         } else {
             require(!processor.ready(),"test requires a fresh or invalid cache");
@@ -347,7 +347,7 @@ int main(int argc,char** argv) {
                 if(mode=="--reject" || mode=="--cancel") {
                     require(!processor.ready() && !second.ready(),"unsupported/cancelled import activated processor");
                     if(mode=="--reject") require(processor.romStatus().contains("224 v4.4"),"missing compatibility error");
-                    require(!CineolRomBank::cacheFile().existsAsFile(),"failed import saved a bank");
+                    require(!CineolRomBank::optionsCacheFile().existsAsFile(),"failed import saved a bank");
                     dry(processor);
                 } else {
                     require((mode=="--import" || mode=="--import-xl") && argc==4,"invalid test mode");
@@ -356,7 +356,7 @@ int main(int argc,char** argv) {
                     require(!find(*editor,"rom_setup")->isVisible() && find(*editor,"algorithm")->isEnabled(),
                             "completed import did not reveal the plugin controls");
                     juce::MemoryBlock got,wanted;
-                    require((mode=="--import-xl"?CineolRomBank::xlCacheFile():CineolRomBank::cacheFile()).loadFileAsData(got) &&
+                    require((mode=="--import-xl"?CineolRomBank::xlCacheFile():CineolRomBank::optionsCacheFile()).loadFileAsData(got) &&
                         juce::File(juce::String::fromUTF8(argv[3])).loadFileAsData(wanted) && got==wanted,"runtime bank differs from build-time bank");
                     if(mode=="--import-xl") compare_xl(processor);else compare(processor);
                 }
@@ -365,7 +365,7 @@ int main(int argc,char** argv) {
     }
     // The existing public build workflow already runs --empty on both hosts.
     // Exercise import rejection after its processors have been destroyed.
-    if(mode=="--empty" && !CineolRomBank::cacheFile().existsAsFile() && !CineolRomBank::xlCacheFile().existsAsFile()) invalid_imports();
+    if(mode=="--empty" && !CineolRomBank::optionsCacheFile().existsAsFile() && !CineolRomBank::xlCacheFile().existsAsFile()) invalid_imports();
     require(allocations==0 && releases==0,"audio callback allocated/released memory");
     std::cout<<mode<<": pass; audio new=0, delete=0\n";
 }

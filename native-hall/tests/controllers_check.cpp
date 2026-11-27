@@ -18,7 +18,7 @@ void* operator new[](size_t n){return ::operator new(n);}
 void operator delete[](void* p) noexcept {::operator delete(p);}
 using namespace native_hall;
 static void check_xreg(const char* prefix) {
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<legacy_program_count;++program) {
         auto model=std::make_unique<lexicon224x::Machine>();model->model=lexicon224x::Model::Lexicon224;
         std::ifstream image(std::string(prefix)+"."+std::to_string(program)+".wcs",std::ios::binary);
         uint8_t bytes[512];assert(image.read(reinterpret_cast<char*>(bytes),512));
@@ -40,7 +40,7 @@ static void check_clock_adapter(const ProgramBank& bank) {
     unsigned cancelled=0;
     const auto input=[](unsigned channel,uint64_t pass){return int16_t(uint16_t(pass*(channel?31:71)));};
     const auto mask=[](unsigned channel,uint64_t pass){return unsigned((pass/(channel?11:7))%32);};
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<legacy_program_count;++program) {
         actual->prepare(bank,program);expected->prepare(bank,program);seed->prepare(bank,program);expected->restore_decay(actual->decay_state());
         ControlScan224 clock;clock.reset(program_networks[program]);
         std::array<uint64_t,2> last{};Controls controls;controls.predelay_ms=predelay_minima[program];
@@ -98,14 +98,14 @@ static void check_clock_adapter(const ProgramBank& bank) {
 int main(int argc,char** argv) {
     if(argc==2)check_xreg(argv[1]);else assert(argc==1);
     auto bank=std::make_unique<ProgramBank>();
-    for(unsigned p=0;p<program_count;++p) {
+    for(unsigned p=0;p<legacy_program_count;++p) {
         auto& a=bank->programs[p];a.identity=program_identities[p];a.network=program_networks[p];
         a.modulation_rate_tenths.fill(10240);a.level_rate_tenths.fill(569);
         a.initial_decay.diffusion_period=15;a.initial_decay.diffusion_divider=11;
     }
     auto hall=std::make_unique<DesktopHall>();
     int16_t out[4];Controls controls;controls.mode_enhancement=controls.decay_optimization=false;
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<legacy_program_count;++program) {
         hall->prepare(*bank,program);hall->set_controls(controls);
         assert(hall->decay_state().diffusion_period==0);
         assert(bank->programs[program].initial_decay.diffusion_period==15);
@@ -127,11 +127,11 @@ int main(int argc,char** argv) {
         auto modulation=hall->modulation_state();modulation.divider=11;
         modulation.random_divider=5;modulation.hold=7;modulation.index=177;
         hall->restore_modulation(modulation);
-        tracking=true;hall->select_program((program+1)%program_count);tracking=false;
+        tracking=true;hall->select_program((program+1)%legacy_program_count);tracking=false;
         assert(!std::memcmp(&state,&hall->decay_state(),sizeof state));
         const auto switched=hall->modulation_state();
         assert(switched.divider==11 && switched.random_divider==5 && switched.hold==7);
-        assert(switched.index==bank->programs[(program+1)%program_count].modulation_index);
+        assert(switched.index==bank->programs[(program+1)%legacy_program_count].modulation_index);
         hall->reset();assert(hall->decay_state().diffusion_period==0);
         tracking=true;
         for(unsigned n=0;n<180000;++n) {

@@ -46,7 +46,7 @@ static void check_hidden_controls() {
     PresetTestFiles files;const auto file=files.folder.getChildFile("Hidden.cineol224");
     p.setCurrentProgram(2);set(p,"mode_enh",0);set(p,"mod_rate",1);set(p,"mod_depth",9);set(p,"optimization_response",16);
     require(p.savePreset(file).wasOk(),"hidden preset save failed");
-    auto xml=juce::XmlDocument::parse(file);require(xml && xml->getIntAttribute("version")==7,"hidden preset schema missing");
+    auto xml=juce::XmlDocument::parse(file);require(xml && xml->getIntAttribute("version")==8,"hidden preset schema missing");
     p.setCurrentProgram(3);set(p,"mode_enh",1);
     require(p.loadPreset(file).wasOk(),"hidden preset recall failed");expect(1,9,16);
     require(!p.presetModified(),"recalled hidden preset marked modified");

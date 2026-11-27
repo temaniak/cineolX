@@ -40,7 +40,7 @@ int main(int argc,char** argv) try {
     csv<<"program,mode,passes,calls,writes,samples,call_different,call_peak,call_relative_rms_percent,pass_different,pass_peak,pass_relative_rms_percent,exact_mismatches\n";
     auto engine=std::make_unique<lexplug::Engine>(1);auto& h=engine->host();
     h.audio_observer={};load_roms(*engine,argv[1]);wait(h,9000);button(h,1,4);
-    for(unsigned program=0;program<program_count;++program)for(unsigned mode:{0u,3u}) {
+    for(unsigned program=0;program<legacy_program_count;++program)for(unsigned mode:{0u,3u}) {
         h.row_observer={};h.pc_observer={};h.wcs_observer={};h.pc_watches.fill(false);
         h.set_audio(0,0,0,0);h.set_level_detectors(0,0);h.set_level_detectors(1,0);
         button(h,0,program_identities[program]);wait(h,400);

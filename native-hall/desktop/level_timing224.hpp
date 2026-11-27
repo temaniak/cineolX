@@ -19,9 +19,12 @@ inline unsigned multiply_cycles224(unsigned multiplier) noexcept {
 }
 template<class Write> unsigned loop_gain_cycles224(const ProgramBank& bank,unsigned program,
         uint8_t mean,uint8_t amount,bool half,unsigned cycles,Write&& write) noexcept {
+    const auto& profile=bank.programs[program];
+    if(!profile.loop_count) return cycles+28;
     cycles+=85;unsigned previous_type=128;int gain=4;
-    for(unsigned loop=0;loop<4;++loop) {
-        const auto spec=loop_gain_timing224(program,loop);
+    for(unsigned loop=0;loop<profile.loop_count;++loop) {
+        const unsigned encoded=profile.loop_types[loop];
+        const auto spec=program>=legacy_program_count?LoopGainTiming224{encoded/32,encoded%32}:loop_gain_timing224(program,loop);
         const unsigned type=spec.quarters*32+spec.limit;
         cycles+=65;
         if(type!=previous_type) {
@@ -41,7 +44,7 @@ template<class Write> unsigned loop_gain_cycles224(const ProgramBank& bank,unsig
             // states), then preserve its other two bits in the WCS write.
             cycles+=87+7+31;
             const int value=coefficient==0?gain:coefficient==1?32-gain*gain/32:-gain;
-            const auto row=uint8_t(bank.programs[program].loop_rows[loop]+coefficient);
+            const auto row=uint8_t(profile.loop_rows[loop]+coefficient);
             cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,row,uint8_t(value)});cycles+=20;
             if(coefficient<2)cycles+=55;
         }

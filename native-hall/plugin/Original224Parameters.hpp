@@ -10,7 +10,7 @@ class CineolOriginal224Parameters {
 public:
     enum Field : unsigned {Rate,Depth,Optimization};
     static constexpr unsigned defaults=1u|(4u<<8); // Rate 2, Depth 1, Opt 5.
-    static constexpr unsigned program_mask=31u<<12,mode_bit=1u<<17,restore_bit=1u<<18;
+    static constexpr unsigned program_mask=31u<<12,mode_bit=1u<<17,restore_bit=1u<<18,option_mask=3u<<19;
     static_assert(std::atomic<unsigned>::is_always_lock_free);
     unsigned snapshot() const noexcept {return value_.load(std::memory_order_acquire);}
     static int get(unsigned state,Field field) noexcept {return int((state>>(4*field))&15)+1;}
@@ -28,7 +28,7 @@ public:
     void mode(bool enabled) noexcept {
         update([&](unsigned state) {
             const bool changed=bool(state&mode_bit)!=enabled;
-            if(changed && !(state&restore_bit) && ((state&program_mask)>>12)<6)
+            if(changed && !(state&(restore_bit|option_mask)) && ((state&program_mask)>>12)<6)
                 state=(state&~4095u)|defaults;
             return enabled?state|mode_bit:state&~mode_bit;
         });
@@ -36,8 +36,15 @@ public:
     void program(int program) noexcept {
         update([&](unsigned state) {
             const unsigned bits=unsigned(std::clamp(program,0,27))<<12;
-            if((state&program_mask)!=bits && !(state&restore_bit))state=(state&~4095u)|defaults;
+            if((state&program_mask)!=bits && !(state&(restore_bit|option_mask)))state=(state&~4095u)|defaults;
             return (state&~program_mask)|bits;
+        });
+    }
+    void option(int program) noexcept {
+        update([&](unsigned state) {
+            const unsigned bits=unsigned(std::clamp(program,0,3))<<19;
+            if(!bits && (state&option_mask) && !(state&restore_bit)) state=(state&~4095u)|defaults;
+            return (state&~option_mask)|bits;
         });
     }
     void beginRestore() noexcept {value_.fetch_or(restore_bit,std::memory_order_acq_rel);}
@@ -85,5 +92,16 @@ public:
         :AudioParameterChoice(juce::ParameterID{"algorithm",2},"Algorithm",names,2),controls_(std::move(controls)) {}
 private:
     void valueChanged(int program) override {controls_->program(program);}
+    std::shared_ptr<CineolOriginal224Parameters> controls_;
+};
+
+class CineolOptionProgramParameter final : public juce::AudioParameterChoice {
+public:
+    explicit CineolOptionProgramParameter(std::shared_ptr<CineolOriginal224Parameters> controls)
+        :AudioParameterChoice(juce::ParameterID{"option_program",10},"224 Additional Program",
+            juce::StringArray{"Use Algorithm","Room A","Constant Density Plate A","Chorus A"},0),
+          controls_(std::move(controls)) {}
+private:
+    void valueChanged(int program) override {controls_->option(program);}
     std::shared_ptr<CineolOriginal224Parameters> controls_;
 };

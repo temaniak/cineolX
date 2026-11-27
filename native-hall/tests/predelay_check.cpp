@@ -16,11 +16,11 @@ int main(int argc,char** argv) {
     auto bank=std::make_unique<ProgramBank>();
     require(read_bank(bytes.data(),bytes.size(),*bank),"invalid prepared bank");
     auto hall=std::make_unique<Hall>();
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<bank->available_programs;++program) {
         hall->prepare(*bank,program);
-        for(int offset=0;offset<=128;++offset) {
+        for(int offset=0;offset<=std::max(128,predelay_spans[program]+1);++offset) {
             Controls c;c.predelay_ms=predelay_minima[program]+offset;hall->set_controls(c);
-            const unsigned expected=unsigned((program==1 || program==4)?std::min(offset,107):offset);
+            const unsigned expected=unsigned(std::min(offset,predelay_spans[program]));
             const auto& data=bank->programs[program];
             for(unsigned i=0;i<data.predelay_count;++i)
                 require(hall->offsets()[data.predelay_rows[i]]==data.predelay[expected][i],

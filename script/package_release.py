@@ -52,11 +52,17 @@ def verify_bundle(bundle, platform):
             raise RuntimeError(f'{bundle.name}: expected Windows x64 PE')
 
 
-def package(platform, build_dir, output_dir):
+def package(platform, build_dir, output_dir, candidate=False):
     if (platform == 'macos') != (sys.platform == 'darwin'):
         raise RuntimeError('Package on the build platform so signatures and permissions can be verified')
     label = 'macOS-universal' if platform == 'macos' else 'Windows-x64'
-    name = f'Cineol-X-224-v{version()}-{label}'
+    commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    version_label = f'candidate-{commit[:12]}' if candidate else f'v{version()}'
+    name = f'Cineol-X-224-{version_label}-{label}'
+    notes_dir = ROOT / 'docs/releases'
+    notes = notes_dir / f'v{version()}.md'
+    if candidate and (notes_dir / 'unreleased.md').is_file():
+        notes = notes_dir / 'unreleased.md'
     products = [('VST3', 'Cineol-X 224.vst3')]
     products += [('AU', 'Cineol-X 224.component'), ('Standalone', 'Cineol-X 224.app')] if platform == 'macos' else [('Standalone', 'Cineol-X 224.exe')]
     artefacts = build_dir / 'NativeHall224_artefacts/Release'
@@ -81,14 +87,17 @@ def package(platform, build_dir, output_dir):
             verify_bundle(destination, platform)
         for document in ('README.md', 'NOTICE.md'):
             shutil.copy2(ROOT / document, staging / document)
-        shutil.copy2(ROOT / 'docs/releases' / ('v' + version() + '.md'), staging / 'RELEASE-NOTES.md')
+        shutil.copy2(notes, staging / 'RELEASE-NOTES.md')
         metadata = dict(version=version(), numeric_version=numeric_version(), prerelease=is_prerelease(), platform=label,
-                        commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
-                        dependencies=json.loads((ROOT / 'dependencies.json').read_text()), juce='8.0.14')
+                        commit=commit, dependencies=json.loads((ROOT / 'dependencies.json').read_text()), juce='8.0.14')
+        if candidate:
+            metadata['candidate'] = True
         (staging / 'BUILD-INFO.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
-        install = f'Cineol-X 224 v{version()} - {label}\n\n'
+        install = f'Cineol-X 224 {version_label} - {label}\n\n'
         if platform == 'macos':
-            install += ('Copy AU/Cineol-X 224.component to ~/Library/Audio/Plug-Ins/Components/\n'
+            install += ('Before updating the AU, back up any older Cineol-X 224.component from\n'
+                        'the system or user Components folder outside both AU scan folders.\n'
+                        'Copy AU/Cineol-X 224.component to /Library/Audio/Plug-Ins/Components/\n'
                         'Copy VST3/Cineol-X 224.vst3 to ~/Library/Audio/Plug-Ins/VST3/\n'
                         'Copy Standalone/Cineol-X 224.app to Applications.\n'
                         'Requires macOS 11 or later. Bundles are ad-hoc signed, not notarized.\n'
@@ -104,9 +113,9 @@ def package(platform, build_dir, output_dir):
                     'delay and pre-delay remain. This setting defaults to off and is saved\n'
                     'per instance. A transport restart may be needed after switching.\n\n'
                     'FIRST LAUNCH - IMPORT YOUR ROMS\n'
-                    'Original 224 programs: Lexicon 224 v4.4 ROM1-ROM5, five 2048-byte files.\n'
-                    'XL preview programs: Lexicon 224 XL v8.21, the complete eleven-chip\n'
-                    'set of 2048- and 4096-byte files. Import both sets for all 28 programs.\n'
+                    'Nine original 224 programs use Lexicon 224 v4.4 ROM1-ROM5, five 2048-byte files.\n'
+                    'Twenty-two 224 XL programs use the complete Lexicon 224 XL v8.21\n'
+                    'eleven-chip set of 2048- and 4096-byte files. Import both sets for all 31 programs.\n'
                     'Click Choose ROMs... for ZIPs or all ROM files together, or Choose\n'
                     'folder... for a directory. Wait for preparation; only imported engines\n'
                     'are enabled. Import errors stay visible when adding the other engine.\n'
@@ -114,19 +123,21 @@ def package(platform, build_dir, output_dir):
                     '224X v8.1, 224 XL v8.1A and incomplete or modified sets are rejected.\n'
                     'ROMs and prepared banks are not included. Your files stay local;\n'
                     'later launches use the cache. See README.md for details.\n')
-        install += ('\nUPGRADING TO ' + version() + '\n'
-                    'XL sound corrections require the version-5 prepared cache. Re-import your\n'
-                    'complete original 224XL v8.21 ROM set once after updating. The previous\n'
-                    'XL caches, including the 0.9.6 version-4 cache, are retained. Original-224\n'
-                    'caches and sound presets remain compatible. No re-import is needed if\n'
-                    'the corrected version-5 cache has already been prepared locally.\n'
+        install += ('\nUPDATING AN EXISTING INSTALLATION\n'
+                    'Open the firmware setup and re-import the same Lexicon 224 v4.4 ROM1-ROM5\n'
+                    'to add Room A, Constant Density Plate A and Chorus A to the 224 menu.\n'
+                    'The original six-program cache still opens those first six programs.\n'
+                    'Reuse your 224 XL v5 cache. If you have an older XL cache, import the\n'
+                    'complete 224 XL v8.21 ROM set to prepare the v5 cache.\n'
+                    'Automate the new selections with 224 Additional Program. Choose Use Algorithm\n'
+                    'to return selection to the existing 28-position Algorithm scale.\n'
                     'The editor opens at 1104 x 696; compact display mode is 1104 x 252.\n'
                     'The gear contains Display brightness, Option illumination, Compact\n'
                     'display mode and Clean. Drag screen values up/down; hold Shift for fine adjustment.\n'
                     'Appearance is saved in the DAW session. A host may restore window size.\n'
                     'See RELEASE-NOTES.md for changes, validation and known limitations.\n')
         install += ('\nCLEAN AND DARK HALL VARIATION\n'
-                    'Enable Clean in the gear for higher signal precision on all 28 algorithms\n'
+                    'Enable Clean in the gear for higher signal precision on all 31 programs\n'
                     'and clean panel textures. Dirt still controls filter bandwidth independently.\n'
                     'Both precision paths stay active to preserve tails when switching; this\n'
                     'increases CPU use even with Clean off. Existing presets default to Clean off.\n'
@@ -134,7 +145,7 @@ def package(platform, build_dir, output_dir):
                     'Original at full, and a percentage between. Double-click restores Original.\n'
                     'Stable reduces excessive internal feedback in the v8.21 graph; it is not\n'
                     'v8.1 firmware emulation. Original preserves its possible self-oscillation.\n'
-                    'Preset schema 7 reads versions 1-6; new presets require this or a newer build.\n')
+                    'This build reads preset formats v1-v8 and saves presets in format v8.\n')
         install += ('\nSPACE, DIRT AND OUTPUTS\n'
                     'Raise SPACE to lower the selected DSP clock to half its nominal rate.\n'
                     'The display shows DSP kHz. DIRT now opens converter filters up to full\n'
@@ -172,6 +183,7 @@ def main():
     parser.add_argument('--platform', choices=('macos', 'windows'))
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/dist')
+    parser.add_argument('--candidate', action='store_true', help='Label the archive as a build for validation')
     parser.add_argument('--check-tag', action='store_true')
     parser.add_argument('--version', action='store_true')
     parser.add_argument('--prerelease', action='store_true')
@@ -190,7 +202,7 @@ def main():
         return
     if not args.platform or not args.build_dir:
         parser.error('--platform and --build-dir are required')
-    package(args.platform, args.build_dir.resolve(), args.output_dir.resolve())
+    package(args.platform, args.build_dir.resolve(), args.output_dir.resolve(), args.candidate)
 
 
 if __name__ == '__main__':

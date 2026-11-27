@@ -14,7 +14,7 @@ int main(int argc,char** argv) try {
     std::ofstream csv(argv[3]);require(bool(csv),"Cannot write timing CSV");
     csv<<"program,depth,mode,amplitude,checks,instruction_mismatches,bus_mismatches,write_mismatches,min_cycles,max_cycles,wcs_writes,min_write_cycles,max_write_cycles,payload_mismatches\n";
     unsigned total=0,total_bad=0,total_bus_bad=0,total_write_bad=0,total_writes=0,total_payload_bad=0;
-    for(unsigned program=0;program<program_count;++program) {
+    for(unsigned program=0;program<legacy_program_count;++program) {
         button(h,0,program_identities[program]);wait(h,400);
         // Verify the native slot description against the independent graph.
         for(unsigned row=0;row<100;++row) {

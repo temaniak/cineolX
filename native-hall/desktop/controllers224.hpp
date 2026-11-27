@@ -16,7 +16,7 @@ public:
         bank_=nullptr;profile_=&profile;Hall::prepare(profile);initialize();
     }
     void prepare(const ProgramBank& bank,unsigned program=2) noexcept {
-        bank_=&bank;profile_=nullptr;program_=std::min(program,program_count-1);
+        bank_=&bank;profile_=nullptr;program_=std::min(program,bank.available_programs-1);
         Hall::prepare(bank,program_);initialize();
     }
     void reset() noexcept {Hall::reset();initialize();}
@@ -24,7 +24,7 @@ public:
         if(!bank_)return;
         const auto state=decay_state();
         const auto modulation=modulation_state();
-        program_=std::min(program,program_count-1);Hall::select_program(program_);
+        program_=std::min(program,bank_->available_programs-1);Hall::select_program(program_);
         // The firmware's level/history dividers live outside the program.
         restore_decay(state);
         // The ROM program compiler resets its random-table index and tap

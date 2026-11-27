@@ -3,7 +3,7 @@
 #include "control_write224.hpp"
 
 namespace native_hall {
-// Original-224 WCS grant clock for the four supported fixed networks. The
+// Original-224 WCS grant clock for the fixed networks. The
 // unprotected rows are graph properties, not ROM/WCS payload. A write grant
 // displaces the next fetch; its falling/rising protect edges change the pair
 // flip-flop. This matters for the following write's wait, even at steady input.
@@ -32,10 +32,12 @@ public:
         return duration;
     }
 private:
+    inline static constexpr unsigned unprotected_rows[7][4]={
+        {46,95,100,100},{46,69,93,100},{94,100,100,100},{46,95,100,100},
+        {46,95,100,100},{79,95,100,100},{29,45,78,94}};
     bool protected_row(unsigned row) const noexcept {
-        if(network_==1)return row!=46 && row!=69 && row!=93;
-        if(network_==2)return row!=94;
-        return row!=46 && row!=95;
+        for(unsigned unprotected:unprotected_rows[network_]) if(row==unprotected) return false;
+        return true;
     }
     void skip_stable(uint64_t limit) noexcept {
         // Protected rows with unchanged reset/protect inputs do not change
@@ -46,9 +48,8 @@ private:
         if(!previous_protected_ || previous_reset_ || !reset_high_)return;
         const unsigned row=unsigned((next_-origin_)%100);
         unsigned at=99;
-        if(network_==1)at=row<=46?46:row<=69?69:row<=93?93:99;
-        else if(network_==2)at=row<=94?94:99;
-        else at=row<=46?46:row<=95?95:99;
+        for(unsigned unprotected:unprotected_rows[network_])
+            if(unprotected>=row) {at=std::min(unprotected,99u);break;}
         uint64_t target=next_+at-row;
         if(displaced_>=next_)target=std::min(target,displaced_);
         next_=std::min(target,limit);
@@ -159,8 +160,10 @@ template<class Write> unsigned modulation_cycles224(const ProgramBank& bank,
             const uint8_t first=uint8_t((phase&0xfc)|(cap&3));
             const uint8_t second=uint8_t(((cap|3)-4-first)|3);
             // Firmware commits the second interpolation coefficient first.
-            cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,uint8_t(row+1),uint8_t((~second&255)>>2)});
-            cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,uint8_t(row),uint8_t((~first&255)>>2)});
+            const auto a=uint8_t(p.modulation_coefficient(j,0,(~first&255)>>2));
+            const auto b=uint8_t(p.modulation_coefficient(j,1,(~second&255)>>2));
+            cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,uint8_t(row+1),b});
+            cycles+=control_write224(write,cycles,{ControlWrite224::Kind::Coefficient,uint8_t(row),a});
             cycles+=10;
         }
         cycles+=47; // Descriptor loop, including its conditional jump.

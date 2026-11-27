@@ -24,11 +24,14 @@ juce::File CineolRomBank::cacheFile() {
 }
 CineolRomBank::CineolRomBank():Thread("Cineol ROM preparation"),
     clean_bank_(std::make_unique<clean_native_hall::ProgramBank>()),
+    clean_options_bank_(std::make_unique<clean_native_hall::ProgramBank>()),
     clean_xl_bank_(std::make_unique<clean_cineol::xl::Bank>()) {
     juce::MemoryBlock bytes;
-    const auto original=cacheFile(),xl=xlCacheFile();
-    if(original.getSize()==bank_file_size && original.loadFileAsData(bytes) &&
-       native_hall::read_bank(bytes.getData(),bytes.getSize(),bank_)) publishOriginal();
+    const auto original=cacheFile(),options=optionsCacheFile(),xl=xlCacheFile();
+    if(options.getSize()==bank_file_size && options.loadFileAsData(bytes) &&
+       native_hall::read_bank(bytes.getData(),bytes.getSize(),options_bank_)) publishOptions();
+    if(!ready() && original.getSize()==int64_t(sizeof(native_hall::BankHeader)+native_hall::legacy_bank_size) &&
+       original.loadFileAsData(bytes) && native_hall::read_bank(bytes.getData(),bytes.getSize(),bank_)) publishOriginal();
     bytes.reset();
     if(xl.getSize()==int64_t(sizeof(cineol::xl::BankHeader)+sizeof(cineol::xl::Bank)) && xl.loadFileAsData(bytes) &&
        cineol::xl::read_bank(bytes.getData(),bytes.getSize(),xl_bank_)) publishXL();
@@ -39,6 +42,14 @@ CineolRomBank::CineolRomBank():Thread("Cineol ROM preparation"),
         status_="Re-import the original 224XL v8.21 ROM set once to prepare the native modulation startup update.";
     else if(!xlReady() && xl.getSiblingFile("programs-v821-native-v3.bankxl").existsAsFile())
         status_="Re-import the original 224XL v8.21 ROM set once to prepare the native dynamics update.";
+    else if(ready() && !optionsReady())
+        status_="Re-import the original 224 v4.4 ROM set to add Room A, Constant Density Plate A and Chorus A.";
+}
+void CineolRomBank::publishOptions() {
+    // Keep an already-published v1 bank alive for existing audio instances.
+    std::memcpy(clean_options_bank_.get(),&options_bank_,sizeof(options_bank_));
+    if(!ready()) {bank_=options_bank_;publishOriginal();}
+    options_ready_.store(true,std::memory_order_release);
 }
 void CineolRomBank::publishOriginal() {
     static_assert(sizeof(*clean_bank_)==sizeof(bank_) && std::is_trivially_copyable_v<clean_native_hall::ProgramBank>);
@@ -56,7 +67,7 @@ CineolRomBank::~CineolRomBank() {
 juce::String CineolRomBank::status() const {const juce::ScopedLock lock(status_lock_);return status_;}
 void CineolRomBank::setStatus(const juce::String& text) {const juce::ScopedLock lock(status_lock_);status_=text;}
 bool CineolRomBank::startImport(const juce::Array<juce::File>& files) {
-    if(files.isEmpty() || (ready() && xlReady()) || isThreadRunning()) return false;
+    if(files.isEmpty() || (optionsReady() && xlReady()) || isThreadRunning()) return false;
     bool expected=false;
     if(!importing_.compare_exchange_strong(expected,true,std::memory_order_acq_rel)) return false;
     sources_=files;progress_.store(0);setStatus("Checking 224 / 224XL ROMs...");
@@ -110,13 +121,13 @@ void CineolRomBank::run() {
             } else read(source);
         }
         cancelled();
-        const bool original=mask==31 && !ready(),xl=xl_mask==2047 && !xlReady();
+        const bool original=mask==31 && !optionsReady(),xl=xl_mask==2047 && !xlReady();
         if(!original && !xl) {
             juce::String message;
-            if(mask && !ready()) message+="224 v4.4: found "+juce::String(std::popcount(mask))+"/5 chips. ";
+            if(mask && !optionsReady()) message+="224 v4.4: found "+juce::String(std::popcount(mask))+"/5 chips. ";
             if(xl_mask && !xlReady()) message+="224XL v8.21: found "+juce::String(std::popcount(xl_mask))+"/11 chips. ";
             if(unsupported.size()) message+="Unsupported firmware: "+unsupported.joinIntoString(", ")+". ";
-            if(mask==31 && ready()) message+="224 v4.4 is already loaded. ";
+            if(mask==31 && optionsReady()) message+="224 v4.4 is already loaded. ";
             if(xl_mask==2047 && xlReady()) message+="224XL v8.21 is already loaded. ";
             if(message.isEmpty()) message="No supported ROM chips found. ";
             throw std::runtime_error((message+missing_roms).toStdString());
@@ -144,7 +155,7 @@ void CineolRomBank::run() {
         };
         if(original) {
             auto prepared=native_hall::import::prepare_bank(roms,callbacks);native_hall::BankHeader header;
-            save(cacheFile(),header,prepared);bank_=*prepared;publishOriginal();
+            save(optionsCacheFile(),header,prepared);options_bank_=*prepared;publishOptions();
         }
         if(xl) {
             auto prepared=cineol::xl::import::prepare_bank(xl_roms,callbacks);cineol::xl::BankHeader header;

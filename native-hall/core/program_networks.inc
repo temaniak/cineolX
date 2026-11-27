@@ -1,6 +1,12 @@
 // Native, fixed data-flow graphs of original 224 v4.4. No opcode dispatch.
-// Network 0: Hall B; 1: Plate; 2: Chamber; 3: Hall A.
-if(network==1) {
+// Network 0: Hall B, 1: Plate, 2: Chamber, 3: Hall A, 4–6: option-board programs.
+if(network==4) {
+    #include "room_a_network.inc"
+} else if(network==5) {
+    #include "constant_density_plate_a_network.inc"
+} else if(network==6) {
+    #include "chorus_a_network.inc"
+} else if(network==1) {
     node<0,3,0,0,true,true,0>(left);
     node<1,1,3,3,true,true,0>();
     node<2,1,2,2,false,false,0>();

@@ -28,9 +28,9 @@ int main(int argc,char** argv) try {
             h.memory[0x3f65]&=63;h.memory[0x3f55]&=63;h.pc_watches[cpu.pc]=true;
         }
     };
-    std::array<ModulationState,program_count> seeds{};unsigned control_checks=0,steps=0;
-    for(unsigned repeat=0;repeat<2;++repeat)for(unsigned n=0;n<program_count;++n) {
-        const unsigned program=repeat?program_count-1-n:n;
+    std::array<ModulationState,legacy_program_count> seeds{};unsigned control_checks=0,steps=0;
+    for(unsigned repeat=0;repeat<2;++repeat)for(unsigned n=0;n<legacy_program_count;++n) {
+        const unsigned program=repeat?legacy_program_count-1-n:n;
         const uint8_t divider=repeat?11:7,random_divider=repeat?5:3,hold=repeat?7:9;
         h.memory[0x3e66]=divider;h.memory[0x3e67]=random_divider;h.memory[0x3e68]=hold;
         h.memory[0x3e69]=210;h.memory[0x3e6a]=4;
@@ -78,7 +78,7 @@ int main(int argc,char** argv) try {
         std::cout<<program_names[program]<<": bank/compiler seed exact; "<<calls<<" initial calls exact\n";
     }
     unsigned switches=0;
-    for(unsigned from=0;from<program_count;++from)for(unsigned to=0;to<program_count;++to) {
+    for(unsigned from=0;from<legacy_program_count;++from)for(unsigned to=0;to<legacy_program_count;++to) {
         if(from==to)continue;
         button(h,0,program_identities[from]);wait(h,400);
         auto native=std::make_unique<DesktopHall>();native->prepare(*bank,from);
@@ -98,7 +98,7 @@ int main(int argc,char** argv) try {
     std::cout<<switches<<" directed native program switches: complete load modulation state exact\n";
     h.pc_observer={};h.pc_watches.fill(false);
     unsigned mode_compilations=0;
-    for(unsigned program=0;program<program_count;++program)for(unsigned mode=0;mode<4;++mode)for(unsigned flag:{64u,128u}) {
+    for(unsigned program=0;program<legacy_program_count;++program)for(unsigned mode=0;mode<4;++mode)for(unsigned flag:{64u,128u}) {
         button(h,0,program_identities[program]);wait(h,400);
         Controls controls;controls.predelay_ms=predelay_minima[program];controls.mode_enhancement=controls.decay_optimization=false;
         h.memory[0x3f65]=h.memory[0x3f55]=program_identities[program];compile_controls(h,program,controls);
