@@ -1,17 +1,16 @@
 # Cineol-X 224
 
 Cineol-X 224 is a native reverb plugin and a portable Daisy DSP project. The
-desktop source supports all nine programs of the **original Lexicon 224 v4.4**
-and all 22 programs of the **224 XL v8.21**. The latest desktop release,
-**1.2 Alpha**, fixed Plate pre-delay and XL Attack/Depth endpoints and made
-the original-224 modulation controls independent. Global Clean,
-Dark Hall variation, restored controls and refined Rich-program timing remain.
-SPACE clock control, converter-filter DIRT and optional four outputs remain.
+desktop plugin supports all nine programs of the **original Lexicon 224 v4.4**
+and all 22 programs of the **224 XL v8.21**. The **1.3a** prerelease adds
+Room A, Constant Density Plate A and Chorus A. The plugin includes Clean,
+Dark Hall Variation, SPACE clock control, converter-filter DIRT and optional
+four outputs.
 The displayed manufacturer is **NK Stuff**, matching Silver-K; existing plugin
 identifiers are retained for DAW-session compatibility.
 
-See the [1.3a release notes](docs/releases/v1.3a.md) for the three additional
-224 programs and the ROM re-import instructions.
+Re-import your original **224 v4.4 ROM1–ROM5** once to enable the three new
+programs. [1.3a release notes](docs/releases/v1.3a.md)
 
 ## What's new in 1.2 Alpha
 
@@ -167,8 +166,8 @@ parameter IDs remain stable. Version 0.9.8 adds the sound and editor refinements
 
 Download the **macOS Universal** (AU/VST3/Standalone) or **Windows x64**
 (VST3/Standalone) archives from the
-[1.2 Alpha release](https://github.com/temaniak/cineolX/releases/tag/v1.2Alpha).
-See the [release notes](docs/releases/v1.2Alpha.md) for installation, compatibility
+[1.3a release](https://github.com/temaniak/cineolX/releases/tag/v1.3a).
+See the [release notes](docs/releases/v1.3a.md) for installation, compatibility
 and validation details. ROMs and prepared banks are not included.
 
 **Before first use:** import your own **Lexicon 224 v4.4 ROM1–ROM5** files
@@ -229,8 +228,7 @@ are shipped in this repository or embedded in the desktop plugin.
 | 30 | Constant Density Plate A (224) |
 | 31 | Chorus A (224) |
 
-The development build groups programs 29–31 with the other 224 programs in
-the menu. The published 1.2 Alpha has programs 1–28. The host's legacy
+The menu groups programs 29–31 with the other 224 programs. The host's legacy
 **Algorithm** and VST3 **Program** parameters retain their 28 positions for
 existing automation.
 Use **224 Additional Program** to automate selection of the new programs.
