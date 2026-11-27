@@ -1,6 +1,7 @@
 #pragma once
 #include "profile.hpp"
 #include <algorithm>
+#include <cstddef>
 
 namespace native_hall {
 // CALL followed by the program's button or simultaneous button pair.
@@ -37,24 +38,24 @@ template<unsigned Values,unsigned Columns,unsigned Rows> struct CoefficientTable
         for(unsigned i=0;i<count;++i) coefficients[rows[i]]=v[column[i]];
     }
 };
-template<unsigned Delays,unsigned Taps,unsigned FilterRows=4> struct ProgramProfileFields {
+// The v2 cache stores these members directly. A flat record gives the
+// additional fields the same offsets with Apple Clang and MSVC.
+struct ProgramProfile {
     std::array<int8_t,100> coefficients{};
     std::array<uint16_t,100> offsets{};
     CoefficientTable<1024,16,24> tail;
-    CoefficientTable<32,FilterRows,FilterRows> crossover,treble;
+    CoefficientTable<32,6,6> crossover,treble;
     CoefficientTable<72,8,8> depth;
     CoefficientTable<64,18,18> diffusion;
-    std::array<std::array<uint16_t,4>,Delays> predelay{};
+    std::array<std::array<uint16_t,4>,256> predelay{};
     std::array<uint8_t,4> predelay_rows{},loop_rows{};
-    std::array<uint8_t,5*Taps> modulation_descriptors{};
+    std::array<uint8_t,5*maximum_modulation_taps> modulation_descriptors{};
     std::array<uint16_t,4> level_rate_tenths{},modulation_rate_tenths{};
     DecayState initial_decay{};
     uint16_t modulation_index=0;
     uint8_t identity=1,network=0,predelay_count=0,loop_count=0,modulation_flags=0;
     uint8_t modulation_period=1,modulation_hold=32,modulation_step=4,modulation_mask=0;
     uint8_t initial_mod_divider=1,initial_random_divider=8,initial_random_hold=1,decay_amount=5;
-};
-struct ProgramProfile : ProgramProfileFields<256,maximum_modulation_taps,6> {
     // Bass/Mid/Crossover/Treble (voice levels in Chorus), Depth, Pre-delay, Diffusion.
     std::array<uint8_t,7> factory{};
     std::array<uint8_t,1024> decay_means{};
@@ -91,12 +92,31 @@ struct ProgramBank {
     unsigned available_programs=program_count;
 };
 static_assert(sizeof(ProgramProfile)==22134 && sizeof(ProgramBank)==203308,"bank ABI changed; bump format version");
+static_assert(offsetof(ProgramProfile,factory)==21081 && offsetof(ProgramBank,available_programs)==203304,
+              "v2 bank field offsets changed");
 struct BankHeader {
     char magic[8]={'B','A','N','K','2','2','4',0};
     uint32_t version=2,size=sizeof(ProgramBank),checksum=0;
 };
 static_assert(sizeof(BankHeader)==20,"bank header ABI changed");
-using LegacyProgramProfile=ProgramProfileFields<129,2>;
+// The v1 cache keeps its original six-program record layout.
+struct LegacyProgramProfile {
+    std::array<int8_t,100> coefficients{};
+    std::array<uint16_t,100> offsets{};
+    CoefficientTable<1024,16,24> tail;
+    CoefficientTable<32,4,4> crossover,treble;
+    CoefficientTable<72,8,8> depth;
+    CoefficientTable<64,18,18> diffusion;
+    std::array<std::array<uint16_t,4>,129> predelay{};
+    std::array<uint8_t,4> predelay_rows{},loop_rows{};
+    std::array<uint8_t,10> modulation_descriptors{};
+    std::array<uint16_t,4> level_rate_tenths{},modulation_rate_tenths{};
+    DecayState initial_decay{};
+    uint16_t modulation_index=0;
+    uint8_t identity=1,network=0,predelay_count=0,loop_count=0,modulation_flags=0;
+    uint8_t modulation_period=1,modulation_hold=32,modulation_step=4,modulation_mask=0;
+    uint8_t initial_mod_divider=1,initial_random_divider=8,initial_random_hold=1,decay_amount=5;
+};
 inline constexpr size_t legacy_bank_size=sizeof(LegacyProgramProfile)*legacy_program_count+4096;
 static_assert(sizeof(LegacyProgramProfile)==19894 && legacy_bank_size==123460,"legacy bank ABI changed");
 
